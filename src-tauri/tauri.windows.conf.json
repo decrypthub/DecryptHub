@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "resources": {
+      "../build/resources/sidecar/": "resources/sidecar/",
+      "../build/resources/node/": "resources/node/",
+      "../build/resources/executor/": "resources/executor/"
+    }
+  }
+}

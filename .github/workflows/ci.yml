@@ -1,0 +1,68 @@
+name: DecryptHub core
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  core:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.16.0'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm --prefix sidecar ci --ignore-scripts
+      - run: node --test --test-concurrency=2 sidecar/test/*.test.mjs
+      - run: npm run build:ui
+      - run: node scripts/check-update-shutdown.mjs
+      - run: npx --yes bun@1.4.4 scripts/build-sidecar.mjs win
+        if: runner.os == 'Windows'
+      - run: node scripts/prepare-node.mjs
+        if: runner.os == 'Windows'
+      - run: node scripts/check-sidecar.mjs
+        if: runner.os == 'Windows'
+      - run: npx --yes bun@1.4.4 scripts/build-sidecar.mjs linux
+        if: runner.os == 'Linux'
+      - run: node scripts/check-sidecar.mjs build/jsra-sidecar-linux
+        if: runner.os == 'Linux'
+  integration:
+    runs-on: windows-latest
+    env:
+      JSRA_DEV: '1'
+      DECRYPTHUB_WDH_DIR: ${{ github.workspace }}/wdh
+    defaults:
+      run:
+        working-directory: harness
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+      - uses: actions/checkout@v4
+        with:
+          repository: decrypthub/WebDecryptHub
+          ref: 934058d5913426fe1608560b4132863dd0f568c6
+          path: wdh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.16.0'
+      - run: npm ci --ignore-scripts
+      - run: npm --prefix sidecar ci --ignore-scripts
+      - run: npm --prefix ../wdh ci --ignore-scripts
+      - run: npm run check:wdh -- ../wdh
+      - run: npm run build:ui
+      - run: npm run audit:ui
+      - run: npm run check:ui
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: integration-ui-screenshots
+          path: harness/artifacts/ui/*.png
+          retention-days: 7

@@ -1,0 +1,24 @@
+# 应用自身命令的权限集合。
+# 本地（tauri://）页面本来就允许调用；这里显式声明是为了让 Vite dev server 的
+# http://127.0.0.1:5173 来源（能力文件里的 remote.urls）也能走 IPC，用于调试模式。
+[[permission]]
+identifier = "allow-app-commands"
+description = "允许调用应用自身的命令（调试模式下的 Vite 来源需要）"
+commands.allow = [
+  "app_info",
+  "get_ws_port",
+  "get_ws_token",
+  "secret_sync",
+  "secret_set",
+  "secret_clear",
+  "restart_sidecar",
+  "prepare_for_update",
+  "pick_save_path",
+  "pick_open_paths",
+  "pick_work_folder",
+  "embed_show",
+  "embed_hide",
+  "embed_release",
+  "embed_supported",
+  "open_devtools",
+]
