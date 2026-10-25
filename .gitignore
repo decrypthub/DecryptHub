@@ -1,4 +1,4 @@
-﻿# Dependencies & build
+# Dependencies & build
 node_modules/
 sidecar/node_modules/
 ui-dist/
@@ -61,3 +61,6 @@ updater-test/
 
 # Local build, review and isolated app data
 /.tmp/
+
+/artifacts/
+/.tmp-*

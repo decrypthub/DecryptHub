@@ -1,0 +1,42 @@
+{
+  "name": "decrypthub",
+  "version": "1.4.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:ui": "vite build",
+    "dev:ui": "vite",
+    "dev:desktop": "powershell -ExecutionPolicy Bypass -File scripts/dev-desktop.ps1",
+    "check:ui": "node scripts/check-ui.mjs",
+    "check:desktop-browser": "node scripts/check-desktop-browser.mjs",
+    "audit:ui": "node scripts/audit-ui.mjs",
+    "check:wdh": "node scripts/check-wdh.mjs",
+    "component:install": "node scripts/install-component.mjs"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.1.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "vite": "^8.3.4",
+    "@zhizhuodemao/patchright": "1.61.1-mcp.2",
+    "jsdom": "^30.1.3"
+  },
+  "dependencies": {
+    "@radix-ui/react-icons": "^1.3.2",
+    "@radix-ui/themes": "^3.3.0",
+    "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-process": "^2.4.0",
+    "@tauri-apps/plugin-updater": "^2.14.0",
+    "highlight.js": "^11.12.0",
+    "marked": "^18.1.1",
+    "react-resizable-panels": "2.1.7",
+    "sonner": "^2.0.8",
+    "ws": "^8.22.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/decrypthub/DecryptHub.git"
+  },
+  "homepage": "https://github.com/decrypthub/DecryptHub",
+  "license": "MIT"
+}
