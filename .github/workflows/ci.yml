@@ -36,6 +36,7 @@ jobs:
   integration:
     runs-on: windows-latest
     env:
+      DECRYPTHUB_GITHUB_TOKEN: ${{ github.token }}
       JSRA_DEV: '1'
       DECRYPTHUB_WDH_DIR: ${{ github.workspace }}/wdh
     defaults:
@@ -48,11 +49,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: decrypthub/WebDecryptHub
-          ref: 934058d5913426fe1608560b4132863dd0f568c6
+          ref: ee3aab73c2550f719226aa8a2730cc861bc707cc
           path: wdh
       - uses: actions/setup-node@v4
         with:
           node-version: '24.16.0'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - run: npm ci --ignore-scripts
       - run: npm --prefix sidecar ci --ignore-scripts
       - run: npm --prefix ../wdh ci --ignore-scripts
@@ -60,9 +64,12 @@ jobs:
       - run: npm run build:ui
       - run: npm run audit:ui
       - run: npm run check:ui
+      - run: npm run check:plugins
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: integration-ui-screenshots
-          path: harness/artifacts/ui/*.png
+          path: |
+            harness/artifacts/ui/*.png
+            harness/artifacts/plugins/*.png
           retention-days: 7

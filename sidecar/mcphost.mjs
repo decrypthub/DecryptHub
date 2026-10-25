@@ -82,6 +82,13 @@ export function approvedServers(input, previous = {}, approveNames = []) {
   return next;
 }
 
+export function redactMcpLog(text,cfg={}) {
+  let safe=String(text);
+  const secrets=[...Object.entries(cfg.env||{}).filter(([key])=>/token|key|pass|secret|auth|cookie/i.test(key)).map(([,value])=>value),...Object.entries(cfg.headers||{}).filter(([key])=>/authorization|cookie|key|token/i.test(key)).map(([,value])=>value)].filter(value=>typeof value==='string'&&value.length>=4);
+  for(const value of secrets.sort((a,b)=>b.length-a.length))safe=safe.replaceAll(value,'[REDACTED]');
+  return safe;
+}
+
 export class McpHost {
   constructor({ getServers, log, onChange, baseDir } = {}) {
     this.getServers = getServers || (() => ({}));
@@ -100,6 +107,7 @@ export class McpHost {
       enabled: e.cfg.enabled,
       transport: e.cfg.transport,
       state: e.state,
+      version: e.version || null,
       error: ['error', 'needs-approval'].includes(e.state) ? (e.error || '连接失败') : '',
       tools: (e.tools || []).map(t => ({ name: t.name, description: t.description || '' })),
       toolCount: (e.tools || []).length,
@@ -140,9 +148,9 @@ export class McpHost {
 
   async call(name, args, signal) {
     const hit = this.index.get(name);
-    if (!hit) throw new Error('MCP 工具不可用：' + name + '（服务可能未连接，可在设置 → MCP 服务里重试）');
+    if (!hit) throw new Error('MCP 工具不可用：' + name + '（服务可能未连接，可在插件 → MCP 服务里重试）');
     const { entry, raw } = hit;
-    if (!entry.client) throw new Error(`MCP 服务「${entry.cfg.name}」已断开，请在设置里重启该服务`);
+    if (!entry.client) throw new Error(`MCP 服务「${entry.cfg.name}」已断开，请在插件中重新连接该服务`);
     let res;
     try {
       res = await entry.client.callTool({ name: raw, arguments: args || {} }, undefined, { signal, timeout: CALL_TIMEOUT });
@@ -175,7 +183,7 @@ export class McpHost {
         stderr: 'pipe',
       });
       transport.stderr?.on('data', d => {
-        const s = String(d).trim();
+        const s = redactMcpLog(String(d).trim(),cfg);
         if (s) this.log(`[mcp:${cfg.name}] ${s.slice(0, 400)}`);
       });
     } else {
@@ -217,8 +225,11 @@ export class McpHost {
         if (!current()) { await client.close(); return; }
         e.pendingClient = null;
         e.client = client; e.transport = transport; e.tools = res.tools || [];
+        e.version = client.getServerVersion?.()?.version || null;
         e.state = 'ready'; e.error = '';
+        const previousClose = transport.onclose;
         transport.onclose = () => {
+          previousClose?.();
           if (e.client !== client) return;
           e.client = null; e.tools = []; e.state = 'error'; e.error = '连接已断开';
           this.log(`[mcp] ${name} 连接已断开`);
@@ -228,7 +239,7 @@ export class McpHost {
       } catch (err) {
         if (client) { try { await client.close(); } catch {} }
         if (!current()) return;
-        e.state = 'error'; e.error = String(err?.message || err); e.tools = [];
+        e.state = 'error'; e.error = redactMcpLog(String(err?.message || err),e.cfg); e.tools = [];
         e.client = null; e.pendingClient = null;
         this.log(`[mcp] ${name} 连接失败：${e.error}`);
       } finally {

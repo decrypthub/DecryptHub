@@ -102,6 +102,7 @@ export class BrowserManager extends EventEmitter {
     const generation = this.generation;
     this.starting = (async () => {
       const component = this.components?.resolve();
+      if (!component && this.components?.info().installed) throw Error('WDH 已停用，请在插件中启用。');
       if (!component)
         throw Error('尚未安装 WebDecryptHub 组件。文件与代码任务仍可使用；请先在组件设置中安装 WDH。');
       const root = this.getRoot(),

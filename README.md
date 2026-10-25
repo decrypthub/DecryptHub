@@ -2,7 +2,7 @@
 
 通用桌面 Agent Harness。可在用户选择的文件夹中工作，也可使用随聊天保留的独立目录。支持模型配置、权限审批、图片附件、工具调用、目标任务、子代理和外部 MCP。
 
-浏览器分析已拆为独立的 [WebDecryptHub](https://github.com/decrypthub/WebDecryptHub) 组件。未安装 WDH 时，文件、代码和通用 MCP 任务仍可使用。WDH 安装后提供浏览器、网络请求、脚本调试及 Agent 控制光效。
+浏览器分析已拆为独立的 [WebDecryptHub](https://github.com/decrypthub/WebDecryptHub) 组件。在左侧「插件」按需下载安装 WDH、IDH/ADH 网关或配置自己的 MCP；未安装官方插件时，文件、代码和通用 MCP 任务仍可使用。WDH 安装后提供浏览器、网络请求、脚本调试及 Agent 控制光效。
 
 ## 开发
 
@@ -35,7 +35,7 @@ node scripts/check-sidecar.mjs
 - [执行器](docs/executor.md)
 - [第三方声明](THIRD_PARTY_NOTICES.md)
 
-IDH / ADH 后续通过各自 MCP / CLI 接入；本版本没有设备刷机、插件安装或对应组件自动下载功能。
+IDH / ADH 已通过各自官方 CLI/MCP 网关接入插件中心，支持版本检查、下载、校验、配置和启停；Python 3.10+ 及设备插件/Host 服务由用户准备。详见 [插件管理](docs/plugins.md)。
 
 旧桌面应用的应用标识、凭据库和默认 `WebDecryptHub` 数据目录暂时保留，以兼容已有配置与会话。产品名称和更新源改为 DecryptHub；网页分析项目保留 WebDecryptHub 名称。
 

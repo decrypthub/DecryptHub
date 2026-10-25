@@ -2,7 +2,7 @@
 import React, { forwardRef, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Theme, Box, Flex, Text, Button as RadixButton, IconButton as RadixIconButton, TextArea, Select, Dialog, Tooltip } from '@radix-ui/themes';
-import { PlayIcon, StopIcon, ArrowLeftIcon, ReloadIcon, ArrowRightIcon, GearIcon, SunIcon, MoonIcon, TrashIcon, ClockIcon, MagicWandIcon, GlobeIcon, CodeIcon, ActivityLogIcon, FileIcon, MixerHorizontalIcon, ArrowUpIcon, Cross2Icon, CheckIcon, DownloadIcon, FileTextIcon, InfoCircledIcon, ResetIcon, MinusIcon, SquareIcon, CopyIcon, PlusIcon, DotsHorizontalIcon, ChatBubbleIcon, ReaderIcon, DrawingPinIcon, LockClosedIcon, MagnifyingGlassIcon, StackIcon, ChevronUpIcon, ChevronDownIcon, ChevronRightIcon, DotFilledIcon, ViewVerticalIcon, DashboardIcon, TargetIcon, DesktopIcon, ExternalLinkIcon, LightningBoltIcon, Pencil1Icon } from '@radix-ui/react-icons';
+import { PlayIcon, StopIcon, ArrowLeftIcon, ReloadIcon, ArrowRightIcon, GearIcon, SunIcon, MoonIcon, TrashIcon, ClockIcon, MagicWandIcon, GlobeIcon, CodeIcon, ActivityLogIcon, FileIcon, MixerHorizontalIcon, ArrowUpIcon, Cross2Icon, CheckIcon, DownloadIcon, FileTextIcon, InfoCircledIcon, ResetIcon, MinusIcon, SquareIcon, CopyIcon, PlusIcon, DotsHorizontalIcon, ChatBubbleIcon, ReaderIcon, DrawingPinIcon, LockClosedIcon, MagnifyingGlassIcon, StackIcon, ChevronUpIcon, ChevronDownIcon, ChevronRightIcon, DotFilledIcon, ViewVerticalIcon, DashboardIcon, TargetIcon, DesktopIcon, ExternalLinkIcon, LightningBoltIcon, Pencil1Icon, MobileIcon } from '@radix-ui/react-icons';
 import { renderMd, highlightHtml } from './md.js';
 import { themeConfig } from './theme.js';
 
@@ -20,7 +20,7 @@ const ICONS = {
   chevup: ChevronUpIcon, chevdown: ChevronDownIcon, chevright: ChevronRightIcon,
   dot: DotFilledIcon, sidebar: ViewVerticalIcon, dashboard: DashboardIcon,
   target: TargetIcon, desktop: DesktopIcon, external: ExternalLinkIcon, bolt: LightningBoltIcon, edit: Pencil1Icon,
-  pin: DrawingPinIcon,
+  pin: DrawingPinIcon, mobile: MobileIcon,
 };
 
 export function Icon({ n, size = 16, className }) {

@@ -34,7 +34,7 @@ function BrowserPanel() {
   const [component, setComponent] = useState(null);
   useEffect(() => { let live = true; window.api.invoke('component-info').then(value => { if (live) setComponent(value); }).catch(() => {}); return () => { live = false; }; }, []);
   const running = cur.status.running;
-  if (component && !component.installed) return <EmptyState icon="globe" title="安装 WebDecryptHub" description="添加浏览器组件后，即可浏览网页、抓取请求和调试网站。"><Button variant="soft" onClick={() => setView('settings')}>前往组件设置</Button></EmptyState>;
+  if (component && (!component.installed || !component.enabled)) return <EmptyState icon="globe" title={component.installed ? "启用 WebDecryptHub" : "安装 WebDecryptHub"} description="添加浏览器组件后，即可浏览网页、抓取请求和调试网站。"><Button variant="soft" onClick={() => setView('plugins')}>管理插件</Button></EmptyState>;
   return <>
     <div className="bar browser-bar">
       <ActionIcon icon="back" variant="soft" color="gray" disabled={!running} onClick={() => inv('go-back')} title="后退" />

@@ -74,7 +74,7 @@ function Rail({ onSearch, onCollapse }) {
     </div>
     <Button className="new-session" size="2" onClick={newSession} title="新建对话（Ctrl+T）"><Icon n="plus" size={16} /><span>新对话</span><kbd>Ctrl T</kbd></Button>
     <nav className="rail-nav" aria-label="主要导航">
-      <NavButton active={view === 'chat'} onClick={() => setView('chat')}><Icon n="dashboard" /><span>Agent 工作台</span></NavButton>
+      <NavButton active={view === 'plugins'} onClick={() => setView('plugins')}><Icon n="tool" /><span>插件</span></NavButton>
       <NavButton active={view === 'automations'} onClick={() => setView('automations')}><Icon n="clock" /><span>自动化任务</span></NavButton>
     </nav>
     <div className="rail-sec"><span>会话列表</span><span className="rail-count">{list.length}</span><ActionIcon icon="search" variant="soft" color="gray" onClick={onSearch} title="查找会话" /></div>
@@ -187,7 +187,7 @@ function FirstRunDialog() {
         ['globe', '浏览器（可选）', doc ? !!doc.chromeOk : null, doc?.chromeOk ? 'WDH 组件已安装' : '可在设置中安装 WDH；未安装也能先对话和处理文件'],
         ['sparkles', 'AI 模型', keyOk, keyOk ? '已连接模型渠道' : '添加 API Key 以启用 AI 分析'],
       ].map(([icon, title, ok, desc]) => <div className="setup-check" key={title}><span className="setup-check-icon"><Icon n={icon} size={19} /></span><div><strong>{title}</strong><span>{ok === null ? '正在检查…' : desc}</span></div><span className={'setup-state' + (ok ? ' ready' : '')}><Icon n={ok ? 'check' : 'minus'} size={16} /></span></div>)}</div>
-      <Flex justify="end" gap="3" mt="5"><Button variant="soft" color="gray" onClick={() => setFirstRun(false)}>稍后</Button><Button onClick={() => { setFirstRun(false); if (!ready) setView('settings'); }}>{ready ? '进入工作台' : '前往设置'}<Icon n="go" size={16} /></Button></Flex>
+      <Flex justify="end" gap="3" mt="5"><Button variant="soft" color="gray" onClick={() => setFirstRun(false)}>稍后</Button><Button onClick={() => { setFirstRun(false); if (!ready) setView('settings'); }}>{ready ? '开始对话' : '前往设置'}<Icon n="go" size={16} /></Button></Flex>
     </Dialog.Content>
   </Dialog.Root>;
 }
