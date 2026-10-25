@@ -235,6 +235,62 @@ test('runtime changes are rejected while an Agent is running', async (t) => {
   await assert.rejects(() => manager.toggle('wdh', false), /停止/);
 });
 
+test('updating a disabled mobile gateway preserves its endpoint and disabled state', async (t) => {
+  const { manager, components, settings } = fixture(t, { id: 'idh' });
+  manager.install('idh');
+  await manager.jobs.get('idh');
+  await manager.configure('idh', '127.0.0.1:8088');
+  await manager.toggle('idh', false);
+  const oldEntry = components.resolve('idh', { includeDisabled: true }).entry;
+  manager.install('idh');
+  await manager.jobs.get('idh');
+  assert.equal(manager.operations.get('idh').phase, 'installed');
+  const next = components.resolve('idh', { includeDisabled: true });
+  assert.notEqual(next.entry, oldEntry);
+  assert.equal(components.info('idh').enabled, false);
+  assert.equal(settings.mcpServers.decrypthub_idh.enabled, false);
+  assert.ok(settings.mcpServers.decrypthub_idh.args.includes(next.entry));
+  assert.ok(settings.mcpServers.decrypthub_idh.args.includes('http://127.0.0.1:8088/'));
+});
+
+test('updates preserve a disabled WDH and cancellation while closing never activates it', async (t) => {
+  const { manager, components } = fixture(t);
+  manager.install('wdh');
+  await manager.jobs.get('wdh');
+  await manager.toggle('wdh', false);
+  manager.install('wdh');
+  await manager.jobs.get('wdh');
+  assert.equal(manager.operations.get('wdh').phase, 'installed');
+  assert.equal(components.info().enabled, false);
+  const pointer = fs.readFileSync(components.activeFile, 'utf8');
+  manager.releaseWdh = async () => manager.cancel('wdh');
+  manager.install('wdh');
+  await manager.jobs.get('wdh');
+  assert.equal(manager.operations.get('wdh').phase, 'cancelled');
+  assert.equal(fs.readFileSync(components.activeFile, 'utf8'), pointer);
+});
+
+test('invalid gateway configuration or a settings save failure leaves the previous activation', async (t) => {
+  const { manager, components, settings } = fixture(t, { id: 'adh' });
+  manager.install('adh');
+  await manager.jobs.get('adh');
+  await manager.configure('adh', '127.0.0.1:8089');
+  const pointer = fs.readFileSync(components.activeFile, 'utf8'),
+    previousServers = structuredClone(settings.mcpServers);
+  settings.mcpServers.decrypthub_adh.args = ['broken-launcher.py'];
+  manager.install('adh');
+  await manager.jobs.get('adh');
+  assert.equal(manager.operations.get('adh').phase, 'error');
+  assert.equal(fs.readFileSync(components.activeFile, 'utf8'), pointer);
+  settings.mcpServers = previousServers;
+  manager.saveSettings = async () => { throw Error('disk full'); };
+  manager.install('adh');
+  await manager.jobs.get('adh');
+  assert.equal(manager.operations.get('adh').phase, 'error');
+  assert.equal(fs.readFileSync(components.activeFile, 'utf8'), pointer);
+  assert.deepEqual(settings.mcpServers, previousServers);
+});
+
 test('version comparisons keep stable releases above their prereleases and compare numeric segments', () => {
   assert.equal(comparePluginVersions('1.0.0', '1.0.0-beta.1'), 1);
   assert.equal(comparePluginVersions('1.10.0', '1.9.9'), 1);

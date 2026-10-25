@@ -496,27 +496,49 @@ export class PluginManager {
         await this.change(async () => {
           controller.signal.throwIfAborted();
           this.progress(id, { phase: 'installing' });
+          const settings = this.getSettings(),
+            previousServers = settings.mcpServers,
+            previousPointer = fs.existsSync(this.components.activeFile)
+              ? JSON.parse(fs.readFileSync(this.components.activeFile, 'utf8'))
+              : {},
+            local = this.components.info(id),
+            name = id !== 'wdh' ? managedServerName(id) : null,
+            existing = name && previousServers?.[name];
+          let nextServers = previousServers;
+          if (existing) {
+            const current = this.components.resolve(id, { includeDisabled: true }),
+              args = [...existing.args],
+              index = args.indexOf(current?.entry);
+            if (index < 0) throw Error('现有网关配置已更改，请重新配置地址');
+            args[index] = resolveIn(prepared.directory, manifest.entrypoint);
+            nextServers = approvedServers(
+              { ...previousServers, [name]: { ...existing, args } },
+              previousServers,
+              [name],
+            );
+          }
           if (id === 'wdh') await this.releaseWdh();
-          const installed = this.components.activate(prepared);
-          if (id !== 'wdh') {
-            const settings = this.getSettings(),
-              name = managedServerName(id),
-              existing = settings.mcpServers?.[name];
-            this.components.setEnabled(id, !!existing?.enabled);
+          controller.signal.throwIfAborted();
+          let installed;
+          try {
+            installed = this.components.activate(prepared, {
+              enabled: id === 'wdh' ? !local.installed || local.enabled : !!existing?.enabled,
+            });
             if (existing) {
-              const component = this.components.resolve(id);
-              const args = [...existing.args];
-              const index = args.findIndex((a) => String(a).endsWith('launch.py'));
-              if (index < 0) throw Error('现有网关配置已更改，请重新配置地址');
-              args[index] = component.entry;
-              settings.mcpServers = approvedServers(
-                { ...settings.mcpServers, [name]: { ...existing, args } },
-                settings.mcpServers,
-                [name],
-              );
+              settings.mcpServers = nextServers;
               await this.saveSettings();
               await this.mcpHost.apply();
             }
+          } catch (error) {
+            atomicJson(this.components.activeFile, previousPointer);
+            settings.mcpServers = previousServers;
+            if (existing) {
+              try {
+                await this.saveSettings();
+                await this.mcpHost.apply();
+              } catch {}
+            }
+            throw error;
           }
           this.updateTools();
           this.progress(id, {

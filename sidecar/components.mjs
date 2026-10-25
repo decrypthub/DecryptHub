@@ -170,7 +170,7 @@ export class ComponentStore {
     await fs.promises.writeFile(path.join(directory, 'component.json'), JSON.stringify(manifest, null, 2));
     return { id: manifest.id, version: manifest.version, directory };
   }
-  activate(prepared) {
+  activate(prepared, { enabled = true } = {}) {
     const directory = resolveIn(this.root, prepared.directory);
     if (!path.relative(this.root, directory).startsWith('versions' + path.sep))
       throw Error('Invalid component activation directory');
@@ -192,7 +192,7 @@ export class ComponentStore {
     atomicJson(this.activeFile, {
       ...active,
       [manifest.id]: path.relative(this.root, directory),
-      disabled: { ...active.disabled, [manifest.id]: false },
+      disabled: { ...active.disabled, [manifest.id]: !enabled },
     });
     return { id: manifest.id, version: manifest.version, directory };
   }
