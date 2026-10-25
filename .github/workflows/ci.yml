@@ -1,6 +1,7 @@
 name: DecryptHub core
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -59,3 +60,9 @@ jobs:
       - run: npm run build:ui
       - run: npm run audit:ui
       - run: npm run check:ui
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: integration-ui-screenshots
+          path: harness/artifacts/ui/*.png
+          retention-days: 7

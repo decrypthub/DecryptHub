@@ -549,6 +549,7 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   ok(!await page.locator('.tool-head').first().isVisible(), '[' + scheme + '] 连续工具调用没有默认收起');
   await page.screenshot({ path: path.join(SHOTS, scheme + '-conversation.png') });
   await page.locator('.tool-group > summary').press('Enter');
+  await page.locator('.tool-head').nth(2).waitFor({ state: 'visible' });
   ok(await page.locator('.tool-head:visible').count() === 3, '[' + scheme + '] 工具分组不能通过键盘展开');
   await page.locator('.tool-head').first().click();
   ok(await page.locator('.tool-body').isVisible(), '[' + scheme + '] 工具调用记录不能展开');
@@ -556,6 +557,7 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   ok(await page.locator('.md pre code').count() > 0, '[' + scheme + '] 代码块没有渲染');
   await page.screenshot({ path: path.join(SHOTS, scheme + '-tool-detail.png') });
   await page.locator('.tool-group > summary').press('Enter');
+  await page.locator('.tool-head').first().waitFor({ state: 'hidden' });
   ok(!await page.locator('.tool-head').first().isVisible(), '[' + scheme + '] 工具分组不能收起');
   await page.locator('.msgs').evaluate(el => { el.style.scrollBehavior = 'auto'; el.scrollTop = el.scrollHeight; });
   await page.screenshot({ path: path.join(SHOTS, scheme + '-conversation-code.png') });
