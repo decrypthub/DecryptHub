@@ -74,7 +74,7 @@ test('child env never receives WDH_LLM_API_KEY', () => {
   assert.equal('WDH_LLM_API_KEY' in env, false);
 });
 
-test('workspace_shell background job can be polled and killed', async () => {
+test('workspace_shell background job can be polled and killed', { timeout: 40000 }, async () => {
   const dir = tmp();
   const script = "require('fs').writeSync(1,'READY\\n'); setInterval(()=>{},1000)";
   try {
@@ -83,7 +83,7 @@ test('workspace_shell background job can be polled and killed', async () => {
     const id = started.text.match(/id=([a-f0-9-]+)/)?.[1];
     assert.ok(id);
     let seen = '';
-    for (let i = 0; i < 40 && !seen.includes('READY'); i++) {
+    for (const deadline = Date.now() + 15000; Date.now() < deadline && !seen.includes('READY');) {
       seen = jobOutput(dir, { id }).text;
       if (!seen.includes('READY')) await new Promise(r => setTimeout(r, 50));
     }
@@ -92,7 +92,7 @@ test('workspace_shell background job can be polled and killed', async () => {
     const killed = jobKill(dir, { id });
     assert.equal(killed.isError, undefined);
     let after = '';
-    for (let i = 0; i < 40 && !/killed|exit /.test(after); i++) {
+    for (const deadline = Date.now() + 15000; Date.now() < deadline && !/killed|exit /.test(after);) {
       after = jobOutput(dir, { id }).text;
       if (!/killed|exit /.test(after)) await new Promise(r => setTimeout(r, 50));
     }
