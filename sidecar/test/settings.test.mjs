@@ -17,10 +17,10 @@ test('old implicit forty-step limit migrates; explicit budgets and installed ker
 
 /** 在临时 APPDATA 下调用一次 load()，避免碰真实用户目录 */
 async function withAppData(dir, fn) {
-  const prev = process.env.APPDATA;
-  process.env.APPDATA = dir;
+  const prev = process.env.DECRYPTHUB_DATA_DIR;
+  process.env.DECRYPTHUB_DATA_DIR = path.join(dir, 'WebDecryptHub');
   const mod = await import(`../settings.mjs?t=${Date.now()}${Math.random()}`);
-  try { return await fn(mod); } finally { if (prev === undefined) delete process.env.APPDATA; else process.env.APPDATA = prev; }
+  try { return await fn(mod); } finally { if (prev === undefined) delete process.env.DECRYPTHUB_DATA_DIR; else process.env.DECRYPTHUB_DATA_DIR = prev; }
 }
 
 test('settings: 带 BOM 的 settings.json 也能读（否则会静默回到默认值）', async () => {

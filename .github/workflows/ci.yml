@@ -19,7 +19,7 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm --prefix sidecar ci --ignore-scripts
-      - run: node --test sidecar/test/*.test.mjs
+      - run: node --test --test-concurrency=2 sidecar/test/*.test.mjs
       - run: npm run build:ui
       - run: node scripts/check-update-shutdown.mjs
       - run: npx --yes bun@1.4.4 scripts/build-sidecar.mjs win
@@ -47,7 +47,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: decrypthub/WebDecryptHub
-          ref: 7c974cdf24f38000736bd1acdf2d5d696b2c1369
+          ref: 934058d5913426fe1608560b4132863dd0f568c6
           path: wdh
       - uses: actions/setup-node@v4
         with:
