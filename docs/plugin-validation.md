@@ -9,4 +9,14 @@
 - IDH 38 项 Python 测试、ADH 5 项测试及两端 Windows/Linux CI 通过。WDH Windows/Linux 组件构建 CI 通过。
 - 官方预览安装包分别由 WebDecryptHub、idh-cli、adh-cli 的 GitHub Releases 提供。WDH 发布 Windows/Linux x64 包，网关使用 Python 3.10+；设备端与 Host Daemon 仍由用户自行准备。
 
+## 真机后续验收
+
+2026-10-25 已使用实际手机完成独立于模拟服务的验证：
+
+- IDH：真实设备 CLI 发现、能力/统计调用；官方 0.7.0 网关经桌面 RPC 保存配置，MCP 报告设备引擎 1.27.5、47 个工具；通过 Agent 工具路由读取能力和统计，前后 PID 相同。
+- ADH：专用 Android 测试设备的既有 Sandbox Agent 连接真实 Host ADH Daemon；CLI 进程列表、官方 0.1.2 网关、桌面配置与 Agent 的进程列表/能力/连通性探针通过；MCP 枚举 86 个工具，前后 session/PID 保持一致。
+- 本机已有 SSH 密钥可登录用户指定的 iOS 设备，仅检查了连接身份和系统类型，没有修改手机配置。
+
+此验收覆盖设备连接及所列只读工具，不代表所有 Hook、Trace、导出或复杂目标分析能力均已真机验收。真实地址、App 数据、SSH 连接材料与本地验收报告不提交；可通过 `check:mobile` 在准备好的设备环境重做。
+
 下载完整性依赖固定官方 GitHub 仓库、HTTPS 与 GitHub API digest，不声称已有独立发布者签名。核心 SRT 依赖链原有 3 条 high、Windows OS 隔离后端与多屏/IME 完整验收仍按 security.md 跟踪。

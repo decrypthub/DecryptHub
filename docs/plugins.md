@@ -40,3 +40,15 @@ WDH：npm run build 后运行 node scripts/package-component.mjs，得到 wdh-<v
 本地检查：核心测试、build:ui、audit:ui、check:ui；check:plugins 使用新应用数据，验证从官方 Release 实际下载三个插件、校验、MCP 配置和连接、自定义 MCP、版本显示、停用与浅深色截图。设备联调使用本地 HTTP 样本，不触碰用户已连接设备。
 
 高级环境可用 DECRYPTHUB_PYTHON 指定 Python 绝对路径。CI 可以设置 DECRYPTHUB_GITHUB_TOKEN 读取官方仓库元数据；该凭据不会传给浏览器、Python 或其他 MCP 子进程。
+
+## 真机连接验收
+
+源码、CLI、电脑端服务和手机端是独立环节。Android 的 ADB 在线不代表 Host ADH Daemon 已启动，网关 MCP 连接成功也不代表目标 App 在线。IDH 需目标 App 正在运行且可访问设备 HTTP 服务；ADH 需 Host Daemon 在线、ADB reverse 正确及实际设备 Agent 已接入。
+
+`npm run check:mobile` 是显式启用的真机检查，不在常规 CI 中运行。通过 `DECRYPTHUB_TEST_IDH_ENDPOINT`、`DECRYPTHUB_TEST_ADH_ENDPOINT` 指定本次端点，至少提供一个；两者都使用真实安装的 CLI，再经桌面 RPC、官方托管网关、`discover_tools(mcp)` 和 Agent 工具路由验证。Android 多目标时必须以 `DECRYPTHUB_TEST_ADH_PACKAGE` 选择一个实际在线包名，不能猜测目标。
+
+默认创建独立的 `.tmp/mobile-plugins-*` 配置。显式提供 `DECRYPTHUB_TEST_DATA_DIR` 则将选中的官方网关连接保存到该应用数据目录，便于随后启动桌面体验；其余模型/MCP 设置由正常接口保留。该目录不能同时被另一个桌面实例使用。再次运行会复用匹配的已启用连接，验证保存后的重启恢复。
+
+验证只调用 IDH 的能力/统计及 ADH 的进程列表、能力和连通性探针，不安装设备插件、不重启目标、不布 Hook、不启用 Trace。结果只保存版本、检查项与通过状态，不导出事件内容、密钥或请求数据。创建的验收会话结束前恢复标准权限并关闭；手机、源码目录和既有 Host Daemon 由用户配置，脚本不自动探测或修改。
+
+自定义本机 CLI 的 stdio MCP 可显式传 `mcp --endpoint <地址>`（IDH 全局参数 `--no-auto-update` 放在 `mcp` 前）。需要沿用已有 CLI 连接文件时，在服务环境变量中指定 `IDH_CONFIG_PATH` / `ADH_CONFIG_PATH` 的绝对路径；不要依赖过滤环境后的进程自动继承用户 HOME。官方托管连接使用私有配置和显式端点，避免串用其他项目或设备的配置。

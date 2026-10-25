@@ -12,7 +12,8 @@
     "audit:ui": "node scripts/audit-ui.mjs",
     "check:wdh": "node scripts/check-wdh.mjs",
     "component:install": "node scripts/install-component.mjs",
-    "check:plugins": "node scripts/check-plugins.mjs"
+    "check:plugins": "node scripts/check-plugins.mjs",
+    "check:mobile": "node scripts/check-mobile-plugins.mjs"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^6.1.2",
