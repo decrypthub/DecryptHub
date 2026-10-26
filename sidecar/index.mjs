@@ -57,14 +57,18 @@ async function startServer() {
     for (const c of clients) { try { c.send(msg); } catch {} }
   }
   // 用户接入的 MCP 服务：全局一份，所有会话共享（工具名带服务前缀）
+  let plugins;
+  const { PluginManager } = await import('./plugins.mjs');
   const { McpHost } = await import('./mcphost.mjs');
   const mcpHost = new McpHost({
     getServers: () => settings.mcpServers || {},
     baseDir: settingsMod.userDataDir(),
     log: m => fileLog(m),
-    onChange: status => broadcast('mcp-status', status),
+    onChange: status => { broadcast('mcp-status', status); plugins?.notify(); },
   });
   const sessions = new SessionManager({ userDataDir: settingsMod.userDataDir(), getSettings: () => settings, broadcast, chromeMod, mcpHost });
+  plugins = new PluginManager({ components:sessions.components, mcpHost, getSettings:()=>settings, saveSettings:()=>settingsMod.save(settings), getSessions:()=>[...sessions.sessions.values()], broadcast });
+  sessions.plugins = plugins;
   mcpHost.apply().catch(e => fileLog('MCP 服务启动失败: ' + e.message));
   // 自动化任务：每天定时把一句话交给 AI（新建会话 → 起浏览器 → 发送）
   const { TaskStore } = await import('./tasks.mjs');
@@ -78,7 +82,7 @@ async function startServer() {
     'get-settings': () => publicSettings(settings),
     'save-settings': s => {
       const previous = settings, old = new Map((settings.providers || []).map(p => [p.id, p]));
-      settings = { ...settings, ...s, openai: { ...settings.openai, ...(s?.openai || {}), apiKey: s?.openai?.apiKey || settings.openai.apiKey }, anthropic: { ...settings.anthropic, ...(s?.anthropic || {}), apiKey: s?.anthropic?.apiKey || settings.anthropic.apiKey } };
+      settings = { ...settings, ...s, mcpServers:settings.mcpServers, openai: { ...settings.openai, ...(s?.openai || {}), apiKey: s?.openai?.apiKey || settings.openai.apiKey }, anthropic: { ...settings.anthropic, ...(s?.anthropic || {}), apiKey: s?.anthropic?.apiKey || settings.anthropic.apiKey } };
       if (Array.isArray(s?.providers)) settings.providers = s.providers.map(p => ({ ...p, apiKey: (!nativeKey && p.apiKey) || old.get(p.id)?.apiKey || (!previous.providers?.length && previous[p.type]?.baseUrl === p.baseUrl ? previous[p.type]?.apiKey : '') || (p.type === 'openai' && process.env.JSRA_OPENAI_KEY && settings.openai.baseUrl === p.baseUrl ? process.env.JSRA_OPENAI_KEY : '') || '' }));
       mirrorProvider(settings); settingsMod.save(settings); mcpHost.apply().catch(e => fileLog('MCP 应用失败: ' + e.message));
       for (const x of sessions.sessions.values()) if (x.agent) x.agent.emitContext(); return publicSettings(settings);
@@ -90,12 +94,19 @@ async function startServer() {
       mirrorProvider(settings); return publicSettings(settings);
     },
     // MCP 服务管理：列表/测试/保存/重启。保存会立即与常驻连接对齐。
+    'plugins-list': async () => { await plugins.runtime(); return plugins.status(); },
+    'plugins-refresh': a => plugins.refresh(!!a?.force),
+    'plugin-install': a => plugins.install(a?.id),
+    'plugin-cancel': a => plugins.cancel(a?.id),
+    'plugin-toggle': a => plugins.toggle(a?.id,!!a?.enabled),
+    'plugin-configure': a => plugins.configure(a?.id,a?.endpoint,a?.enabled!==false),
+    'plugin-reconnect': a => plugins.reconnect(a?.id),
     'mcp-status': () => mcpHost.status(),
     'mcp-test': a => mcpHost.test(a || {}),
     'mcp-restart': async a => { await mcpHost.restart(String(a?.name || '')); return mcpHost.status(); },
     'mcp-save': async a => {
       const mod = await import('./mcphost.mjs');
-      settings.mcpServers = mod.approvedServers(a?.servers || {}, settings.mcpServers, a?.approveNames || []);
+      settings.mcpServers = mod.approvedServers(plugins.preserveManagedServers(a?.servers || {}), settings.mcpServers, a?.approveNames || []);
       settingsMod.save(settings);
       await mcpHost.apply();
       for (const x of sessions.sessions.values()) if (x.agent) x.agent.emitContext();
@@ -105,7 +116,7 @@ async function startServer() {
     'doctor': async () => ({runtime:runtimeInfo,hostIntegrity:await windowsRuntime.hostIntegrity(),component:sessions.components.info(),chrome:[],chromeOk:sessions.components.info().installed,downloading:!!downloading,version:process.env.JSRA_APP_VERSION||''}),
     'kernel-info': async () => {
       const component=sessions.components.info();
-      if(!component.installed)return {component,hostIntegrity:await windowsRuntime.hostIntegrity(),kernel:settings.kernel};
+      if(!component.installed||!component.enabled)return {component,hostIntegrity:await windowsRuntime.hostIntegrity(),kernel:settings.kernel};
       const info=await S().browser.control('kernel-info');return {...info,component,hostIntegrity:await windowsRuntime.hostIntegrity(),kernel:settings.kernel,downloading:!!downloading};
     },
     'kernel-repair': async a => {if([...sessions.sessions.values()].some(s=>s.browser.running))return {ok:false,error:'请先关闭所有浏览器再修复内核'};return S().browser.control('kernel-repair',a);},
@@ -138,7 +149,7 @@ async function startServer() {
     'changes-list': a => { const s = S(a); return s.changes.list(s.workspace.id); },
     'change-detail': a => { const s = S(a); return s.changes.detail(a.id, s.workspace.id); },
     'change-undo': a => { const s = S(a); if (s.agent?.running) throw new Error('任务运行中，请先停止后撤销'); if (s.mode === 'read-only') throw new Error('只读权限下不能撤销文件改动'); sessions.workspaces.verify(s.workspace); const result = s.changes.undo(a.id, s.workspace); s.emit('changes-updated', { workspaceId: s.workspace.id }); return result; },
-    'browser-launch': async a => S(a).launch(),
+    'browser-launch': async a => S(a).launch({url:a?.url,isolated:a?.isolated}),
     'browser-viewport': async a => { const s = S(a); return s.browser.fitViewport(a.width, a.height, a.dpr); },
     'embed-inset': a => S(a).browser.embedInset(),
     'embed-fallback': async a => { const s = S(a); const r = await s.browser.embedFallback(a.reason); sessions.emitList(); return r; },
@@ -253,7 +264,7 @@ async function startServer() {
     'tool-run': async a => { if (process.env.JSRA_DEV !== '1') throw new Error('disabled'); const agent = S(a).ensureAgent(); return agent.runTool(a.name, a.args || {}); },
     'list-tools': a => {
       const s = sessions.get(a?.sessionId, true);
-      const local = LOCAL_TOOLS.filter(t => !t.component || sessions.components.info().installed).map(t => ({ name: t.name, description: t.description, kind: '本地' }));
+      const local = LOCAL_TOOLS.filter(t => !t.component || (sessions.components.info().installed && sessions.components.info().enabled)).map(t => ({ name: t.name, description: t.description, kind: '本地' }));
       const m = (s?.mcp?.tools || []).map(t => ({ name: t.name, description: t.description, kind: '浏览器' }));
       const ext = (mcpHost.tools?.() || []).map(t => ({ name: t.name, description: t.description, kind: 'MCP' }));
       return [...m, ...ext, ...local];
@@ -299,6 +310,7 @@ async function startServer() {
     });
   });
   async function gracefulExit() {
+    try { await plugins.close(); } catch {}
     try { await mcpHost.close(); } catch {}
     try { await sessions.closeAll(); } catch {}
     fileLog('sidecar 退出');

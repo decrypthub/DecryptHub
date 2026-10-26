@@ -365,7 +365,7 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
 
   await page.locator('.rail button', { hasText: '设置' }).first().click();
   await page.waitForTimeout(600);
-  ok(await page.locator('.settings-nav button').count() >= 5, '[' + scheme + '] 设置页导航项不足');
+  ok(await page.locator('.settings-nav button').count() >= 4, '[' + scheme + '] 设置页导航项不足');
   ok(await page.locator('.settings-col').count() > 0, '[' + scheme + '] 设置页没有内容区');
   const settingsNavBefore = await page.locator('.settings-nav .nav-button').evaluateAll(navGeometry);
   await checkWindowDragging(page, ['.screen-head', '.screen-breadcrumb'], '[' + scheme + '] 设置标题栏');
@@ -382,7 +382,7 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.setViewportSize({ width: 1440, height: 900 });
   for (const c of (await page.evaluate(contrast)).slice(0, 10)) ok(false, '[' + scheme + '] 设置页对比度不足 ' + c);
 
-  for (const name of ['WDH 组件', '运行参数', '外观', '关于与更新']) {
+  for (const name of ['运行参数', '外观', '关于与更新']) {
     await page.locator('.settings-nav').getByRole('button', { name, exact: true }).click();
     await page.waitForTimeout(150);
     const settingsNavAfter = await page.locator('.settings-nav .nav-button').evaluateAll(navGeometry);
@@ -426,6 +426,15 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.locator('.screen-head button').first().click();
   await page.waitForTimeout(300);
 
+  await page.locator('.rail-nav').getByRole('button', { name: '插件', exact: true }).click();
+  await page.locator('[data-plugin-id="wdh"]').waitFor();
+  ok(await page.locator('.official-plugin').count() === 3, '[' + scheme + '] 官方插件应包含 WDH/IDH/ADH');
+  await checkWindowDragging(page, ['.screen-head'], scheme + ' 插件顶部拖动');
+  await page.locator('[data-plugin-id="wdh"]').getByRole('button', { name: '配置', exact: true }).click();
+  await page.getByRole('button', { name: '测试所选内核', exact: true }).click();
+  await page.getByText('浏览器启动与画面检查通过', { exact: true }).waitFor({ timeout: 90000 });
+  await page.screenshot({ path: path.join(SHOTS, scheme + '-plugins.png') });
+  await page.locator('.screen-head button').first().click();
   await page.getByRole('tab', { name: '浏览器', exact: true }).click();
   // Only use a local page. Browser launch, streaming, capture and detail are real.
   await page.getByRole('textbox', { name: '目标网址' }).fill('http://127.0.0.1:' + PORT + '/__ui-fixture');

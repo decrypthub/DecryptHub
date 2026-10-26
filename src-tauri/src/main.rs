@@ -374,7 +374,7 @@ fn main() {
                 None => WebviewUrl::default(),
             };
             let mut b = WebviewWindowBuilder::new(app, "main", ui_target)
-                .title("DecryptHub · Agent 工作台")
+                .title("DecryptHub")
                 .inner_size(want_w, want_h)
                 .min_inner_size(1080.0, 680.0)
                 .decorations(false)

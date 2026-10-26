@@ -217,7 +217,7 @@ class Session {
   toolCtx() {
     this.mgr.workspaces.verify(this.workspace);
     return {
-      components: this.mgr.components, projectDir: this.projectDir, browser: this.browser, mcp: this.mcp, relaunch: o => this.relaunch(o),
+      components: this.mgr.components, plugins:this.mgr.plugins, projectDir: this.projectDir, browser: this.browser, mcp: this.mcp, relaunch: o => this.relaunch(o),
       openBrowser: opts => this.browser.running ? this.browser.navigate(opts.url).then(() => ({ ok: true })) : this.launch(opts),
       ensureDebugger: () => this.ensureDebugger(),
       subagents: this.subagents, getGoal: () => this.goal, updateGoal: value => this.updateGoal(value),
@@ -257,7 +257,7 @@ class Session {
   ensureAgent() {
     if (!this.agent) {
       this.agent = new Agent({ mcp: this.mcp, mcpHost: this.mgr.mcpHost, browser: this.browser, projectDir: this.projectDir,
-        getSettings: this.mgr.getSettings, tools: DEFAULT_TOOLS.filter(tool => !tool.component || this.mgr.components.info().installed),
+        getSettings: this.mgr.getSettings, tools: DEFAULT_TOOLS.filter(tool => !tool.component || (this.mgr.components.info().installed && this.mgr.components.info().enabled)),
         emit: (ev, p) => { if (ev === 'debugger-state') this.debuggerPaused = !!p.paused; this.emit('agent-' + ev, p); if (ev === 'done' || ev === 'user') this.mgr.emitList(); },
         getToolContext: () => this.toolCtx(), getWorkspace: () => this.workspace,
         record: (type, value) => { if (this.activeRun) this.runs.event(this.activeRun.id, type, value); },
@@ -278,6 +278,7 @@ class Session {
     return { profileDir: this.browser.profileDir, requests: this.browser.requests.length, toolCount: r.toolCount };
   }
   send({ text = '', auto, maxSteps, tokenBudget, attachments, source = 'user', enqueue = false }) {
+    if (this.mgr.plugins?.applying) return { ok:false, error:'正在切换插件，请稍后发送任务' };
     if (source === 'user' && this.goal?.status === 'active') source = 'goal';
     const s = this.mgr.getSettings();
     try { attachments = validateAttachments(this.projectDir, attachments || [], { workRoot: this.workspace.root, vision: !!((s.provider === 'anthropic' ? s.anthropic : s.openai) || {}).vision }); }
