@@ -1,6 +1,6 @@
 # DecryptHub
 
-通用桌面 Agent Harness。可在用户选择的文件夹中工作，也可使用随聊天保留的独立目录。支持模型配置、权限审批、图片附件、工具调用、目标任务、子代理和外部 MCP。
+通用桌面 Agent Harness。新会话先选择项目/文件夹，或明确选择“不在目录中工作”。项目可包含多个目录，主目录用于执行和写入，附加目录供文件工具读取。支持模型配置、权限审批、图片附件、工具调用、目标任务、子代理和外部 MCP。
 
 浏览器分析已拆为独立的 [WebDecryptHub](https://github.com/decrypthub/WebDecryptHub) 组件。在左侧「插件」按需下载安装 WDH、IDH/ADH 网关或配置自己的 MCP；未安装官方插件时，文件、代码和通用 MCP 任务仍可使用。WDH 安装后提供浏览器、网络请求、脚本调试及 Agent 控制光效。
 
@@ -16,6 +16,10 @@ node --test sidecar/test/*.test.mjs
 ```
 
 Windows 调试：先运行 `scripts/build-desktop.cmd`，然后 `npm run dev:desktop`。脚本使用 `.tmp/desktop-appdata/WebDecryptHub` 保存开发聊天，与日常数据分开。开发模式需要 Node 在 PATH 中。
+
+`scripts/start-desktop.ps1` 启动当前源码和最新本地构建；同时保留标准 target 与 `.tmp/projects-harness-target` 预览构建时按时间选新版。先关闭该项目的其他桌面实例，避免共享开发数据。可用 `-BinaryPath` 明确选择构建。
+
+输入 `/` 查看命令：`/goal`、`/compact`、`/agent`、`/skill`、`/skills`、`/memory`、`/memories`、`/automation`、`/mcp` 和 `/init`。技能/记忆会保存到会话、项目或用户范围；自动化与 MCP 管理由实际工具完成，遵循当前权限。详见 [项目与扩展](docs/projects-and-extensions.md)。
 
 Windows 核心打包：
 

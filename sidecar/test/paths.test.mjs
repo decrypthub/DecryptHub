@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveIn, tryResolveIn } from '../paths.mjs';
+import { DEFAULT_TOOLS } from '../catalog.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'wdh-path-'));
 
@@ -43,22 +44,16 @@ test('tryResolveIn: 越界返回 null 而不抛', () => {
   assert.ok(tryResolveIn(root, 'ok.js'));
 });
 
-test('deobfuscate_code: source 越界直接报错（不再接受任意绝对路径）', async () => {
-  let LOCAL_TOOLS = null;
-  try { ({ LOCAL_TOOLS } = await import('../localtools.mjs')); } catch { /* 缺依赖时跳过 */ }
-  if (!LOCAL_TOOLS) return;
-  const tool = LOCAL_TOOLS.find(t => t.name === 'deobfuscate_code');
+test('注册的 workspace_read 拒绝工作区外的相对和绝对路径', async () => {
+  const tool = DEFAULT_TOOLS.find(t => t.name === 'workspace_read');
   const root = tmp();
-  await assert.rejects(() => tool.run({ source: '../../../etc/passwd' }, { projectDir: root }), /路径越界/);
-  await assert.rejects(() => tool.run({ source: path.resolve(root, '..', 'x.js') }, { projectDir: root }), /路径越界/);
+  await assert.rejects(() => tool.run({ path: '../../../etc/passwd' }, { workRoot: root }), /路径越界/);
+  await assert.rejects(() => tool.run({ path: path.resolve(root, '..', 'x.js') }, { workRoot: root }), /路径越界/);
 });
 
-test('net_load_har: 只读项目目录内的 HAR', async () => {
-  let LOCAL_TOOLS = null;
-  try { ({ LOCAL_TOOLS } = await import('../localtools.mjs')); } catch { /* 跳过 */ }
-  if (!LOCAL_TOOLS) return;
-  const tool = LOCAL_TOOLS.find(t => t.name === 'net_load_har');
+test('注册的 workspace_write 拒绝工作区外写入，专用工具不进入核心', async () => {
+  assert.ok(!DEFAULT_TOOLS.some(t => ['net_load_har', 'deobfuscate_code'].includes(t.name)));
+  const tool = DEFAULT_TOOLS.find(t => t.name === 'workspace_write');
   const root = tmp();
-  const ctx = { projectDir: root, browser: { imported: [] } };
-  await assert.rejects(() => tool.run({ file: '../../secret.har' }, ctx), /路径越界/);
+  await assert.rejects(() => tool.run({ path: '../../secret.har', content: 'must not write' }, { workRoot: root }), /路径越界/);
 });

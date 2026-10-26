@@ -13,12 +13,13 @@ import { executor, findNode } from '../executor.mjs';
 import { TaskStore } from '../tasks.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'wdh-harness-'));
-const manager = dir => new SessionManager({ userDataDir: dir, getSettings: () => ({ openai: { apiKey: 'fixture', model: 'test', contextWindow: 1000000 } }), broadcast() {}, chromeMod: {} });
+// These lifecycle fixtures explicitly opt into a session work directory.
+const manager = (dir, choose = true) => { const mgr = new SessionManager({ userDataDir: dir, getSettings: () => ({ openai: { apiKey: 'fixture', model: 'test', contextWindow: 1000000 } }), broadcast() {}, chromeMod: {} }); if (choose && mgr.get('main').workspace.kind === 'unselected') mgr.get('main').setWorkspace(null); return mgr; };
 const done = { content: '完成', toolCalls: [], usage: null, finishReason: 'stop' };
 
 test('optional folder, external folder and chat state survive restart without polluting a repository', async () => {
-  const dir = tmp(), repo = tmp(), mgr = manager(dir), s = mgr.get('main');
-  assert.equal(s.workspace.kind, 'managed'); assert.equal(fs.existsSync(s.workspace.root), false);
+  const dir = tmp(), repo = tmp(), mgr = manager(dir, false), s = mgr.get('main');
+  assert.equal(s.workspace.kind, 'unselected'); assert.equal(fs.existsSync(s.workspace.root), false);
   s.setWorkspace(mgr.workspaces.folder(repo));
   const result = await s.ensureAgent().runTool('workspace_write', { path: 'hello.js', content: 'console.log(1)' });
   assert.equal(result.isError, undefined); assert.equal(fs.readFileSync(path.join(repo, 'hello.js'), 'utf8'), 'console.log(1)');

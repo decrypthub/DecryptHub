@@ -9,7 +9,7 @@ import { normalizeTargetUrl } from '../../sidecar/url.mjs';
 import { scheduleStartupCheck } from './updater.js';
 import { historyEvents } from './conversation.js';
 import { rememberPreview } from './attachments.jsx';
-import { parseCommand } from './commands.js';
+import { parseCommand, extensionRequest } from './commands.js';
 import { BrowserSurface } from './browser-surface.js';
 
 const api = window.api;
@@ -29,6 +29,11 @@ export function Workbench({ children }) {
   const [launching, setLaunching] = useState({});
   const [drafts, setDrafts] = useState({});
   const [atts, setAtts] = useState({});
+  const [projects, setProjects] = useState([]), [projectFilter, setProjectFilter] = useState(null);
+  const [projectEditor, setProjectEditor] = useState(null), [moveSession, setMoveSession] = useState(null), [workspacePrompt, setWorkspacePrompt] = useState(false);
+  const [commandForm, setCommandForm] = useState(null), [extensionBrowser, setExtensionBrowser] = useState(null), [commandFeedback, setCommandFeedback] = useState({});
+  const [automationDraft, setAutomationDraft] = useState(false);
+  useEffect(() => api.on('projects', setProjects), []);
 
   const sid = sessions.focused;
   const session = sessions.sessions.find(s => s.id === sid) || null;
@@ -137,6 +142,7 @@ export function Workbench({ children }) {
       try { s = await api.invoke('save-settings', mirrorActive(s)); if (native.isNative()) { const envelope = await native.syncSecrets(s.providers.map(p => 'prov.' + p.id), s.activeProviderId); s = await api.invoke('secrets-sync', { envelope }); } } catch (e) { console.error('sync provider key:', e); }
       setSettings(s);
       setSessions(await api.invoke('session-list'));
+      setProjects(await api.invoke('projects-list'));
       const doc = await api.invoke('doctor');
       const activeKey = s.providers.find(p => p.id === s.activeProviderId)?.hasKey;
       const keyMissing = !(activeKey || (s.provider === 'anthropic' ? s.anthropic.hasKey : s.openai.hasKey));
@@ -323,6 +329,7 @@ export function Workbench({ children }) {
     setLaunching(l => ({ ...l, [target]: true }));
     try {
       const r = await api.invoke('browser-launch', { sessionId: target });
+      if (r.code === 'workspace-required' && sidRef.current === target) setWorkspacePrompt(true);
       if (!r.ok) { dispatch({ t: 'patch', sid: target, patch: { browserError: r.error } }); toast(r.error, 'err', 6000); return false; }
       dispatch({ t: 'patch', sid: target, patch: { toolCount: r.toolCount } });
       return true;
@@ -348,10 +355,12 @@ export function Workbench({ children }) {
 
   async function newSession() {
     try {
-      const s = await api.invoke('session-create', {});
+      const s = await api.invoke('session-create', projectFilter ? { projectId: projectFilter } : {});
       await api.invoke('session-focus', { sessionId: s.id });
       setView('chat');
-      setTimeout(() => inputRef.current?.focus(), 50);
+      requestAnimationFrame(() => {
+        if (sidRef.current === s.id && !document.querySelector('[role="dialog"], [role="menu"], [data-radix-popper-content-wrapper]')) inputRef.current?.focus();
+      });
     } catch (e) { toast(e.message, 'warn'); }
   }
 
@@ -383,20 +392,33 @@ export function Workbench({ children }) {
     api.sendInput({ kind, w: cv.width, x, y, ...extra });
   }
 
-  async function send(auto) {
+  async function send(auto, override) {
     const target = sid, sentDraft = input;
     if (sending[target]) return;
-    const text = auto ? '' : input.trim();
+    let text = auto ? '' : String(typeof override === 'string' ? override : input).trim();
     if (!auto && !text && !(atts[sid] || []).length) return;
     if (uploads[sid]) { toast('附件仍在添加，请稍候', 'info'); return; }
     const command = !auto && parseCommand(text);
+    const feedback = (state, message) => setCommandFeedback(m => ({ ...m, [target]: { name: command?.name || '', state, text: message } }));
     if (command) {
       const commandAttachments = atts[target] || [];
       if (!command.known) { toast('未知命令。输入 / 查看可用命令。', 'warn'); return; }
       if (command.name === 'help') { setInput('/'); return; }
-      if (command.name === 'status') { toast(['会话 ID：' + target, session?.workspace?.root, '权限：' + cur.mode, cur.status.running ? '浏览器已打开' : '浏览器未打开', cur.goal ? '目标：' + cur.goal.objective : ''].filter(Boolean).join('\n'), 'info', 7000); }
+      if (['skills', 'memories'].includes(command.name)) { setExtensionBrowser(command.name === 'skills' ? 'skill' : 'memory'); setInput(''); return; }
+      if (command.name === 'mcp' && !command.argument) { setView('plugins'); setInput(''); return; }
+      if (command.name === 'automation' && !command.argument) { setAutomationDraft(true); setView('automations'); setInput(''); return; }
+      if (['goal', 'skill', 'memory', 'agent'].includes(command.name) && !command.argument) { setCommandForm({ name: command.name, sessionId: target }); return; }
+      const request = extensionRequest(command.name, command.argument);
+      if (request) {
+        if (session?.workspace?.kind === 'unselected') { setWorkspacePrompt(true); return; }
+        text = request;
+      } else {
+      feedback('running', '正在执行 /' + command.name + '…');
+      if (command.name === 'status') { feedback('success', ['会话 ID：' + target, session?.workspace?.kind === 'unselected' ? '尚未选择工作目录' : session?.workspace?.root, '权限：' + cur.mode, cur.goal ? '目标：' + cur.goal.objective : ''].filter(Boolean).join('\n')); }
       else {
-        if (command.name === 'compact' && cur.agentRunning) { toast('请先停止当前任务，再压缩上下文。', 'warn'); return; }
+        if (command.name === 'compact' && cur.agentRunning) { feedback('error', '请先停止当前任务，再压缩上下文。'); return; }
+        if (command.name === 'agent' && session?.workspace?.kind === 'unselected') { setWorkspacePrompt(true); feedback('error', '请选择工作目录后再启动研究任务。'); return; }
+        if (command.name === 'goal' && !['pause', 'resume', 'clear'].includes(command.argument) && session?.workspace?.kind === 'unselected') { setWorkspacePrompt(true); feedback('error', '请选择工作目录后再启动目标。'); return; }
         if (['goal', 'agent'].includes(command.name) && !command.argument) { if (command.name === 'goal' && cur.goal) toast(cur.goal.summary || cur.goal.objective, 'info'); else toast(`在 /${command.name} 后填写${command.name === 'goal' ? '目标' : '研究任务'}。`, 'info'); return; }
         setSending(m => ({ ...m, [target]: true }));
         try {
@@ -407,13 +429,16 @@ export function Workbench({ children }) {
           if (command.name === 'agents') { dispatch({ t: 'patch', sid: target, patch: { subagents: (await api.invoke('agent-state', { sessionId: target })).subagents || [] } }); toast('研究任务会显示在输入框上方，可展开查看状态和结论。', 'info'); }
           if (command.name === 'stop') await api.invoke('agent-interrupt', { sessionId: target });
           if (command.name === 'new') await newSession();
-          if (r?.ok === false) { toast(r.error || '命令未执行', 'warn'); return; }
+          if (r?.ok === false) { feedback('error', r.error || '命令未执行'); return; }
+          feedback('success', command.name === 'compact' ? `上下文已压缩：${r.before} → ${r.after} tokens` : command.name === 'goal' ? '目标操作已完成，进展显示在输入框上方。' : '/' + command.name + ' 已执行');
           if (command.name === 'goal' && !['pause', 'resume', 'clear'].includes(command.argument)) { const consumed = new Set(commandAttachments.map(a => a.key)); setAtts(m => ({ ...m, [target]: (m[target] || []).filter(a => !consumed.has(a.key)) })); }
-        } catch (e) { toast(e.message || '命令执行失败', 'err'); return; }
+        } catch (e) { feedback('error', e.message || '命令执行失败'); return; }
         finally { setSending(m => ({ ...m, [target]: false })); }
       }
-      setDrafts(m => m[target] === sentDraft ? { ...m, [target]: '' } : m); if (inputRef.current) inputRef.current.style.height = ''; return;
+      setDrafts(m => m[target] === sentDraft ? { ...m, [target]: '' } : m); if (inputRef.current) inputRef.current.style.height = ''; return true;
+      }
     }
+    if (session?.workspace?.kind === 'unselected') { setWorkspacePrompt(true); return; }
     const list = auto ? [] : (atts[sid] || []);
     let r;
     setSending(m => ({ ...m, [target]: true }));
@@ -421,7 +446,7 @@ export function Workbench({ children }) {
     catch (e) { toast('发送失败：' + e.message, 'err'); return; }
     finally { setSending(m => ({ ...m, [target]: false })); }
     if (!r?.ok) {
-      toast(r?.error || '发送失败', 'warn');
+      if (r?.code === 'workspace-required') { if (sidRef.current === target) setWorkspacePrompt(true); } else toast(r?.error || '发送失败', 'warn');
       if (sidRef.current === target && /API Key/.test(r?.error || '')) setView('settings');
       return;
     }
@@ -433,6 +458,7 @@ export function Workbench({ children }) {
       if (sidRef.current === target && inputRef.current) inputRef.current.style.height = '';
     }
     if (sidRef.current === target) setView('chat');
+    return true;
   }
 
   async function compactNow(instructions) {
@@ -507,6 +533,10 @@ export function Workbench({ children }) {
 
   const value = {
     api, conn, toast,
+    projects, setProjects, projectFilter, setProjectFilter, projectEditor, setProjectEditor, moveSession, setMoveSession, workspacePrompt, setWorkspacePrompt,
+    isCurrentSession: id => sidRef.current === id,
+    commandForm, setCommandForm, extensionBrowser, setExtensionBrowser, automationDraft, setAutomationDraft,
+    commandFeedback: commandFeedback[sid], clearCommandFeedback: () => setCommandFeedback(m => ({ ...m, [sid]: null })),
     settings, saveSettings, setSettings, firstRun, setFirstRun,
     sessions, sid, session, cur, dispatch, focusSession,
     view, setView, side, setSide, sideOpen, setSideOpen, openSide,

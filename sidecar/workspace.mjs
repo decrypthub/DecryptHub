@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { workRoot, workspacePath } from './workspaces.mjs';
+import { workRoot, workspacePath, selectReadRoot } from './workspaces.mjs';
 import { isSensitivePath } from './paths.mjs';
 import { contentHash } from './changes.mjs';
 import { executor, findNode, shellSpec, childEnv } from './executor.mjs';
@@ -67,6 +67,7 @@ async function wsWrite(a, ctx) {
   return write(ctx, rel, String(a.content ?? ''), expected);
 }
 async function wsRead(a, ctx) {
+  ctx = selectReadRoot(ctx, a.root);
   const rel = a.path || a.file; if (!rel) throw new Error('需要 path');
   const file = workspacePath(ctx, rel), size = fs.statSync(file).size; if (size > 8 * 1024 * 1024) throw new Error('文件超过 8MB，请用搜索或分段读取');
   const buf = fs.readFileSync(file); ctx.readHashes?.set(file, contentHash(buf));
@@ -74,8 +75,10 @@ async function wsRead(a, ctx) {
   return { text: `文件 ${rel}（${size} 字节，sha256=${contentHash(buf)}）：\n` + text.slice(0, max) + (text.length > max ? '\n…(已截断)' : '') };
 }
 async function wsList(a, ctx) {
+  const roots = (ctx.projectRoots || []).map(r => `${r.id} · ${r.label}${r.primary ? '（主目录，可写）' : '（附加目录，只读）'}`).join('\n');
+  ctx = selectReadRoot(ctx, a.root);
   const entries = walk(ctx, a.path || '.', { depth: Math.min(12, Math.max(0, a.depth ?? 3)), includeModules: !!a.includeModules });
-  return { text: `工作区：${workRoot(ctx)}\n` + (entries.map(e => e.name + (e.directory ? '/' : `  ${e.size}B`)).join('\n') || '工作区为空，可以创建文件。') };
+  return { text: (roots ? '项目目录（读取其他目录时传 root ID）：\n' + roots + '\n\n' : '') + `工作区：${workRoot(ctx)}\n` + (entries.map(e => e.name + (e.directory ? '/' : `  ${e.size}B`)).join('\n') || '工作区为空，可以创建文件。') };
 }
 export function workspaceFileSize(v, rel) { try { return fs.statSync(workspacePath(ctxOf(v), rel)).size; } catch { return 0; } }
 export function editWorkspace(v, a) {
@@ -99,7 +102,7 @@ function globMatch(rel, glob) {
 }
 export function grepWorkspace(v, a) {
   try {
-    const ctx = ctxOf(v); if (!a.pattern) throw new Error('需要 pattern');
+    const ctx = selectReadRoot(ctxOf(v), a.root); if (!a.pattern) throw new Error('需要 pattern');
     const source = a.literal ? a.pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : a.pattern;
     let re; try { re = new RegExp(source, a.ignoreCase ? 'i' : ''); } catch (e) { throw new Error('正则无效：' + e.message); }
     const hits = [], max = Math.min(200, Math.max(1, a.max || 80));
@@ -146,17 +149,17 @@ async function wsNpm(a, ctx) {
   const job = await start(ctx, { file: node, args, cwd: workRoot(ctx), trustedPurpose: 'dependency-install', timeoutMs: a.timeoutMs || 180000, network: a.command === 'init' ? [] : [registry.hostname] }); const r = await job.done;
   return { text: `npm → exit ${r.code}\n${r.out}${r.err ? '\n[stderr]\n' + r.err : ''}`, isError: r.code !== 0 || !!r.reason };
 }
-const S = (properties, required) => ({ type: 'object', properties, ...(required ? { required } : {}) });
+const S = (properties, required) => ({ type: 'object', properties, additionalProperties: false, ...(required ? { required } : {}) });
 const str = { type: 'string' }, num = { type: 'number' }, bool = { type: 'boolean' };
 export const WORKSPACE_TOOLS = [
-  { name: 'workspace_list', description: '列出当前工作文件夹。未选文件夹时使用会话工作区；跳过敏感文件与链接。', schema: S({ path: str, depth: num, includeModules: bool }), run: wsList },
-  { name: 'workspace_read', description: '读取工作文件夹文件并返回版本 hash，覆盖前先读。', schema: S({ path: str, file: str, max: num, binary: bool }), run: wsRead },
+  { name: 'workspace_list', description: '列出工作目录与项目授权根 ID。root 可选择附加目录；默认主目录。跳过敏感文件与链接。', schema: S({ root: str, path: str, depth: num, includeModules: bool }), run: wsList },
+  { name: 'workspace_read', description: '读取工作文件并返回版本 hash。root 可选项目附加目录 ID；写入只作用于主目录。', schema: S({ root: str, path: str, file: str, max: num, binary: bool }), run: wsRead },
   { name: 'workspace_write', description: '创建或覆盖文本文件。覆盖前先读取；修改已有代码优先 workspace_edit。改动可在界面审阅和撤销。', schema: S({ path: str, file: str, content: str, expectedHash: str }, ['content']), run: wsWrite },
   { name: 'workspace_edit', description: '精确替换已有文件，old_string 默认必须唯一；replace_all 可替换全部。', schema: S({ path: str, old_string: str, new_string: str, replace_all: bool }, ['path', 'old_string', 'new_string']), run: (a, ctx) => editWorkspace(ctx, a) },
-  { name: 'workspace_grep', description: '检索代码，返回相对路径和行号。支持 glob、子目录和正则。', schema: S({ pattern: str, path: str, glob: str, literal: bool, ignoreCase: bool, max: num, includeModules: bool }, ['pattern']), run: (a, ctx) => grepWorkspace(ctx, a) },
+  { name: 'workspace_grep', description: '检索代码，返回相对路径和行号。root 可选项目附加目录 ID；支持 glob、子目录和正则。', schema: S({ root: str, pattern: str, path: str, glob: str, literal: bool, ignoreCase: bool, max: num, includeModules: bool }, ['pattern']), run: (a, ctx) => grepWorkspace(ctx, a) },
   { name: 'workspace_run', description: '用 Node 执行当前工作目录内的脚本或 eval，遵守执行隔离和审批。', schema: S({ file: str, path: str, eval: str, args: { type: 'array', items: str }, timeoutMs: num }), run: wsRun },
   { name: 'workspace_npm', description: '在工作目录安装依赖或初始化 npm；默认禁用安装脚本，联网需授权。', schema: S({ packages: { type: 'array', items: str }, package: str, command: { type: 'string', enum: ['install', 'init'] }, registry: str, dev: bool, timeoutMs: num }), run: wsNpm },
   { name: 'workspace_shell', description: '在当前工作目录执行命令。Windows 用 PowerShell，其他平台用 sh。支持后台任务；networkDomains 申请受限执行所需域名。未隔离执行会明确请求用户确认。', schema: S({ cmd: str, timeoutMs: num, background: bool, networkDomains: { type: 'array', items: str } }, ['cmd']), run: (a, ctx) => shellWorkspace(ctx, a) },
   { name: 'workspace_job_output', description: '读取本对话后台任务输出，offset 支持分页。', schema: S({ id: str, offset: num }, ['id']), run: (a, ctx) => jobOutput(ctx, a) },
   { name: 'workspace_job_kill', description: '停止本对话后台任务及子进程，不能结束其他进程。', schema: S({ id: str }, ['id']), run: (a, ctx) => jobKill(ctx, a) },
-];
+].map(tool => ({ ...tool, strict: true }));

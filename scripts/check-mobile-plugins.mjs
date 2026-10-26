@@ -117,7 +117,7 @@ try {
       return entry?.state === 'ready';
     }, id + ' desktop MCP connection');
   }
-  diagnosticSession = (await invoke('session-create', { title: '设备连接验收' })).id;
+  diagnosticSession = (await invoke('session-create', { title: '设备连接验收', managed: true })).id;
   // The caller opts into these specific read-only live checks. Permission changes affect
   // only this new diagnostic session and are reset before it is closed.
   await invoke('session-set-mode', { sessionId: diagnosticSession, mode: 'full-access' });

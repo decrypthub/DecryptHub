@@ -319,9 +319,10 @@ function Automations() {
   const w = useWorkbench();
   const [list, setList] = useState([]);
   const [form, setForm] = useState(null);
-  const load = async () => { try { setList(await w.api.invoke('tasks-list') || []); } catch {} };
-  useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, []);
+  const load = async () => { try { setList(await w.api.invoke('tasks-list') || []); } catch (e) { w.toast('无法读取自动化：' + e.message, 'err'); } };
+  useEffect(() => { load(); const off = w.api.on('tasks-status', setList), t = setInterval(load, 15000); return () => { off(); clearInterval(t); }; }, []);
   const blank = { title: '', prompt: '', time: '09:00', days: [1, 2, 3, 4, 5], enabled: true, sessionId: w.sid || '' };
+  useEffect(() => { if (w.automationDraft) { setForm({ ...blank }); w.setAutomationDraft(false); } }, [w.automationDraft]);
   const save = async () => {
     if (!form.prompt.trim()) { w.toast('先写清楚要 AI 做什么', 'warn'); return; }
     try { await w.api.invoke('task-save', { task: form }); setForm(null); await load(); w.toast('已保存', 'ok'); }
@@ -373,6 +374,7 @@ function Automations() {
               每天 {t.time} · {(t.days || []).length === 7 ? '每天' : (t.days || []).map(d => '周' + DAYS[d]).join(' ')}
               {t.nextAt ? ` · 下次 ${new Date(t.nextAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ' · 未排期'}
             </Text>
+            {t.lastError && <Text as="div" size="1" color={t.lastStatus === 'needs_attention' ? 'amber' : 'red'} mt="1">{t.lastError}</Text>}
           </div>
           <Flex className="row-actions" align="center" gap="2">
             <Button size="2" variant="soft" color="gray" disabled={t.lastStatus === 'running'} onClick={() => run(t.id)}>立即运行</Button>

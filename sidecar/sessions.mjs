@@ -13,6 +13,7 @@ import { normalizeMode, normalizeReview, autoReview } from './policy.mjs';
 import { validateAttachments } from './attachments.mjs';
 import { workspaceFileSize, killAllJobs } from './workspace.mjs';
 import { WorkspaceStore } from './workspaces.mjs';
+import { ProjectStore } from './projects.mjs';
 import { RunStore } from './runs.mjs';
 import { ChangeStore, contentHash } from './changes.mjs';
 import { executor } from './executor.mjs';
@@ -53,6 +54,11 @@ class Session {
     this.mode = st.mode === 'full-access' ? 'standard' : normalizeMode(st.mode);
     this.review = normalizeReview(st.review);
     this.workspace = mgr.workspaces.restore(st.workspace, id, this.projectDir);
+    this.projectId = st.projectId || this.workspace.projectId || null;
+    if (this.projectId) {
+      try { this.workspace = mgr.projects.workspace(this.projectId); }
+      catch { this.projectId = null; delete this.workspace.projectId; delete this.workspace.roots; }
+    }
     this.readHashes = new Map(); this.changes = new ChangeStore(this.projectDir);
     this.runs = new RunStore(this.projectDir, event => this.emit('run-event', event), { sessionId: this.id });
     this.activeRun = null; this.queue = Array.isArray(st.queue) ? st.queue.slice(0, 10) : []; this.completion = null; this.closing = false;
@@ -75,7 +81,7 @@ class Session {
     return [];
   }
   saveState() {
-    atomicJson(this.stateFile(), { mode: this.mode === 'full-access' ? 'standard' : this.mode, review: this.review, todos: this.todos, workspace: this.workspace, queue: this.queue, goal: this.goal });
+    atomicJson(this.stateFile(), { mode: this.mode === 'full-access' ? 'standard' : this.mode, review: this.review, todos: this.todos, workspace: this.workspace, projectId: this.projectId, queue: this.queue, goal: this.goal });
   }
   setTodos(list) { this.todos = list; this.saveState(); this.emit('agent-todos', this.todos); }
   setMode(mode, review) {
@@ -116,6 +122,7 @@ class Session {
     return this.titleJob;
   }
   setWorkspace(binding) {
+    if (this.closing || this.mgr.sessions.get(this.id) !== this) throw new Error('会话已关闭，不能更换目录');
     if (this.browser.client || this.browser.starting) throw new Error('请先关闭浏览器，再更换文件夹');
     if (this.agent?.running) throw new Error('请先停止当前任务，再更换文件夹');
     if (this.subagents.jobs.size) throw new Error('请先等待或取消研究子代理，再更换文件夹');
@@ -125,7 +132,7 @@ class Session {
     this.mgr.workspaces.verify(next);
     for (const p of this.pending.values()) p.finish(false);
     killAllJobs(this.projectDir); this.allows.clear(); this.readHashes.clear();
-    this.workspace = next; this.saveState(); this.emit('subagents', this.subagents.list(this.workspace.id));
+    this.workspace = next; this.projectId = next.projectId || null; this.saveState(); this.emit('subagents', this.subagents.list(this.workspace.id));
     this.agent?.hist.append({ t: 'user', content: `【工作区已切换】${this.workspace.root}。后续文件操作以此目录为准，旧产出不自动迁移。` });
     this.agent?.persist(); this.emit('workspace', this.workspace); this.mgr.emitList(); return this.publicState();
   }
@@ -212,12 +219,13 @@ class Session {
     const live = this.browser.activePage ? safe(() => this.browser.activePage.url()) : '';
     if (/^https?:/.test(live)) this.lastUrl = live;
     const url = live || this.lastUrl;
-    return { id: this.id, title: this.title, primary: this.primary, pinned: !!this.pinned, running: this.browser.running, embed: this.browser.embedActive, chromePid: this.browser.embedActive ? this.browser.chromePid : null, agentRunning: !!this.agent?.running, url, projectDir: this.projectDir, mode: this.mode, review: this.review, workspace: this.workspace, run: this.runs.latest(), queued: this.queue.length, updatedAt: this.updatedAt };
+    return { id: this.id, title: this.title, primary: this.primary, pinned: !!this.pinned, running: this.browser.running, embed: this.browser.embedActive, chromePid: this.browser.embedActive ? this.browser.chromePid : null, agentRunning: !!this.agent?.running, url, projectDir: this.projectDir, mode: this.mode, review: this.review, workspace: this.workspace, projectId: this.projectId, run: this.runs.latest(), queued: this.queue.length, updatedAt: this.updatedAt };
   }
   toolCtx() {
+    if (this.mgr.projectsBusy) throw new Error('正在更新项目目录，请稍候');
     this.mgr.workspaces.verify(this.workspace);
     return {
-      components: this.mgr.components, plugins:this.mgr.plugins, projectDir: this.projectDir, browser: this.browser, mcp: this.mcp, relaunch: o => this.relaunch(o),
+      components: this.mgr.components, plugins:this.mgr.plugins, extensions: this.mgr.extensions, sessionId: this.id, projectId: this.projectId, projectRoots: this.workspace.roots || [], projectDir: this.projectDir, browser: this.browser, mcp: this.mcp, relaunch: o => this.relaunch(o),
       openBrowser: opts => this.browser.running ? this.browser.navigate(opts.url).then(() => ({ ok: true })) : this.launch(opts),
       ensureDebugger: () => this.ensureDebugger(),
       subagents: this.subagents, getGoal: () => this.goal, updateGoal: value => this.updateGoal(value),
@@ -241,6 +249,8 @@ class Session {
   }
 
   async launch({ isolated, url } = {}) {
+    if (this.workspace.kind === 'unselected') return { ok: false, code: 'workspace-required', error: '请先选择工作目录，或选择“不在目录中工作”' };
+    if (this.mgr.projectsBusy) return { ok: false, error: '正在更新项目目录，请稍候' };
     if (!this.browser.running && [...this.mgr.sessions.values()].filter(s => s.browser.running).length >= 6) return { ok: false, error: '最多同时打开 6 个浏览器' };
     if (this.launching) return this.launching;
     this.launching = (async () => { try {
@@ -278,6 +288,8 @@ class Session {
     return { profileDir: this.browser.profileDir, requests: this.browser.requests.length, toolCount: r.toolCount };
   }
   send({ text = '', auto, maxSteps, tokenBudget, attachments, source = 'user', enqueue = false }) {
+    if (this.workspace.kind === 'unselected') return { ok: false, code: 'workspace-required', error: '请先选择工作文件夹，或明确选择“不在目录中工作”' };
+    if (this.mgr.projectsBusy) return { ok: false, error: '正在更新项目目录，请稍候' };
     if (this.mgr.plugins?.applying) return { ok:false, error:'正在切换插件，请稍后发送任务' };
     if (source === 'user' && this.goal?.status === 'active') source = 'goal';
     const s = this.mgr.getSettings();
@@ -287,14 +299,14 @@ class Session {
     const agent = this.ensureAgent();
     if (!agent) return { ok: false, error: '会话未就绪' };
     if (agent.running) {
-      if (!enqueue) return { ok: false, error: '该会话正在运行，可以将消息加入下一轮队列' };
+      if (!enqueue) return { ok: false, code: 'busy', error: '该会话正在运行，可以将消息加入下一轮队列' };
       if (this.queue.length >= 10) return { ok: false, error: '队列最多保留 10 条消息' };
       this.queue.push({ text, auto, maxSteps, tokenBudget, attachments, source }); this.saveState(); this.mgr.emitList(); return { ok: true, queued: true };
     }
     // 前端保存时会把当前渠道镜像进 openai/anthropic；这里再兜一层，避免渠道密钥还没同步时误报
     const active = (s.providers || []).find(p => p.id === s.activeProviderId);
     const key = active?.apiKey || (s.provider === 'anthropic' ? s.anthropic?.apiKey : s.openai?.apiKey);
-    if (!key) return { ok: false, error: '尚未配置 API Key，请在「设置」页填写' };
+    if (!key) return { ok: false, code: 'model-required', error: '尚未配置 API Key，请在「设置」页填写' };
     let release; try { release = this.mgr.workspaces.acquire(this.workspace, this.id, this.mode !== 'read-only'); }
     catch (e) { return { ok: false, error: e.message }; }
     if (source === 'goal' && this.goal?.status === 'active') { this.goal.turns++; if (this.goal.tokenBudget > 0) tokenBudget = Math.min(tokenBudget || Infinity, Math.max(1, this.goal.tokenBudget - (this.goal.usedTokens || 0))); this.saveState(); this.emit('goal', this.goal); }
@@ -365,6 +377,7 @@ export class SessionManager {
     this.titleGenerator = titleGenerator || titleService.generate.bind(titleService);
     this.components = new ComponentStore(userDataDir);
     this.workspaces = new WorkspaceStore(userDataDir);
+    this.projects = new ProjectStore(userDataDir);
     this.sessions = new Map(); this.focusedId = null; this.seq = 0;
     this.stateFile = path.join(userDataDir, 'sessions.json');
     // 恢复上次的会话标签（标题、最后访问的网址、对话上下文；浏览器按需再启动）
@@ -385,13 +398,18 @@ export class SessionManager {
     const l = this.list(); this.broadcast('sessions', l);
     atomicJson(this.stateFile, { focused: l.focused, seq: this.seq, sessions: l.sessions.map(s => ({ id: s.id, title: s.title, titleSource: this.sessions.get(s.id).titleSource, primary: s.primary, url: s.url, updatedAt: s.updatedAt, pinned: s.pinned })) });
   }
-  create({ title, titleSource, primary, id: wantId, lastUrl, updatedAt, pinned, quiet } = {}) {
+  create({ title, titleSource, primary, id: wantId, lastUrl, updatedAt, pinned, quiet, managed = false, projectId } = {}) {
+    if (this.projectsBusy) throw new Error('正在更新项目目录，请稍候创建会话');
+    const projectWorkspace = projectId ? this.projects.workspace(projectId) : null;
     if (this.sessions.size >= MAX_SESSIONS) throw new Error(`最多保留 ${MAX_SESSIONS} 个会话，请关闭不再需要的会话`);
     let id = primary ? 'main' : (wantId && /^s(?:[0-9a-f]{6}|[0-9a-f]{32})$/.test(wantId) ? wantId : 's' + crypto.randomUUID().replaceAll('-', ''));
     if (this.sessions.has(id)) throw new Error('会话 ID 重复：' + id);
     this.seq++;
     const s = new Session(this, { id, title: title || `会话 ${this.seq}`, titleSource, primary: !!primary, lastUrl, updatedAt, pinned });
     this.sessions.set(id, s);
+    if (managed) s.workspace = this.workspaces.managed(s.id, s.projectDir);
+    if (projectWorkspace) { s.workspace = projectWorkspace; s.projectId = projectId; }
+    if (managed || projectId) s.saveState();
     if (!this.focusedId) this.focusedId = id;
     if (!quiet) this.emitList();
     return s;
@@ -410,6 +428,7 @@ export class SessionManager {
     this.emitList();
   }
   async close(id) {
+    if (this.projectsBusy) throw new Error('正在更新项目目录，请稍候关闭会话');
     const s = this.get(id);
     this.sessions.delete(id);
     if (this.focusedId === id) { const next = this.sessions.values().next().value; this.focusedId = next?.id || null; if (next) await this.focus(next.id).catch(() => {}); }

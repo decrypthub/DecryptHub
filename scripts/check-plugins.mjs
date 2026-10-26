@@ -239,6 +239,7 @@ try {
     embedMode: 'screencast',
   });
   const session = (await invoke('session-list')).focused;
+  await invoke('workspace-set', { sessionId: session, managed: true });
   const opened = await invoke('browser-launch', {
     sessionId: session,
     url: 'http://127.0.0.1:' + site.address().port + '/browser-fixture',

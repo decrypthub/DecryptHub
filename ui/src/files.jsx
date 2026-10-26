@@ -1,23 +1,25 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text, Code } from '@radix-ui/themes';
 import { useWorkbench } from './bus.jsx';
-import { Button, ActionIcon, Icon, EmptyState } from './kit.jsx';
+import { Button, ActionIcon, Icon, EmptyState, Dropdown } from './kit.jsx';
 import { fmtSize } from './state.js';
 
 export function WorkspaceFiles() {
-  const { api, sid, session, cur, toast, addAtt } = useWorkbench();
+  const w = useWorkbench(), { api, sid, session, cur, toast, addAtt } = w;
+  const [rootId, setRootId] = useState('primary');
   const [branches, setBranches] = useState({}), [expanded, setExpanded] = useState(new Set()), [git, setGit] = useState(null);
   const [selected, setSelected] = useState(null), [content, setContent] = useState(''), [focus, setFocus] = useState('');
   const epoch = useRef(0), reading = useRef(0), tree = useRef(null), inFlight = useRef(new Set());
   const ws = session?.workspace;
-  const identity = `${sid}:${ws?.id}:${ws?.revision}:${ws?.root}`;
+  const identity = `${sid}:${ws?.id}:${ws?.revision}:${ws?.projectRevision}:${ws?.root}:${rootId}`;
+  useEffect(() => setRootId('primary'), [sid, ws?.id, ws?.projectRevision]);
   async function load(path = '.', generation = epoch.current) {
     const key = generation + ':' + path;
     if (inFlight.current.has(key)) return;
     inFlight.current.add(key);
     setBranches(prev => ({ ...prev, [path]: { ...prev[path], loading: true, error: '' } }));
     try {
-      const value = await api.invoke('workspace-directory', { sessionId: sid, path });
+      const value = await api.invoke('workspace-directory', { sessionId: sid, path, root: rootId === 'primary' ? undefined : rootId });
       if (generation === epoch.current) setBranches(prev => ({ ...prev, [path]: value }));
     } catch (e) { if (generation === epoch.current) setBranches(prev => ({ ...prev, [path]: { error: e.message } })); }
     finally { inFlight.current.delete(key); }
@@ -26,9 +28,10 @@ export function WorkspaceFiles() {
     const generation = ++epoch.current;
     setBranches({}); setGit(null);
     if (reset) { reading.current++; setExpanded(new Set()); setSelected(null); setContent(''); setFocus(''); }
+    if (ws?.kind === 'unselected') return;
     load('.', generation);
     if (!reset) for (const path of expanded) load(path, generation);
-    api.invoke('git-status', { sessionId: sid }).then(value => { if (generation === epoch.current) setGit(value); }).catch(() => {});
+    if (rootId === 'primary') api.invoke('git-status', { sessionId: sid }).then(value => { if (generation === epoch.current) setGit(value); }).catch(() => {});
   }
   useEffect(() => { refresh(true); return () => { epoch.current++; reading.current++; }; }, [identity]);
   useEffect(() => { if (!cur.agentRunning) refresh(); }, [cur.agentRunning, cur.changesVersion]);
@@ -44,7 +47,7 @@ export function WorkspaceFiles() {
   async function open(path, diff = false) {
     const request = ++reading.current;
     setSelected({ path, diff }); setContent('加载中…');
-    try { const value = await api.invoke(diff ? 'git-diff' : 'read-file', { sessionId: sid, ...(diff ? { path } : { file: 'workspace/' + path }) }); if (request === reading.current) setContent(typeof value === 'string' ? value : value.text); }
+    try { const value = await api.invoke(diff ? 'git-diff' : 'read-file', { sessionId: sid, root: rootId === 'primary' ? undefined : rootId, ...(diff ? { path } : { file: 'workspace/' + path }) }); if (request === reading.current) setContent(typeof value === 'string' ? value : value.text); }
     catch (e) { if (request === reading.current) setContent(e.message); }
   }
   function move(path) { setFocus(path); tree.current?.querySelectorAll('[role="treeitem"]').forEach(node => { if (node.dataset.path === path) node.focus(); }); }
@@ -61,9 +64,11 @@ export function WorkspaceFiles() {
     e.preventDefault();
   }
   const root = branches['.'];
+  if (ws?.kind === 'unselected') return <EmptyState icon="folder" title="尚未选择工作目录" description="选择项目或文件夹后即可浏览代码。"><Button size="2" onClick={() => w.setWorkspacePrompt(true)}>选择工作目录</Button></EmptyState>;
   return <>
     <div className="bar"><Text size="2" weight="medium">工作区文件</Text><Box flexGrow="1" /><ActionIcon icon="reload" variant="soft" color="gray" onClick={() => refresh()} title="刷新文件目录" /></div>
     <div className="workspace-tree-root" title={ws?.root}><Icon n="folder" size={14} /><Text size="1" className="ellipsis">{ws?.label || '会话工作区'}</Text></div>
+    {ws?.roots?.length > 1 && <div className="project-file-root"><Dropdown label="文件目录" value={rootId} options={ws.roots.map(r => ({ value: r.primary ? 'primary' : r.id, label: r.label + (r.primary ? ' · 主目录' : ' · 只读') }))} onChange={setRootId} /></div>}
     {git?.available && <details className="git-changes"><summary>Git 改动 <Text size="1" color="gray">{git.files.length}</Text></summary>{git.files.map(file => <button className="file-row" key={file.name} onClick={() => open(file.name, true)}><Code>{file.status}</Code><span className="mono ellipsis">{file.name}</span></button>)}</details>}
     <div className="file-list workspace-tree" role="tree" aria-label="工作区目录" ref={tree}>
       {root?.loading && !root.entries && <Text as="p" size="1" color="gray">正在读取目录…</Text>}
@@ -81,6 +86,6 @@ export function WorkspaceFiles() {
       </React.Fragment>)}
       {Object.values(branches).some(branch => branch.truncated) && <Text as="p" size="1" color="gray">单个目录仅展示前 2000 项，可使用 Agent 搜索定位文件。</Text>}
     </div>
-    {selected && <div className="detail"><div className="detail-head"><Text size="1" className="mono ellipsis" style={{ flex: 1 }} title={selected.path}>{selected.path}</Text><Button size="2" variant="soft" color="gray" onClick={() => addAtt({ key: 'f:' + selected.path, kind: 'file', file: 'workspace/' + selected.path, label: selected.path.split('/').pop() })}><Icon n="sparkles" size={16} />发给 AI</Button><ActionIcon icon="copy" variant="soft" color="gray" onClick={() => navigator.clipboard.writeText(content).then(() => toast('已复制', 'ok')).catch(e => toast(e.message, 'err'))} title="复制内容" /><ActionIcon icon="x" variant="soft" color="gray" onClick={() => { reading.current++; setSelected(null); }} title="关闭文件" /></div><pre className="raw" style={{ flex: 1, maxHeight: 'none' }}>{content}</pre></div>}
+    {selected && <div className="detail"><div className="detail-head"><Text size="1" className="mono ellipsis" style={{ flex: 1 }} title={selected.path}>{selected.path}</Text><Button size="2" variant="soft" color="gray" onClick={() => rootId === 'primary' ? addAtt({ key: 'f:' + selected.path, kind: 'file', file: 'workspace/' + selected.path, label: selected.path.split('/').pop() }) : w.setInput(w.input + '\n请使用 workspace_read 读取项目目录 root=' + rootId + ' 中的 ' + selected.path)}><Icon n="sparkles" size={16} />发给 AI</Button><ActionIcon icon="copy" variant="soft" color="gray" onClick={() => navigator.clipboard.writeText(content).then(() => toast('已复制', 'ok')).catch(e => toast(e.message, 'err'))} title="复制内容" /><ActionIcon icon="x" variant="soft" color="gray" onClick={() => { reading.current++; setSelected(null); }} title="关闭文件" /></div><pre className="raw" style={{ flex: 1, maxHeight: 'none' }}>{content}</pre></div>}
   </>;
 }

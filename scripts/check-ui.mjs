@@ -6,6 +6,8 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import WebSocket from 'ws';
+import { folderProof } from '../sidecar/grants.mjs';
 
 const ROOT = process.cwd();
 const DIST = path.join(ROOT, 'ui-dist');
@@ -22,6 +24,13 @@ if (!CHROME) { console.error('找不到 Chrome/Edge，设置 CHROME_PATH'); proc
 
 const fails = [];
 const ok = (cond, msg) => { if (!cond) fails.push(msg); };
+const rpc = (channel, args = {}) => new Promise((resolve, reject) => {
+  const ws = new WebSocket('ws://127.0.0.1:' + WS_PORT + '/?token=ui-check');
+  const timer = setTimeout(() => { ws.terminate(); reject(Error('UI RPC timeout: ' + channel)); }, 30000);
+  ws.once('open', () => ws.send(JSON.stringify({ type: 'invoke', id: 1, channel, args })));
+  ws.on('message', raw => { const message = JSON.parse(raw); if (message.id !== 1) return; clearTimeout(timer); ws.close(); message.error ? reject(Error(message.error)) : resolve(message.result); });
+  ws.once('error', error => { clearTimeout(timer); reject(error); });
+});
 async function checkWindowDragging(page, selectors, label) {
   // Exercise the real frontend handlers against a recorded native bridge. This
   // checks hit testing; real OS window movement remains a native acceptance item.
@@ -70,6 +79,7 @@ const srv = http.createServer((req, res) => {
       const input = JSON.parse(body);
       if (input.messages[0]?.content?.startsWith('你是会话标题生成器')) { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.end('data: ' + JSON.stringify({ choices: [{ delta: { content: '验证图片与工作区操作' }, finish_reason: 'stop' }] }) + '\n\ndata: [DONE]\n\n'); return; }
       modelRequests.push(input);
+      if (input.messages[0]?.content?.startsWith('你是上下文检查点生成器')) { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.end('data: ' + JSON.stringify({ choices: [{ delta: { content: '已验证工作区文件、图片和工具操作。保留当前任务、代码路径与后续检查。' }, finish_reason: 'stop' }] }) + '\n\ndata: [DONE]\n\n'); return; }
       const latest = input.messages.findLast(m => m.role === 'user'), text = typeof latest?.content === 'string' ? latest.content : latest?.content.find(p => p.type === 'text')?.text || '';
       const fileTask = text.includes('创建一个测试文件');
       let delta = fileTask && input.messages.at(-1)?.role !== 'tool' ? { tool_calls: [
@@ -82,6 +92,8 @@ const srv = http.createServer((req, res) => {
       ] };
       if (text.includes('你是主代理创建的研究子代理')) delta = input.messages.at(-1)?.role === 'tool' ? { content: '研究完成：工作区证据已核对。' } : { tool_calls: [{ index: 0, id: 'child-list', type: 'function', function: { name: 'workspace_list', arguments: '{}' } }] };
       if (text.includes('验证目标机制')) delta = input.messages.at(-1)?.role === 'tool' ? { content: '目标验证完成。' } : { tool_calls: [{ index: 0, id: 'goal-done', type: 'function', function: { name: 'goal_update', arguments: JSON.stringify({ status: 'complete', summary: '目标机制验证通过。' }) } }] };
+      if (text.includes('UI_MEMORY_CHECK')) delta = input.messages.at(-1)?.role === 'tool' ? { content: '记忆保存验证完成。' } : { tool_calls: [{ index: 0, id: 'memory-write', type: 'function', function: { name: 'memory_manage', arguments: JSON.stringify({ action: 'write', name: 'ui-memory', scope: 'session', content: 'UI_MEMORY_SAVED: verified fixture fact' }) } }] };
+      if (text.includes('UI_SKILL_CHECK')) delta = input.messages.at(-1)?.role === 'tool' ? { content: '技能保存验证完成。' } : { tool_calls: [{ index: 0, id: 'skill-write', type: 'function', function: { name: 'skill_manage', arguments: JSON.stringify({ action: 'write', name: 'ui-workflow', scope: 'session', content: '---\nname: ui-workflow\ndescription: Verify project evidence\n---\n\nRead sources, verify claims, record results.' }) } }] };
       res.writeHead(200, { 'Content-Type': 'text/event-stream' });
       res.end('data: ' + JSON.stringify({ choices: [{ delta, finish_reason: delta.tool_calls ? 'tool_calls' : 'stop' }] }) + '\n\ndata: [DONE]\n\n');
     }); return;
@@ -170,11 +182,13 @@ const checkNavSpacing = (rows, label) => rows.forEach((row, i) => {
   if (i) ok(row.y - rows[i - 1].y - rows[i - 1].height >= 8, label + ' 菜单间距不足：' + row.name);
 });
 
+let activePage;
 try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SCHEME] : ['dark', 'light'])) {
   console.log('检查主题：' + scheme);
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: scheme });
   await ctx.grantPermissions(['clipboard-read', 'clipboard-write']);
   const page = await ctx.newPage();
+  activePage = page;
   const errs = [];
   page.on('pageerror', e => { errs.push(e.message); console.error('UI runtime error: ' + e.message); });
   await page.goto('http://127.0.0.1:' + PORT + '/?port=' + WS_PORT + '&token=ui-check', { waitUntil: 'load' });
@@ -199,6 +213,33 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.locator('.rail .new-session').click();
   await page.locator('.welcome').waitFor();
   await page.waitForTimeout(300);
+  const freshId = await page.locator('.session-item.on').getAttribute('data-session-id');
+  ok((await page.locator('.workspace-picker').innerText()).includes('选择项目或文件夹') && !fs.existsSync(path.join(DATA, 'WebDecryptHub/projects', freshId, 'workspace')), '[' + scheme + '] 新会话不应预先创建工作目录');
+  await page.getByRole('textbox', { name: '任务指令' }).fill('保留目录选择前的草稿');
+  await page.getByRole('button', { name: '发送（Enter）', exact: true }).click();
+  await page.getByRole('dialog', { name: '选择工作目录', exact: true }).waitFor();
+  await page.getByRole('button', { name: '不在目录中工作', exact: true }).click();
+  await page.getByRole('dialog', { name: '选择工作目录', exact: true }).waitFor({ state: 'detached' });
+  ok(await page.getByRole('textbox', { name: '任务指令' }).inputValue() === '保留目录选择前的草稿', '[' + scheme + '] 目录选择丢失草稿');
+  await page.getByRole('textbox', { name: '任务指令' }).fill('');
+
+  // Project roots are test-owned folders authorized with the same signed native-picker contract.
+  const mainRoot = path.join(DATA, 'ui-main-' + scheme), sharedRoot = path.join(DATA, 'ui-shared-' + scheme);
+  fs.mkdirSync(mainRoot); fs.mkdirSync(sharedRoot); fs.writeFileSync(path.join(sharedRoot, 'shared-evidence.txt'), 'SECONDARY_ROOT_VERIFIED_' + scheme);
+  const folder = (directory, key) => { const grant = { sessionId: freshId, path: directory, expiresAt: Date.now() + 60000 }; grant.signature = folderProof('ui-check', grant); return { key, grant }; };
+  const codeProject = await rpc('project-save', { sessionId: freshId, project: { name: 'UI Project ' + scheme, folders: [folder(mainRoot, 'main'), folder(sharedRoot, 'shared')], primaryKey: 'main' } });
+  await page.locator('.workspace-picker').click();
+  await page.locator('.project-choice').filter({ hasText: codeProject.name }).click();
+  await page.locator('.workspace-picker').filter({ hasText: codeProject.name }).waitFor();
+  ok((await rpc('session-list')).sessions.find(s => s.id === freshId).projectId === codeProject.id, '[' + scheme + '] 项目未绑定到会话');
+  await page.getByRole('tab', { name: /工作区文件/ }).click();
+  await page.getByRole('combobox', { name: '文件目录', exact: true }).click();
+  await page.getByRole('option', { name: 'ui-shared-' + scheme + ' · 只读', exact: true }).click();
+  await page.locator('.workspace-tree [data-path="shared-evidence.txt"]').click();
+  await page.locator('.detail pre').filter({ hasText: 'SECONDARY_ROOT_VERIFIED_' + scheme }).waitFor();
+  await page.getByRole('combobox', { name: '文件目录', exact: true }).click();
+  await page.getByRole('option', { name: 'ui-main-' + scheme + ' · 主目录', exact: true }).click();
+  await page.getByRole('tab', { name: '浏览器', exact: true }).click();
 
   ok(errs.length === 0, '[' + scheme + '] 页面报错: ' + (errs[0] || ''));
   ok(await page.locator('.stage-head').count() > 0, '[' + scheme + '] 找不到对话顶栏 .stage-head');
@@ -226,13 +267,19 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   const composerControls = await page.locator('.composer-bar .rt-SelectTrigger').evaluateAll(els => els.map(el => ({ height: el.getBoundingClientRect().height, font: parseFloat(getComputedStyle(el).fontSize) })));
   ok(composerControls.every(c => c.height === 32 && c.font === 14), '[' + scheme + '] 输入栏选择器尺寸不统一');
   await page.getByRole('button', { name: '选择权限', exact: true }).click();
-  ok(await page.getByRole('menuitemradio', { name: '请求批准', exact: true }).count() === 1, '[' + scheme + '] 执行模式菜单无法打开');
+  ok(await page.getByRole('radio', { name: '请求批准', exact: true }).count() === 1, '[' + scheme + '] 权限弹窗无法打开');
   await page.waitForTimeout(200);
   await page.screenshot({ path: path.join(SHOTS, scheme + '-permissions.png') });
-  await page.getByRole('menuitemradio', { name: '自动批准', exact: true }).click();
+  await page.getByRole('radio', { name: '自动批准', exact: true }).click();
   await page.getByRole('button', { name: '选择权限', exact: true }).filter({ hasText: '自动批准' }).waitFor();
   await page.getByRole('button', { name: '选择权限', exact: true }).click();
-  await page.getByRole('menuitemradio', { name: '请求批准', exact: true }).click();
+  await page.getByRole('radio', { name: '请求批准', exact: true }).click();
+  const beforeEnvironment = await page.locator('.workspace-picker').boundingBox();
+  await page.getByRole('button', { name: '查看执行环境', exact: true }).click();
+  await page.getByRole('dialog', { name: '权限与执行环境', exact: true }).waitFor();
+  const afterEnvironment = await page.locator('.workspace-picker').boundingBox();
+  ok(beforeEnvironment.y === afterEnvironment.y, '[' + scheme + '] 执行环境弹窗挤动了目录选择器');
+  await page.getByRole('dialog', { name: '权限与执行环境', exact: true }).getByRole('button', { name: '关闭', exact: true }).click();
   await page.getByRole('combobox', { name: '选择模型' }).click();
   ok(await page.getByRole('option', { name: 'gpt-4o', exact: true }).count() === 1, '[' + scheme + '] 模型菜单无法打开');
   await page.keyboard.press('Escape');
@@ -331,6 +378,8 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   const beforeSessions = await page.locator('.session-item').count();
   await page.keyboard.press('Control+t');
   await page.waitForTimeout(300);
+  await page.locator('.workspace-picker').click();
+  await page.getByRole('button', { name: '不在目录中工作', exact: true }).click();
   ok(await page.locator('.session-item').count() === beforeSessions + 1, '[' + scheme + '] Ctrl+T 不能新建会话');
   await page.locator('.session-item.on').hover();
   for (const issue of await page.evaluate(actionGeometry)) ok(false, '[' + scheme + '] 会话操作 ' + issue);
@@ -490,6 +539,8 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.locator('.welcome').waitFor();
 
   const taskInput = page.getByRole('textbox', { name: '任务指令' });
+  await page.locator('.workspace-picker').click();
+  await page.getByRole('button', { name: '不在目录中工作', exact: true }).click();
   await taskInput.focus();
   const inputChrome = await page.locator('.composer-input').evaluate(el => ({ outline: getComputedStyle(el).outlineStyle, shadow: getComputedStyle(el).boxShadow }));
   ok(inputChrome.outline === 'none' && inputChrome.shadow === 'none', '[' + scheme + '] 输入框获得焦点时不应出现内框');
@@ -506,13 +557,38 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.getByRole('button', { name: '核对工作区证据', exact: true }).click();
   await page.getByText('研究完成：工作区证据已核对。', { exact: true }).waitFor();
   await page.keyboard.press('Escape');
-  await taskInput.fill('/goal 验证目标机制'); await taskInput.press('Enter');
+  await taskInput.fill('/goal'); await taskInput.press('Enter');
+  await page.getByRole('textbox', { name: '设置目标', exact: true }).fill('验证目标机制');
+  await page.getByRole('dialog', { name: '设置目标', exact: true }).getByRole('button', { name: '执行', exact: true }).click();
   await page.locator('.harness-goal').filter({ hasText: '已完成' }).waitFor();
   await page.locator('.msg.assistant').filter({ hasText: '目标验证完成。' }).waitFor();
   await page.screenshot({ path: path.join(SHOTS, scheme + '-harness-goal.png') });
   await page.reload(); await page.locator('.harness-goal').filter({ hasText: '目标机制验证通过。' }).waitFor();
   await page.getByRole('button', { name: '结束并收起目标', exact: true }).click();
   await page.locator('.harness-goal').waitFor({ state: 'detached' });
+  for (const [command, marker, result] of [['memory', 'UI_MEMORY_CHECK', '记忆保存验证完成。'], ['skill', 'UI_SKILL_CHECK', '技能保存验证完成。']]) {
+    await taskInput.fill('/' + command + ' ' + marker); await taskInput.press('Enter');
+    await page.getByRole('button', { name: '允许这一次', exact: true }).click();
+    await page.locator('.msg.assistant').filter({ hasText: result }).waitFor();
+    const saved = await rpc('extensions-list', { sessionId: (await rpc('session-list')).focused, kind: command });
+    ok(saved.some(item => item.name === (command === 'memory' ? 'ui-memory' : 'ui-workflow')), '[' + scheme + '] /' + command + ' 未实际保存');
+  }
+  await taskInput.fill('/memories'); await taskInput.press('Enter');
+  await page.getByRole('dialog', { name: '记忆', exact: true }).getByRole('button').filter({ hasText: 'ui-memory' }).click();
+  await page.locator('.extension-preview').filter({ hasText: 'UI_MEMORY_SAVED' }).waitFor();
+  await page.getByRole('dialog', { name: '记忆', exact: true }).getByRole('button', { name: '关闭', exact: true }).click();
+  await taskInput.fill('/compact'); await taskInput.press('Enter');
+  await page.locator('.command-feedback.success').filter({ hasText: '上下文已压缩' }).waitFor();
+  await page.screenshot({ path: path.join(SHOTS, scheme + '-compact-and-memory.png') });
+  await taskInput.fill('/automation'); await taskInput.press('Enter');
+  await page.getByPlaceholder('例如：每天早上看一眼竞品接口').fill('UI scheduled run ' + scheme);
+  await page.getByPlaceholder('例如：打开 https://example.com，看它首页调了哪些接口，把新增的参数记到 findings.md').fill('UI automation read-only check');
+  await page.getByRole('button', { name: '保存', exact: true }).click();
+  const automationRow = page.locator('.task-row').filter({ hasText: 'UI scheduled run ' + scheme });
+  await automationRow.getByRole('button', { name: '立即运行', exact: true }).click();
+  await automationRow.getByText('已完成', { exact: true }).waitFor();
+  ok((await rpc('tasks-list')).some(t => t.title === 'UI scheduled run ' + scheme && t.lastStatus === 'ok' && t.runs.length), '[' + scheme + '] 自动化未等待真实 Run 完成');
+  await page.locator('.screen-head button').first().click();
   await page.locator('.rail .new-session').click(); await page.locator('.welcome').waitFor();
 
   for (const viewport of [{ width: 1280, height: 800 }, { width: 1080, height: 680 }]) {
@@ -580,7 +656,14 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.screenshot({ path: path.join(SHOTS, scheme + '-conversation-focused.png') });
   ok(errs.length === 0, '[' + scheme + '] 遍历后报错: ' + (errs[0] || ''));
   await ctx.close();
-} } finally {
+} } catch (error) {
+  if (activePage && !activePage.isClosed()) {
+    await activePage.screenshot({ path: path.join(SHOTS, 'failure.png') }).catch(() => {});
+    const metrics = await activePage.locator('.project-picker-panel').evaluateAll(nodes => nodes.map(node => ({ rect: node.getBoundingClientRect().toJSON(), side: node.getAttribute('data-side'), animations: node.getAnimations().map(a => ({ state: a.playState, time: a.currentTime })) }))).catch(() => []);
+    if (metrics.length) console.error('Project popup diagnostics: ' + JSON.stringify(metrics));
+  }
+  throw error;
+} finally {
   await browser.close(); srv.close(); sidecar.kill();
 }
 

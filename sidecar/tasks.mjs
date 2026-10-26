@@ -10,25 +10,33 @@ const TICK = 30 * 1000;
 function readJson(f, def) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return def; } }
 
 export class TaskStore {
-  constructor({ userDataDir, getSessions, log }) {
+  constructor({ userDataDir, getSessions, log, onChange = () => {} }) {
     this.file = path.join(userDataDir, 'tasks.json');
     this.getSessions = getSessions;
     this.log = log || (() => {});
+    this.onChange = onChange;
     this.tasks = readJson(this.file, []).filter(t => t && t.id);
     this.timer = null;
     this.busy = new Set();
+    this.schedulingFrom = Date.now();
+    let recovered = false;
+    for (const t of this.tasks) if (t.lastStatus === 'running') { t.lastStatus = 'error'; t.lastError = '上次应用退出时任务中断，请检查结果后重新运行'; recovered = true; }
+    if (recovered) this.save(false);
   }
 
-  save() { atomicJson(this.file, this.tasks); }
+  save(notify = true) { atomicJson(this.file, this.tasks); if (notify) this.onChange(this.list().map(t => ({ ...t, nextAt: this.nextAt(t) }))); }
 
   list() { return this.tasks.map(t => ({ ...t })).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)); }
 
   upsert(input) {
     const now = Date.now();
     const t = this.tasks.find(x => x.id === input.id);
-    const base = t || { id: 't' + crypto.randomBytes(4).toString('hex'), createdAt: now, runs: [] };
+    if (input.id && !t) throw new Error('任务不存在');
+    if (t && this.busy.has(t.id)) throw new Error('请等待正在运行的任务结束后再编辑');
+    const base = t ? structuredClone(t) : { id: 't' + crypto.randomBytes(4).toString('hex'), createdAt: now, runs: [] };
     base.title = String(input.title || base.title || '未命名任务').slice(0, 80);
     base.prompt = String(input.prompt || base.prompt || '').slice(0, 4000);
+    if (!base.prompt.trim()) throw new Error('请填写自动化任务内容');
     if (input.time && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(input.time)) throw new Error('时间格式应为 00:00 到 23:59');
     base.time = input.time || base.time || '09:00';
     if (input.sessionId !== undefined) {
@@ -38,12 +46,12 @@ export class TaskStore {
     if (input.days && (!Array.isArray(input.days) || !input.days.length || input.days.some(d => !Number.isInteger(d) || d < 0 || d > 6))) throw new Error('请至少选择一天，星期必须有效');
     base.days = input.days ? [...new Set(input.days)].sort() : (base.days || [0, 1, 2, 3, 4, 5, 6]);
     base.enabled = input.enabled !== undefined ? !!input.enabled : (base.enabled !== false);
-    if (!t) this.tasks.push(base);
+    if (!t) this.tasks.push(base); else this.tasks = this.tasks.map(x => x.id === t.id ? base : x);
     this.save();
     return this.list();
   }
 
-  remove(id) { this.tasks = this.tasks.filter(t => t.id !== id); this.save(); return this.list(); }
+  remove(id) { if (this.busy.has(id)) throw new Error('请先等待任务结束'); this.tasks = this.tasks.filter(t => t.id !== id); this.save(); return this.list(); }
 
   /** 从「现在」到下一次触发的时间戳 */
   nextAt(t, from = Date.now()) {
@@ -66,7 +74,7 @@ export class TaskStore {
     const fired = [];
     for (const t of this.tasks) {
       if (!t.enabled || this.busy.has(t.id)) continue;
-      const next = this.nextAt(t, t.lastAt || t.createdAt || now);
+      const next = this.nextAt(t, Math.max(t.lastAt || 0, t.createdAt || 0, this.schedulingFrom));
       if (!next || next > now) continue;
       fired.push(t.id);
       this.run(t.id).catch(e => this.log('任务执行失败: ' + e.message));
@@ -91,22 +99,23 @@ export class TaskStore {
       let session = t.sessionId ? mgr.sessions.get(t.sessionId) : null;
       if (t.sessionId && !session) throw new Error('绑定会话已关闭，请重新选择执行会话');
       if (!session) {
-        session = mgr.create({ title: t.title, quiet: false });
+        session = mgr.create({ title: t.title, quiet: false, managed: true });
         t.sessionId = session.id;
         this.save();
       }
       mgr.emitList();
-      if (session.mode === 'full-access') throw new Error('自动化不能继承宿主机权限，请先将绑定会话切换为标准或只读权限');
+      if (session.workspace?.kind === 'unselected') throw Object.assign(new Error('绑定会话尚未选择目录，请先打开会话选择工作目录'), { needsAttention: true });
+      if (session.mode === 'full-access') throw Object.assign(new Error('自动化不能继承宿主机权限，请先将绑定会话切换为标准或只读权限'), { needsAttention: true });
       const sent = session.send({ text: t.prompt, source: 'automation' });
-      if (!sent?.ok) throw new Error(sent?.error || '发送失败');
+      if (!sent?.ok) throw Object.assign(new Error(sent?.error || '发送失败'), { needsAttention: ['workspace-required', 'model-required', 'busy'].includes(sent?.code) });
       const finished = await session.completion;
       t.lastStatus = finished?.status === 'completed' ? 'ok' : finished?.status === 'needs_attention' ? 'needs_attention' : 'error';
       t.lastError = t.lastStatus === 'ok' ? '' : finished?.error || (t.lastStatus === 'needs_attention' ? '需要你批准权限或补充信息，请打开绑定会话后继续' : '任务没有正常完成');
       t.runs = [{ at: startedAt, manual: !!manual, sessionId: session.id, runId: sent.runId, ok: t.lastStatus === 'ok', status: t.lastStatus, error: t.lastError }, ...(t.runs || [])].slice(0, 20);
     } catch (e) {
-      t.lastStatus = 'error';
+      t.lastStatus = e.needsAttention ? 'needs_attention' : 'error';
       t.lastError = String(e.message || e).slice(0, 300);
-      t.runs = [{ at: startedAt, manual: !!manual, ok: false, error: t.lastError }, ...(t.runs || [])].slice(0, 20);
+      t.runs = [{ at: startedAt, manual: !!manual, ok: false, status: t.lastStatus, error: t.lastError }, ...(t.runs || [])].slice(0, 20);
       this.log(`任务「${t.title}」失败: ${t.lastError}`);
       throw e;
     } finally {

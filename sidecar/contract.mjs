@@ -104,6 +104,7 @@ export function validateArgs(schema, args, { strict = false } = {}) {
   const value = {};
   const dropped = [];
   for (const [k, v] of Object.entries(input)) {
+    if (schema.additionalProperties === false && schema.properties && !(k in schema.properties)) return { ok: false, error: `不支持的参数：${k}` };
     if (schema.properties && !(k in schema.properties) && strict) { dropped.push(k); continue; }
     value[k] = schema.properties && k in schema.properties ? coerce(v, schema.properties[k]) : v;
   }
