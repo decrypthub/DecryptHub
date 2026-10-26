@@ -20,6 +20,8 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm --prefix sidecar ci --ignore-scripts
+      - run: npm run check:powershell
+        if: runner.os == 'Windows'
       - run: node --test --test-concurrency=2 sidecar/test/*.test.mjs
       - run: npm run build:ui
       - run: node scripts/check-update-shutdown.mjs

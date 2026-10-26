@@ -9,6 +9,7 @@
     "dev:desktop": "powershell -ExecutionPolicy Bypass -File scripts/dev-desktop.ps1",
     "check:ui": "node scripts/check-ui.mjs",
     "check:desktop-browser": "node scripts/check-desktop-browser.mjs",
+    "check:powershell": "node scripts/check-powershell.mjs",
     "audit:ui": "node scripts/audit-ui.mjs",
     "check:wdh": "node scripts/check-wdh.mjs",
     "component:install": "node scripts/install-component.mjs",

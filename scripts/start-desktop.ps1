@@ -1,4 +1,5 @@
 # Launch the locally built Tauri app with the current sidecar source.
+# Keep this file ASCII for Windows PowerShell 5.1 without a UTF-8 BOM.
 param([string]$BinaryPath)
 $ErrorActionPreference = 'Stop'
 $desktopRoot = Split-Path -Parent $PSScriptRoot
@@ -9,7 +10,7 @@ if (-not $desktopBinary -or -not (Test-Path -LiteralPath $desktopBinary)) {
   throw 'Build the desktop app first: cargo build --manifest-path src-tauri/Cargo.toml'
 }
 $desktopRunning = Get-CimInstance Win32_Process -Filter "Name='jsra-tauri.exe'" | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($desktopRoot + '\', [StringComparison]::OrdinalIgnoreCase) }
-if ($desktopRunning) { throw '请先关闭当前 DecryptHub 桌面窗口，再启动新版，避免两个实例同时写入同一份会话数据。' }
+if ($desktopRunning) { throw 'Close the running DecryptHub window before starting another instance with the same session data.' }
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw 'Node.js is required.' }
 $desktopRuntimeNode = (& node -p 'process.execPath').Trim()
 $desktopOldTarget = $env:CARGO_TARGET_DIR
