@@ -10,12 +10,13 @@ import { HARNESS_TOOLS } from '../harnesstools.mjs';
 import { CLASSIFIED } from '../policy.mjs';
 import { parseCommand, commandMatches } from '../../ui/src/commands.js';
 const result = content => ({ content, toolCalls: [], finishReason: 'stop', usage: null });
-const manager = dir => new SessionManager({ userDataDir: dir, getSettings: () => ({ openai: { apiKey: 'fixture', model: 'test', contextWindow: 1000000 } }), broadcast() {}, chromeMod: {} });
+// These lifecycle fixtures explicitly opt into a session work directory.
+const manager = (dir, choose = true) => { const mgr = new SessionManager({ userDataDir: dir, getSettings: () => ({ openai: { apiKey: 'fixture', model: 'test', contextWindow: 1000000 } }), broadcast() {}, chromeMod: {} }); if (choose && mgr.get('main').workspace.kind === 'unselected') mgr.get('main').setWorkspace(null); return mgr; };
 function root(t) { const p = fs.mkdtempSync(path.join(os.tmpdir(), 'wdh-harness-life-')); t.after(() => fs.rmSync(p, { recursive: true, force: true })); return p; }
 const until = async fn => { const end = Date.now() + 5000; while (!fn()) { assert.ok(Date.now() < end, 'state did not settle'); await new Promise(r => setTimeout(r, 15)); } };
 test('session identifiers survive restoration and run journals include their session', async t => {
   const dir = root(t), mgr = manager(dir); t.after(() => mgr.closeAll());
-  const s = mgr.create({ title: 'ID fixture' }), id = s.id; assert.match(id, /^s[0-9a-f]{32}$/);
+  const s = mgr.create({ title: 'ID fixture', managed: true }), id = s.id; assert.match(id, /^s[0-9a-f]{32}$/);
   s.ensureAgent().chat = async () => result('done'); s.send({ text: 'ID fixture' }); await s.completion;
   assert.equal(s.runs.latest().sessionId, id); assert.ok(s.runs.events().every(e => e.sessionId === id));
   const restored = manager(dir); t.after(() => restored.closeAll()); assert.equal(restored.get(id).id, id);

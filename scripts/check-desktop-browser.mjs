@@ -6,7 +6,7 @@ import http from 'node:http';
 import { spawn, execFileSync } from 'node:child_process';
 import WebSocket from 'ws';
 import { fileIntegrity } from '../sidecar/windows-runtime.mjs';
-const root = process.cwd(), binary = path.resolve('src-tauri/target/debug/jsra-tauri.exe');
+const root = process.cwd(), binary = path.resolve(process.env.DECRYPTHUB_DESKTOP_BINARY || 'src-tauri/target/debug/jsra-tauri.exe');
 if (process.platform !== 'win32') throw new Error('Native Windows regression only');
 if (!(await fileIntegrity(binary)).normal) throw new Error('Run node scripts/prepare-windows-runtime.mjs desktop first');
 const parent = path.resolve('.tmp'); fs.mkdirSync(parent, { recursive: true }); const data = fs.mkdtempSync(path.join(parent, 'native-browser-'));
@@ -30,6 +30,7 @@ try {
   const doctor = await invoke('doctor'); if (!doctor.hostIntegrity.normal) throw new Error('Native sidecar inherited low integrity');
   console.log('Native -> Node integrity: ' + doctor.hostIntegrity.level);
   const sid = (await invoke('session-list')).focused;
+  await invoke('workspace-set', { sessionId: sid, managed: true });
   const kernels = [['system', '']]; if (process.env.JSRA_SMOKE_CLOAK) kernels.push(['cloak', '']);
   for (const [kernel, chromePath] of kernels) {
     const settings = await invoke('get-settings'); await invoke('save-settings', { ...settings, kernel, chromePath, headless: false, embedMode: 'auto' });

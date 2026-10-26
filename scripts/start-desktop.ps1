@@ -1,14 +1,22 @@
 # Launch the locally built Tauri app with the current sidecar source.
+param([string]$BinaryPath)
 $ErrorActionPreference = 'Stop'
 $desktopRoot = Split-Path -Parent $PSScriptRoot
-$desktopBinary = Join-Path $desktopRoot 'src-tauri\target\debug\jsra-tauri.exe'
+$desktopCandidates = @((Join-Path $desktopRoot 'src-tauri\target\debug\jsra-tauri.exe'), (Join-Path $desktopRoot '.tmp\projects-harness-target\debug\jsra-tauri.exe'))
+$desktopBinary = if ($BinaryPath) { [IO.Path]::GetFullPath($BinaryPath) } else { ($desktopCandidates | Where-Object { Test-Path -LiteralPath $_ } | Get-Item | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName }
 $desktopEntry = Join-Path $desktopRoot 'sidecar\index.mjs'
-if (-not (Test-Path -LiteralPath $desktopBinary)) {
+if (-not $desktopBinary -or -not (Test-Path -LiteralPath $desktopBinary)) {
   throw 'Build the desktop app first: cargo build --manifest-path src-tauri/Cargo.toml'
 }
+$desktopRunning = Get-CimInstance Win32_Process -Filter "Name='jsra-tauri.exe'" | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($desktopRoot + '\', [StringComparison]::OrdinalIgnoreCase) }
+if ($desktopRunning) { throw '请先关闭当前 DecryptHub 桌面窗口，再启动新版，避免两个实例同时写入同一份会话数据。' }
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw 'Node.js is required.' }
 $desktopRuntimeNode = (& node -p 'process.execPath').Trim()
-& $desktopRuntimeNode (Join-Path $desktopRoot 'scripts\prepare-windows-runtime.mjs') desktop
+$desktopOldTarget = $env:CARGO_TARGET_DIR
+try {
+  $env:CARGO_TARGET_DIR = Split-Path -Parent (Split-Path -Parent $desktopBinary)
+  & $desktopRuntimeNode (Join-Path $desktopRoot 'scripts\prepare-windows-runtime.mjs') desktop
+} finally { $env:CARGO_TARGET_DIR = $desktopOldTarget }
 if ($LASTEXITCODE -ne 0) { throw 'Desktop executable integrity check failed. Start from a normal Windows terminal.' }
 
 $desktopLogs = Join-Path $desktopRoot '.tmp'

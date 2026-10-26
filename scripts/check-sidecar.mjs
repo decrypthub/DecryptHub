@@ -19,7 +19,7 @@ fs.writeFileSync(path.join(root, 'preload.cjs'), 'require("node:fs").writeFileSy
 fs.writeFileSync(path.join(root, 'bunfig.toml'), 'preload = ["./preload.cjs"]\n');
 const site = http.createServer((_, res) => { res.setHeader('Content-Type', 'text/html'); res.end('<h1>Compiled browser works</h1><button>Example</button><script>const COMPILED_DEBUG_SOURCE = 42;</script>'); });
 await new Promise(r => site.listen(0, '127.0.0.1', r));
-const child = spawn(binary, nodeHost ? [entry] : [], { cwd: root, windowsHide: true, env: { ...process.env, APPDATA: root, XDG_CONFIG_HOME: root, HOME: root, TEMP: root, TMP: root, TMPDIR: root, JSRA_MODE: 'server', JSRA_WS_PORT: '0', JSRA_WS_TOKEN: token, JSRA_NATIVE_HOST: '0', JSRA_DEV: '0', DECRYPTHUB_WDH_DIR: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+const child = spawn(binary, nodeHost ? [entry] : [], { cwd: root, windowsHide: true, env: { ...process.env, DECRYPTHUB_DATA_DIR: path.join(root, 'WebDecryptHub'), APPDATA: root, XDG_CONFIG_HOME: root, HOME: root, TEMP: root, TMP: root, TMPDIR: root, JSRA_MODE: 'server', JSRA_WS_PORT: '0', JSRA_WS_TOKEN: token, JSRA_NATIVE_HOST: '0', JSRA_DEV: '0', DECRYPTHUB_WDH_DIR: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
 let stdout = '', stderr = '', socket, seq = 0; const pending = new Map();
 child.stdout.on('data', d => stdout += d); child.stderr.on('data', d => stderr += d);
 const until = async check => { const end = Date.now() + 45000; while (!check()) { if (child.exitCode !== null) throw new Error('Compiled sidecar exited before ready: ' + stderr.replaceAll(token, '[token]').slice(-6000)); if (Date.now() > end) throw new Error('Compiled sidecar readiness timed out'); await new Promise(r => setTimeout(r, 25)); } };
@@ -35,7 +35,8 @@ try {
   await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
   const sessionId = (await invoke('session-list')).focused;
   const state = (await invoke('session-snapshot', { sessionId })).state;
-  if (state.workspace.kind !== 'managed') throw new Error('Expected a managed workspace');
+  if (state.workspace.kind !== 'unselected' || fs.existsSync(state.workspace.root)) throw new Error('New chats must wait for a directory decision');
+  await invoke('workspace-set', { sessionId, managed: true });
   const tools = await invoke('list-tools', { sessionId });
   if (!tools.some(t => t.name === 'component_list') || tools.some(t => t.name === 'browser_open')) throw new Error('Core must work without WDH');
   if ((await invoke('component-info')).installed) throw new Error('Expected a clean core-only install');

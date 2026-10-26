@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Box, Flex, Text, Badge, Card, DropdownMenu, TextArea, Tabs } from '@radix-ui/themes';
+import { Box, Flex, Text, Badge, Card, Dialog, TextArea, Tabs } from '@radix-ui/themes';
 import { useWorkbench } from './bus.jsx';
 import { Button, Icon, askConfirm, EmptyState } from './kit.jsx';
-import { native } from './transport.js';
+import { ProjectPicker } from './projects.jsx';
 
 const PERMISSIONS = [
   { id: 'manual', label: '请求批准', icon: 'key', description: '工作区内读写；额外执行和联网权限由你确认' },
@@ -10,49 +10,39 @@ const PERMISSIONS = [
   { id: 'full-access', label: '完全访问权限', icon: 'info', description: '文件、命令、浏览器及已启用工具直接执行' },
   { id: 'read-only', label: '只读查看', icon: 'file', description: '仅查看文件和页面，不运行代码或修改内容' },
 ];
-export function PermissionPicker() {
-  const w = useWorkbench();
+export function PermissionPicker({ runtime = false }) {
+  const w = useWorkbench(), [open, setOpen] = useState(false), [cap, setCap] = useState(null), [busy, setBusy] = useState(false);
   const selected = w.cur.mode === 'standard' ? w.cur.review || 'manual' : w.cur.mode;
+  useEffect(() => setOpen(false), [w.sid]);
+  useEffect(() => { if (!open) return; let live = true; w.inv('executor-status').then(v => live && setCap(v)).catch(() => {}); return () => { live = false; }; }, [open, w.sid]);
   async function change(id) {
+    const sid = w.sid;
     if (id === 'full-access' && selected !== id && !await askConfirm('Agent 将使用当前系统用户权限执行命令、访问文件和网络、操控浏览器及调用已启用的外部工具，不再逐次请求批准。此选择仅对当前会话、本次应用运行有效。', { ok: '启用完全访问权限', danger: true })) return;
-    try { await w.inv('session-set-mode', { mode: ['manual', 'auto'].includes(id) ? 'standard' : id, review: id === 'auto' ? 'auto' : 'manual' }); } catch (e) { w.toast(e.message, 'err'); }
+    if (!w.isCurrentSession(sid)) return;
+    setBusy(true);
+    try { await w.api.invoke('session-set-mode', { sessionId: sid, mode: ['manual', 'auto'].includes(id) ? 'standard' : id, review: id === 'auto' ? 'auto' : 'manual' }); if (w.isCurrentSession(sid)) setOpen(false); }
+    catch (e) { w.toast(e.message, 'err'); } finally { setBusy(false); }
   }
-  return <DropdownMenu.Root><DropdownMenu.Trigger>
-    <Button size="2" variant="soft" color={w.cur.mode === 'full-access' ? 'red' : 'gray'} disabled={w.cur.agentRunning} title="选择权限" aria-label="选择权限"><Icon n={PERMISSIONS.find(p => p.id === selected)?.icon || 'key'} />{PERMISSIONS.find(p => p.id === selected)?.label || '请求批准'}<Icon n="chevdown" /></Button>
-  </DropdownMenu.Trigger><DropdownMenu.Content className="permission-menu" size="2" align="start" aria-label="权限设置">
-    <DropdownMenu.Label>如何批准 Agent 操作？</DropdownMenu.Label>
-    <DropdownMenu.RadioGroup value={selected} onValueChange={change}>
-      {PERMISSIONS.slice(0, 3).map(p => <DropdownMenu.RadioItem className="permission-option" key={p.id} value={p.id} aria-label={p.label} color={p.id === 'full-access' ? 'red' : undefined}><Icon n={p.icon} /><span className="permission-copy"><strong>{p.label}</strong><span>{p.description}</span></span></DropdownMenu.RadioItem>)}
-      <DropdownMenu.Separator />
-      <DropdownMenu.RadioItem value="read-only" aria-label="只读查看"><Icon n="file" />只读查看</DropdownMenu.RadioItem>
-    </DropdownMenu.RadioGroup>
-  </DropdownMenu.Content></DropdownMenu.Root>;
+  return <Dialog.Root open={open} onOpenChange={setOpen}><Dialog.Trigger>
+    <Button size={runtime ? '1' : '2'} variant={runtime ? 'ghost' : 'soft'} color={w.cur.mode === 'full-access' ? 'red' : 'gray'} disabled={w.cur.agentRunning} title={runtime ? '查看执行环境' : '选择权限'} aria-label={runtime ? '查看执行环境' : '选择权限'}>
+      {!runtime && <Icon n={PERMISSIONS.find(p => p.id === selected)?.icon || 'key'} />}{runtime ? (w.cur.mode === 'full-access' ? '宿主机执行' : '执行环境') : PERMISSIONS.find(p => p.id === selected)?.label || '请求批准'}<Icon n={runtime ? 'info' : 'chevdown'} />
+    </Button>
+  </Dialog.Trigger><Dialog.Content maxWidth="510px" data-overlay className="permission-dialog">
+    <Dialog.Title>权限与执行环境</Dialog.Title><Dialog.Description size="2" color="gray">为当前会话选择操作方式。项目目录范围与命令是否隔离分别检查。</Dialog.Description>
+    <div className="permission-options" role="radiogroup" aria-label="审批方式">{PERMISSIONS.map(p => <button key={p.id} className={'permission-choice' + (selected === p.id ? ' selected' : '')} role="radio" aria-label={p.label} aria-checked={selected === p.id} disabled={busy} onClick={() => change(p.id)}>
+      <Icon n={p.icon} /><span><strong>{p.label}</strong><small>{p.description}</small></span>{selected === p.id && <Icon n="check" />}
+    </button>)}</div>
+    <div className="permission-environment"><Text as="div" size="1" weight="medium">{cap ? cap.available ? '执行隔离可用' : '当前没有可用的命令隔离后端' : '正在检查执行环境…'}</Text>
+      <Text as="p" size="1" color="gray">{w.cur.mode === 'full-access' ? '命令以当前系统用户权限执行。文件工具只在选定目录范围内操作。' : '标准权限下，未隔离的命令仍需明确批准；自动批准只覆盖符合规则的隔离操作。'}</Text>
+      <Text as="p" size="1" className="mono">{w.session?.workspace?.kind === 'unselected' ? '尚未选择工作目录' : w.session?.workspace?.root}</Text>
+      <Flex justify="between" mt="3"><Button size="1" variant="ghost" color="gray" onClick={() => w.inv('executor-status', { refresh: true }).then(setCap).catch(e => w.toast(e.message, 'err'))}>重新检测</Button><Dialog.Close><Button size="2" variant="soft" color="gray">关闭</Button></Dialog.Close></Flex>
+    </div>
+  </Dialog.Content></Dialog.Root>;
 }
 export function WorkspaceBar() {
-  const w = useWorkbench(), ws = w.session?.workspace;
-  const [recent, setRecent] = useState([]), [busy, setBusy] = useState(false), [cap, setCap] = useState(null), [showDetails, setShowDetails] = useState(false);
-  useEffect(() => { w.inv('executor-status').then(setCap).catch(() => {}); }, [w.sid]);
-  async function choose(recentPath) {
-    if (!native.isNative()) { w.toast('请在桌面应用中选择本地文件夹；网页预览可使用会话工作区。', 'info'); return; }
-    setBusy(true);
-    try { const grant = await native.pickWorkspace(w.sid, recentPath); if (grant) { await w.inv('workspace-set', { grant }); w.toast('工作文件夹已切换', 'ok'); } }
-    catch (e) { w.toast('无法打开文件夹：' + e.message, 'err'); } finally { setBusy(false); }
-  }
-  const actual = w.cur.mode === 'read-only' ? '只读访问' : w.cur.mode === 'full-access' ? '宿主机执行' : cap?.available ? '受限执行' : cap ? '命令逐次确认' : '检测执行环境…';
-  return <div className="workspace-area">
-    <Flex className="workspace-bar" align="center" justify="between" gap="2">
-      <DropdownMenu.Root onOpenChange={open => { if (open) w.inv('workspace-recent').then(setRecent).catch(() => {}); }}><DropdownMenu.Trigger>
-        <Button className="workspace-picker" size="2" variant="soft" color="gray" disabled={busy || w.cur.agentRunning} title={ws?.root || '选择工作文件夹'}><Icon n="folder" /><span className="ellipsis">{ws?.label || '会话工作区'}</span><Icon n="chevdown" /></Button>
-      </DropdownMenu.Trigger><DropdownMenu.Content size="2" align="start" aria-label="工作文件夹">
-        <DropdownMenu.Item onSelect={() => choose()}><Icon n="folder" />选择文件夹…</DropdownMenu.Item>
-        <DropdownMenu.Item onSelect={async () => { try { await w.inv('workspace-set', { managed: true }); } catch (e) { w.toast(e.message, 'err'); } }}><Icon n="chat" />不选择文件夹</DropdownMenu.Item>
-        {!!recent.length && <><DropdownMenu.Separator /><DropdownMenu.Label>最近使用</DropdownMenu.Label>{recent.map(p => <DropdownMenu.Item key={p.id} onSelect={() => choose(p.root)} title={p.root}><Icon n="folder" />{p.label}</DropdownMenu.Item>)}</>}
-        <DropdownMenu.Separator /><DropdownMenu.Item disabled={!ws?.root} onSelect={() => { navigator.clipboard.writeText(ws.root).then(() => w.toast('已复制工作目录', 'ok')).catch(() => w.toast('复制失败', 'err')); }}><Icon n="copy" />复制目录路径</DropdownMenu.Item>
-      </DropdownMenu.Content></DropdownMenu.Root>
-      <Button size="1" variant="ghost" color={w.cur.mode === 'full-access' ? 'red' : 'gray'} onClick={() => setShowDetails(v => !v)} title="查看执行环境">{actual}<Icon n="info" size={14} /></Button>
-    </Flex>
-    {showDetails && <div className="workspace-details"><Text size="1" className="mono">{ws?.root}</Text><Text as="div" size="1" color="gray" mt="1">{w.cur.mode === 'full-access' ? '命令使用当前系统用户权限，浏览器与已启用的外部工具直接执行，不再逐次审批。文件工具以当前工作区为根。' : cap?.available ? '命令在当前工作区与网络策略内运行，额外权限按所选方式审批。' : '文件工具仍受工作区边界限制。当前没有可用执行隔离，请求批准和自动批准模式下的命令仍需你确认。批准后命令具有当前系统用户的权限。会话目录会保留，重新打开聊天后可以继续使用。'}</Text><Button size="1" variant="ghost" color="gray" mt="2" onClick={() => w.inv('executor-status', { refresh: true }).then(setCap).catch(e => w.toast(e.message, 'err'))}>重新检测</Button></div>}
-    {ws?.missing && <Text as="div" size="1" color="red">原工作文件夹不存在，请重新选择。</Text>}
+  const w = useWorkbench();
+  return <div className="workspace-area"><Flex className="workspace-bar" align="center" justify="between" gap="2"><ProjectPicker /><PermissionPicker runtime /></Flex>
+    {w.session?.workspace?.missing && <Text as="div" size="1" color="red">原工作文件夹不存在，请重新选择。</Text>}
   </div>;
 }
 export function PendingActions() {

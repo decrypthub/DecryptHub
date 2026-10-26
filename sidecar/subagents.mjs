@@ -25,7 +25,7 @@ export class ResearchAgents {
     const record = { id, task, title: task.slice(0, 60), parentRunId: ctx.runId || null, goalKey: ctx.goalBudget?.key, workspaceId: ctx.workspaceId, status: 'running', startedAt: Date.now() }; this.records.push(record); this.records = this.records.slice(-30);
     const agent = this.createAgent({ tools: WORKSPACE_TOOLS.filter(t => READ_TOOLS.has(t.name)), browser: null, mcp: { tools: [], has: () => false }, projectDir,
       getSettings: () => ({ ...this.settings(), maxTokens: Math.min(2500, this.settings().maxTokens || 2500) }), getMode: () => 'read-only',
-      getWorkspace: () => ({ id: ctx.workspaceId, root: ctx.workRoot }), getToolContext: () => ({ workRoot: ctx.workRoot, workspaceId: ctx.workspaceId, workspaceKind: ctx.workspaceKind, protectedRoot: ctx.protectedRoot, mode: 'read-only', readHashes: new Map() }),
+      getWorkspace: () => ({ id: ctx.workspaceId, root: ctx.workRoot, roots: ctx.projectRoots || [] }), getToolContext: () => ({ workRoot: ctx.workRoot, projectRoots: ctx.projectRoots || [], workspaceId: ctx.workspaceId, workspaceKind: ctx.workspaceKind, protectedRoot: ctx.protectedRoot, mode: 'read-only', readHashes: new Map() }),
       emit: (ev, data) => { if (ev === 'tool-start') { record.lastTool = data.name; this.save(); } if (ev === 'error') record.error = String(data).slice(0, 2000); },
     });
     const job = { agent, record, done: null }; this.jobs.set(id, job); this.save();

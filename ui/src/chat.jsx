@@ -9,7 +9,7 @@ import { WorkspaceBar, PermissionPicker, PendingActions } from './workspace.jsx'
 import { AttachmentTiles } from './attachments.jsx';
 import { conversationTurns, toolPresentation, elapsedLabel } from './conversation.js';
 import { commandMatches } from './commands.js';
-import { CommandMenu, HarnessStatus } from './harness.jsx';
+import { CommandMenu, HarnessStatus, CommandFeedback, CommandDialogs } from './harness.jsx';
 import { handleWindowDrag } from './window-drag.js';
 
 const CTX_PARTS = [['system', '系统提示'], ['tools', '工具定义'], ['summary', '压缩摘要'], ['history', '对话'], ['attachments', '附件'], ['toolResults', '工具结果']];
@@ -72,10 +72,12 @@ export function ChatStage({ railOpen, onExpandRail }) {
     </div>
 
     <div className="composer-wrap">
+      <CommandFeedback />
       <HarnessStatus />
       {!!cur.queued && <Flex align="center" gap="2" mb="2"><Text size="1" color="gray">下一轮队列：{cur.queued} 项</Text>{!cur.agentRunning && <Button size="1" variant="ghost" color="gray" onClick={() => inv('agent-queue-resume').then(r => !r.ok && w.toast(r.error, 'err')).catch(e => w.toast(e.message, 'err'))}>继续队列</Button>}<Button size="1" variant="ghost" color="gray" onClick={() => inv('agent-queue-clear')}>清空队列</Button></Flex>}
       <PendingActions />
       <WorkspaceBar />
+      <CommandDialogs />
       <Card className={'composer' + (dragging ? ' drag-over' : '')} size="2"
         onDragOver={e => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDragging(true); } }}
         onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setDragging(false); }}

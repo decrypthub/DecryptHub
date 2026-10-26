@@ -9,6 +9,7 @@ import { ChatStage } from './chat.jsx';
 import { Dock } from './dock.jsx';
 import { Screens } from './screens.jsx';
 import { handleWindowDrag } from './window-drag.js';
+import { ProjectDialogs } from './projects.jsx';
 
 let win = null;
 async function getWin() {
@@ -46,11 +47,12 @@ function WindowControls() {
 }
 
 function Rail({ onSearch, onCollapse }) {
-  const { sessions, sid, focusSession, newSession, closeSession, pinSession, view, setView, api, toast } = useWorkbench();
+  const w = useWorkbench();
+  const { sessions, sid, focusSession, newSession, closeSession, pinSession, view, setView, api, toast, projects, projectFilter, setProjectFilter, setProjectEditor, setMoveSession } = w;
   const [rename, setRename] = useState(null);
   const [renaming, setRenaming] = useState(false);
   const [menuSession, setMenuSession] = useState(null);
-  const list = sessions.sessions || [];
+  const list = (sessions.sessions || []).filter(s => !projectFilter || s.projectId === projectFilter);
   async function copySession(session, markdown = false) {
     try {
       const text = markdown ? (await api.invoke('session-export-markdown', { sessionId: session.id })).markdown : session.id;
@@ -77,7 +79,12 @@ function Rail({ onSearch, onCollapse }) {
       <NavButton active={view === 'plugins'} onClick={() => setView('plugins')}><Icon n="tool" /><span>插件</span></NavButton>
       <NavButton active={view === 'automations'} onClick={() => setView('automations')}><Icon n="clock" /><span>自动化任务</span></NavButton>
     </nav>
-    <div className="rail-sec"><span>会话列表</span><span className="rail-count">{list.length}</span><ActionIcon icon="search" variant="soft" color="gray" onClick={onSearch} title="查找会话" /></div>
+    <div className="rail-sec"><span>项目</span><ActionIcon icon="plus" variant="soft" color="gray" onClick={() => setProjectEditor({})} title="新建项目" /></div>
+    <div className="rail-projects">{projects.map(p => <div className={'rail-project' + (projectFilter === p.id ? ' selected' : '')} key={p.id}>
+      <button onClick={() => setProjectFilter(projectFilter === p.id ? null : p.id)} title={p.folders.map(f => f.root).join('\n')}><Icon n="folder" size={16} /><span className="ellipsis">{p.name}</span><small>{sessions.sessions.filter(s => s.projectId === p.id).length}</small></button>
+      <ActionIcon icon="more" variant="soft" color="gray" onClick={() => setProjectEditor(p)} title={'编辑项目 ' + p.name} />
+    </div>)}</div>
+    <div className="rail-sec"><span>{projects.find(p => p.id === projectFilter)?.name || '会话列表'}</span><span className="rail-count">{list.length}</span>{projectFilter && <ActionIcon icon="x" variant="soft" color="gray" onClick={() => setProjectFilter(null)} title="显示全部会话" />}<ActionIcon icon="search" variant="soft" color="gray" onClick={onSearch} title="查找会话" /></div>
     <div className="rail-list" aria-label="会话列表">
       {list.map(s => <div key={s.id} data-session-id={s.id} className={'session-item' + (s.id === sid && view === 'chat' ? ' on' : '') + (menuSession === s.id ? ' menu-open' : '')}>
         <button className="session-focus" onClick={() => focusSession(s.id)} onDoubleClick={() => setRename({ id: s.id, title: sessionLabel(s) })} title={s.title} aria-current={s.id === sid && view === 'chat' ? 'page' : undefined}>
@@ -93,6 +100,7 @@ function Rail({ onSearch, onCollapse }) {
               <DropdownMenu.Item onSelect={() => setRename({ id: s.id, title: sessionLabel(s) })}><Icon n="edit" />重命名会话</DropdownMenu.Item>
               <DropdownMenu.Item onSelect={() => copySession(s)}><Icon n="copy" />复制会话 ID</DropdownMenu.Item>
               <DropdownMenu.Item onSelect={() => copySession(s, true)}><Icon n="report" />复制为 Markdown</DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={() => setMoveSession(s.id)}><Icon n="folder" />移动到项目…</DropdownMenu.Item>
               <DropdownMenu.Item onSelect={() => pinSession(s.id, !s.pinned)}><Icon n="pin" />{s.pinned ? '取消置顶' : '置顶会话'}</DropdownMenu.Item>
               <DropdownMenu.Separator />
               <DropdownMenu.Item color="red" onSelect={() => closeSession(s.id)}><Icon n="x" />关闭对话</DropdownMenu.Item>
@@ -163,6 +171,7 @@ export function Shell() {
         </div>
       </div>
       <SessionSearch open={searchOpen} onOpenChange={setSearchOpen} />
+      <ProjectDialogs />
     </>}
     {firstRun && <FirstRunDialog />}
   </div>;

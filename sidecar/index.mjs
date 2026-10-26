@@ -31,6 +31,9 @@ async function startServer() {
   const { listWorkspace, listDirectory, readWorkspace } = await import('./workspace.mjs');
   const { executor } = await import('./executor.mjs');
   const { consumeFolderGrant } = await import('./grants.mjs');
+  const { selectReadRoot } = await import('./workspaces.mjs');
+  const { ProjectService } = await import('./project-service.mjs');
+  const { ExtensionStore } = await import('./extensions.mjs');
   const { publicSettings, decryptSecrets, mirrorProvider } = await import('./secrets.mjs');
   const { registerAttachment, attachmentPreview } = await import('./attachments.mjs');
   const { conversationMarkdown } = await import('./transcript.mjs');
@@ -72,7 +75,12 @@ async function startServer() {
   mcpHost.apply().catch(e => fileLog('MCP 服务启动失败: ' + e.message));
   // 自动化任务：每天定时把一句话交给 AI（新建会话 → 起浏览器 → 发送）
   const { TaskStore } = await import('./tasks.mjs');
-  const tasks = new TaskStore({ userDataDir: settingsMod.userDataDir(), getSessions: () => sessions, log: m => fileLog(m) });
+  const tasks = new TaskStore({ userDataDir: settingsMod.userDataDir(), getSessions: () => sessions, log: m => fileLog(m), onChange: list => broadcast('tasks-status', list) });
+  const extensions = new ExtensionStore({ directory: settingsMod.userDataDir(), getSettings: () => settings,
+    saveSettings: () => settingsMod.save(settings), plugins, mcpHost, tasks,
+    changed: () => { for (const s of sessions.sessions.values()) s.agent?.emitContext(); broadcast('extensions-changed', true); } });
+  sessions.extensions = extensions;
+  const projects = new ProjectService(sessions, (grant, sid) => consumeFolderGrant(wsToken, grant, sid, consumedGrants));
   tasks.start();
   const S = a => sessions.get(a?.sessionId);
   const B = a => { const s = S(a); if (!s.browser.running) throw new Error('该会话的浏览器未启动'); return s.browser; };
@@ -104,14 +112,13 @@ async function startServer() {
     'mcp-status': () => mcpHost.status(),
     'mcp-test': a => mcpHost.test(a || {}),
     'mcp-restart': async a => { await mcpHost.restart(String(a?.name || '')); return mcpHost.status(); },
-    'mcp-save': async a => {
-      const mod = await import('./mcphost.mjs');
-      settings.mcpServers = mod.approvedServers(plugins.preserveManagedServers(a?.servers || {}), settings.mcpServers, a?.approveNames || []);
-      settingsMod.save(settings);
-      await mcpHost.apply();
-      for (const x of sessions.sessions.values()) if (x.agent) x.agent.emitContext();
-      return mcpHost.status();
-    },
+    'mcp-save': a => extensions.saveMcp(a?.servers || {}, a?.approveNames || []),
+    'projects-list': () => sessions.projects.list(),
+    'project-save': a => projects.save(a.project || {}, S(a).id),
+    'project-attach': a => projects.attach(S(a).id, a.projectId || null),
+    'project-remove': a => projects.remove(a.id),
+    'extensions-list': a => { const s = S(a); return extensions.list(a.kind, { sessionId: s.id, projectId: s.projectId }); },
+    'extension-read': a => { const s = S(a); return extensions.read(a.kind, a, { sessionId: s.id, projectId: s.projectId }); },
     'component-info': () => sessions.components.info(),
     'doctor': async () => ({runtime:runtimeInfo,hostIntegrity:await windowsRuntime.hostIntegrity(),component:sessions.components.info(),chrome:[],chromeOk:sessions.components.info().installed,downloading:!!downloading,version:process.env.JSRA_APP_VERSION||''}),
     'kernel-info': async () => {
@@ -137,7 +144,7 @@ async function startServer() {
     'session-pin': a => { const s = S(a); s.setPinned(!!a.pinned); return sessions.list(); },
     'session-focus': async a => { await sessions.focus(a?.sessionId); return true; },
     'workspace-recent': () => sessions.workspaces.recent(),
-    'workspace-set': async a => { const s = S(a); if (s.agent?.running || s.queue.length) throw new Error('请先停止当前任务并清空队列'); await s.closeBrowser(); return s.setWorkspace(a.managed ? null : sessions.workspaces.folder(consumeFolderGrant(wsToken, a.grant, s.id, consumedGrants))); },
+    'workspace-set': a => projects.choose(S(a).id, a),
     'executor-status': a => executor.probe(!!a?.refresh),
     'run-events': a => S(a).runs.events(Number(a?.after) || 0),
     'agent-history': a => { const s = S(a); return s.ensureAgent().hist.events; },
@@ -176,9 +183,9 @@ async function startServer() {
       return { ok: true, path: out, entries: har.log.entries.length, bytes: fs.statSync(out).size };
     },
     'get-scripts': a => S(a).browser.scripts.map(s => ({ id: s.id, url: s.url, size: s.size, file: s.file })),
-    'read-file': a => { const s = S(a), name = String(a.file || ''); if (name.startsWith('workspace/')) return readWorkspace(s.toolCtx(), name.slice(10)); const p = resolveIn(s.projectDir, name); return fs.readFileSync(p, 'utf8').slice(0, 300000); },
+    'read-file': a => { const s = S(a), name = String(a.file || ''); if (name.startsWith('workspace/')) return readWorkspace(selectReadRoot(s.toolCtx(), a.root), name.slice(10)); const p = resolveIn(s.projectDir, name); return fs.readFileSync(p, 'utf8').slice(0, 300000); },
     'list-files': a => { const s = S(a); sessions.workspaces.verify(s.workspace); return listWorkspace(s.toolCtx()).map(f => ({ ...f, name: 'workspace/' + f.name })); },
-    'workspace-directory': a => { const s = S(a); sessions.workspaces.verify(s.workspace); return listDirectory(s.toolCtx(), String(a.path || '.')); },
+    'workspace-directory': a => { const s = S(a); sessions.workspaces.verify(s.workspace); return listDirectory(selectReadRoot(s.toolCtx(), a.root), String(a.path || '.')); },
     'git-status': a => git.gitStatus(S(a).toolCtx()),
     'git-diff': a => git.gitDiff(S(a).toolCtx(), a.path),
     'agent-send': a => S(a).send(a),

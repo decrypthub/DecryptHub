@@ -68,14 +68,12 @@ test('registryIssues: 重名 / 缺 run / 缺 schema 都能被发现', () => {
   assert.ok(issues.some(i => /schema/.test(i)));
 });
 
-// 真实注册表只有在依赖装好时才能 import（asttools 需要 @babel/parser）。
-let LOCAL_TOOLS = null;
-try { ({ LOCAL_TOOLS } = await import('../localtools.mjs')); } catch { /* 本地缺依赖时跳过 */ }
+const { DEFAULT_TOOLS } = await import('../catalog.mjs');
 
-test('真实工具注册表：无重名、每个都有 run 与 object schema', { skip: LOCAL_TOOLS ? false : '缺少 sidecar 依赖，CI 中执行' }, () => {
-  assert.ok(Array.isArray(LOCAL_TOOLS) && LOCAL_TOOLS.length > 20);
-  assert.deepEqual(registryIssues(LOCAL_TOOLS), []);
-  for (const t of LOCAL_TOOLS) {
+test('真实工具注册表：无重名、每个都有 run 与 object schema', () => {
+  assert.ok(Array.isArray(DEFAULT_TOOLS) && DEFAULT_TOOLS.length > 20);
+  assert.deepEqual(registryIssues(DEFAULT_TOOLS), []);
+  for (const t of DEFAULT_TOOLS) {
     assert.equal(typeof t.description, 'string');
     assert.ok(t.description.length > 4, `${t.name} 缺描述`);
   }

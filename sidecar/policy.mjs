@@ -50,6 +50,7 @@ const DESTRUCTIVE = new Set([
 // 会执行代码的工具（宿主进程或页面内）。风险等级仍要分，界面会据此把危险类标红。
 // 「要不要弹确认」是另一个判断：只有碰得到宿主进程/文件的几个才进 approvalCategory。
 const EXEC = new Set([
+  'skill_manage', 'memory_manage', 'automation_manage', 'mcp_manage',
   'browser_click', 'browser_fill', 'browser_press',
   'evaluate_script', 'set_breakpoint_on_text', 'break_on_xhr', 'remove_breakpoint', 'pause_or_resume', 'step',
   'workspace_shell', 'workspace_run', 'workspace_npm', 'workspace_job_kill', 'run_node',
@@ -70,6 +71,7 @@ export const WORKER_TOOLS = new Set(['ast_deobfuscate', 'deobfuscate_code', 'env
 const CONFIRM_INJECT = new Set(['reset_session', 'restart_browser_fresh', 'evaluate_script', 'clear_site_data', 'clear_network_requests', 'remove_breakpoint']);
 
 export function toolRisk(name, args = {}) {
+  if (['skill_manage', 'memory_manage', 'automation_manage', 'mcp_manage'].includes(name)) return ['list', 'read'].includes(args.action) ? 'read' : 'exec';
   if (args.outputFile || (args.filePath && name !== 'workspace_read')) return 'write';
   if (HOST_EXEC.has(name)) return 'exec';
   if (name === 'workspace_job_kill' || name === 'discover_tools') return 'read';
@@ -99,6 +101,7 @@ export function isDifferentHost(target, current) {
 // Host execution is checked against the actual invocation by Session.execute.
 // Standard mode reviews external effects; full access is the user's standing grant.
 export function approvalCategory(name, args = {}, extra = {}) {
+  if (['skill_manage', 'memory_manage', 'automation_manage', 'mcp_manage'].includes(name)) return ['list', 'read'].includes(args.action) ? null : 'management';
   if (HOST_EXEC.has(name)) return name === 'workspace_npm' ? 'npm' : 'shell';
   if (extra.trustedRisk === 'exec') return 'shell';
   if (DESTRUCTIVE.has(name)) return 'reset';

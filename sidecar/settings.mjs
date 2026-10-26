@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { atomicJson } from './paths.mjs';
 
 const DEFAULTS = {
   provider: 'openai',
@@ -75,6 +76,6 @@ export function save(s) {
   c.openai.apiKey = ''; c.anthropic.apiKey = '';
   // 渠道密钥同样只在密钥库里：providers[].apiKey 以前会被原样写盘，启动时再用 keyring 回填
   if (Array.isArray(c.providers)) c.providers = c.providers.map(p => ({ ...p, apiKey: '', hasKey: undefined }));
-  fs.writeFileSync(file(), JSON.stringify(c, null, 2), { mode: 0o600 });
+  atomicJson(file(), c);
 }
 export { DEFAULTS };
