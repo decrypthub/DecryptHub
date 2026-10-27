@@ -11,6 +11,7 @@ import { historyEvents } from './conversation.js';
 import { rememberPreview } from './attachments.jsx';
 import { parseCommand, extensionRequest } from './commands.js';
 import { BrowserSurface } from './browser-surface.js';
+import { useSessionView } from './use-session-view.jsx';
 
 const api = window.api;
 const Ctx = createContext(null);
@@ -23,8 +24,8 @@ export function Workbench({ children }) {
   const [sessions, setSessions] = useState({ focused: null, sessions: [] });
   const [S, dispatch] = useReducer(sessionReducer, {});
   const [view, setView] = useState('chat');
-  const [side, setSide] = useState('browser');
-  const [sideOpen, setSideOpen] = useState(() => localStorage.getItem('wdh_side') === 'open');
+  const presentation = useSessionView(sessions.focused);
+  const { side, sideOpen, setSide, setSideOpen } = presentation;
   const sideOpenRef = useRef(sideOpen); sideOpenRef.current = sideOpen;
   const [launching, setLaunching] = useState({});
   const [drafts, setDrafts] = useState({});
@@ -141,7 +142,7 @@ export function Workbench({ children }) {
       // 启动时把当前渠道的密钥同步过去，否则重启后第一次发消息会误报「尚未配置 API Key」。
       try { s = await api.invoke('save-settings', mirrorActive(s)); if (native.isNative()) { const envelope = await native.syncSecrets(s.providers.map(p => 'prov.' + p.id), s.activeProviderId); s = await api.invoke('secrets-sync', { envelope }); } } catch (e) { console.error('sync provider key:', e); }
       setSettings(s);
-      setSessions(await api.invoke('session-list'));
+      const restoredSessions = await api.invoke('session-list'); setSessions(restoredSessions);
       setProjects(await api.invoke('projects-list'));
       const doc = await api.invoke('doctor');
       const activeKey = s.providers.find(p => p.id === s.activeProviderId)?.hasKey;
@@ -149,12 +150,9 @@ export function Workbench({ children }) {
       if (keyMissing && !window.__JSRA_SKIP_ONBOARD) setFirstRun(true);
       const shot = window.__JSRA_SHOT;
       if (['settings', 'automations'].includes(shot)) setView(shot);
-      else if (['browser', 'evidence', 'code'].includes(shot)) { setSide(shot); setSideOpen(true); }
+      else if (['browser', 'evidence', 'code'].includes(shot)) { setSide(shot, restoredSessions.focused); setSideOpen(true, restoredSessions.focused); }
     } catch (e) { console.error('boot failed:', e && (e.message || e)); setTimeout(() => location.reload(), 1500); }
   })(); }, []);
-
-  // 右侧工具面板默认收起（聊天优先），用户展开/收起后记住选择
-  useEffect(() => { try { localStorage.setItem('wdh_side', sideOpen ? 'open' : 'closed'); } catch {} }, [sideOpen]);
 
   // ---- 画面帧 ----
   const drawFrame = useCallback(f => {
@@ -182,7 +180,7 @@ export function Workbench({ children }) {
       on('browser-status', (v, s) => dispatch({ t: 'status', sid: s, v })),
       on('agent-browser-activity', (v, s) => {
         dispatch({ t: 'patch', sid: s, patch: { browserActivity: v } });
-        if (v.active && s === sidRef.current && (v.tool === 'browser_open' || (!sideOpenRef.current && ['browser_click', 'browser_fill', 'browser_press'].includes(v.tool)))) { setSide('browser'); setSideOpen(true); }
+        if (v.active && s === sidRef.current && (v.tool === 'browser_open' || (!sideOpenRef.current && ['browser_click', 'browser_fill', 'browser_press'].includes(v.tool)))) presentation.revealBrowser(s);
       }),
       on('requests', (v, s) => dispatch({ t: 'requests', sid: s, v })),
       on('requests-cleared', (v, s) => dispatch({ t: 'patch', sid: s, patch: { requests: [] } })),
@@ -198,7 +196,7 @@ export function Workbench({ children }) {
       }),
       on('agent-assistant-start', (v, s) => dispatch({ t: 'assistant-start', sid: s, v })),
       on('agent-delta', (d, s) => dispatch({ t: 'delta', sid: s, v: d })),
-      on('agent-reasoning', (v, s) => dispatch({ t: 'patch', sid: s, patch: { thinking: true } })),
+      on('agent-reasoning', (v, s) => dispatch({ t: 'reasoning', sid: s, v })),
       on('agent-assistant-end', (v, s) => dispatch({ t: 'assistant-end', sid: s, v })),
       on('agent-usage', (u, s) => dispatch({ t: 'patch', sid: s, patch: { usage: u } })),
       on('agent-tool-start', (t, s) => dispatch({ t: 'ev', sid: s, v: { type: 'tool', ...t } })),
@@ -245,7 +243,7 @@ export function Workbench({ children }) {
       if (s.url && /^https?:/.test(s.url)) patch.url = s.url;
       dispatch({ t: 'patch', sid: s.id, patch });
       api.invoke('session-snapshot', { sessionId: s.id }).then(v => {
-        const events = historyEvents(v.events, v.partial, v.partialItem);
+        const events = historyEvents(v.events, v.partial, v.partialItem, v.partialReasoning);
         dispatch({ t: 'patch', sid: s.id, patch: { events, ctx: v.context, mode: v.state.mode, review: v.state.review || 'manual', todos: v.state.todos, approvals: v.state.approvals || [], question: v.state.questions?.[0] || null, run: v.state.run, debuggerPaused: !!v.state.debuggerPaused, goal: v.state.goal, subagents: v.state.subagents || [] } });
       }).catch(() => seen.current.delete(s.id));
       api.invoke('get-requests', { sessionId: s.id }).then(r => r?.list?.length && dispatch({ t: 'requests', sid: s.id, v: r.list })).catch(() => {});
@@ -258,12 +256,13 @@ export function Workbench({ children }) {
   const runningNow = !!cur?.status?.running;
   useEffect(() => {
     const el = viewRef.current; if (!el) return;
+    const target = sid;
     let t;
     const push = () => {
       clearTimeout(t);
       t = setTimeout(() => {
         const r = el.getBoundingClientRect();
-        if (r.width > 50 && r.height > 50) api.invoke('browser-viewport', { sessionId: sidRef.current, width: r.width - 8, height: r.height - 8, dpr: window.devicePixelRatio || 1 }).catch(() => {});
+        if (target === sidRef.current && r.width > 50 && r.height > 50) api.invoke('browser-viewport', { sessionId: target, width: r.width, height: r.height, dpr: window.devicePixelRatio || 1 }).catch(() => {});
       }, 250);
     };
     const ro = new ResizeObserver(push); ro.observe(el); push();
@@ -295,7 +294,7 @@ export function Workbench({ children }) {
       const key = [r.left, r.top, r.width, r.height, window.devicePixelRatio, JSON.stringify(inset)].join();
       if (key === lastKey && !force) return;
       lastKey = key; force = false;
-      try { const result = await surface.current.show({ sessionId: mySid, pid, rect: { x: r.left + 4, y: r.top + 4, w: r.width - 8, h: r.height - 8 }, dpr: window.devicePixelRatio || 1, inset }); if (dead || result.state === 'superseded') return; embedTry.current[mySid] = 0; }
+      try { const result = await surface.current.show({ sessionId: mySid, pid, rect: { x: r.left, y: r.top, w: r.width, h: r.height }, dpr: window.devicePixelRatio || 1, inset }); if (dead || result.state === 'superseded') return; embedTry.current[mySid] = 0; }
       catch (e) {
         if (dead) return;
         const n = (embedTry.current[mySid] || 0) + 1; embedTry.current[mySid] = n;
@@ -354,8 +353,10 @@ export function Workbench({ children }) {
   }
 
   async function newSession() {
+    const initialView = { side, sideOpen, manuallyClosed: false };
     try {
       const s = await api.invoke('session-create', projectFilter ? { projectId: projectFilter } : {});
+      presentation.update(s.id, initialView);
       await api.invoke('session-focus', { sessionId: s.id });
       setView('chat');
       requestAnimationFrame(() => {
@@ -369,6 +370,7 @@ export function Workbench({ children }) {
     if (s?.agentRunning && !await askConfirm(`「${s.title || '对话'}」的 AI 正在分析，关闭将中断并关闭其浏览器。继续？`, { ok: '关闭', danger: true })) return;
     await api.invoke('session-close', { sessionId: id });
     dispatch({ t: 'drop', sid: id });
+    presentation.forget(id);
     localStorage.removeItem('wdh_ev_' + id);
     seen.current.delete(id);
   }
@@ -467,14 +469,15 @@ export function Workbench({ children }) {
     if (!r?.ok) toast(r?.error || '压缩失败', 'warn');
   }
 
-  async function cleanRetry(e) {
-    const fresh = !!e?.shiftKey;
+  async function cleanRetry({ fresh = false } = {}) {
+    const target = sid;
     if (!await askConfirm(fresh ? '使用新的浏览器配置打开当前网址？原聊天和文件会保留。' : '清除当前站点 Cookie、存储与网络记录并刷新？原聊天和文件会保留。')) return;
+    if (target !== sidRef.current) return;
     try {
-      if (cur.agentRunning) await inv('agent-interrupt');
-      if (fresh) await inv('restart-fresh', { url: cur.url }); else await inv('reset-session', { scope: 'site', reload: true });
-      dispatch({ t: 'patch', sid, patch: { requests: [], scripts: [] } });
-      toast(fresh ? '已用全新 Profile 重启' : '已清空站点数据并刷新', 'ok');
+      if (cur.agentRunning) await api.invoke('agent-interrupt', { sessionId: target });
+      if (fresh) await api.invoke('restart-fresh', { sessionId: target, url: cur.url }); else await api.invoke('reset-session', { sessionId: target, scope: 'site', reload: true });
+      dispatch({ t: 'patch', sid: target, patch: { requests: [], scripts: [] } });
+      if (target === sidRef.current) toast(fresh ? '已用全新 Profile 重启' : '已清空站点数据并刷新', 'ok');
     } catch (err) { toast('干净重试失败：' + (err?.message || err), 'err'); }
   }
 
@@ -539,7 +542,7 @@ export function Workbench({ children }) {
     commandFeedback: commandFeedback[sid], clearCommandFeedback: () => setCommandFeedback(m => ({ ...m, [sid]: null })),
     settings, saveSettings, setSettings, firstRun, setFirstRun,
     sessions, sid, session, cur, dispatch, focusSession,
-    view, setView, side, setSide, sideOpen, setSideOpen, openSide,
+    view, setView, side, setSide, sideOpen, setSideOpen, openSide, panelLayout: presentation.layout, setPanelLayout: presentation.setPanelLayout,
     launching, launch, go, newSession, closeSession, pinSession, cleanRetry,
     input, setInput, atts: atts[sid] || [], addAtt, rmAtt, addFiles, uploading: !!uploads[sid], sending: !!sending[sid], enableImages,
     send, sendInput, compactNow, pickModel, inv,

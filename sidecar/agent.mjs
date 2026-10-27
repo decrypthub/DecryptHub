@@ -4,6 +4,7 @@ import {chat} from './llm.mjs';
 import pathx from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import { setTimeout as retryDelay } from 'node:timers/promises';
 import { imageContent, validateAttachments } from './attachments.mjs';
 import { contentHash } from './changes.mjs';
 import { resolveIn, containsPath } from './paths.mjs';
@@ -289,15 +290,15 @@ class Agent {
   async askModel({ settings, tools, step }) {
     for (let tryNo = 0; ; tryNo++) {
       try {
-        this.partial = '';
-        return await this.chat(settings, this.wire(), tools, { onDelta: d => { this.partial = (this.partial || '') + d; this.emit('delta', { ...this.currentItem, text: d }); }, onReasoning: () => this.emit('reasoning', this.currentItem), signal: this.abort?.signal });
+        this.partial = ''; this.partialReasoning = '';
+        return await this.chat(settings, this.wire(), tools, { onDelta: d => { this.partial = (this.partial || '') + d; this.emit('delta', { ...this.currentItem, text: d }); }, onReasoning: d => { if (typeof d !== 'string' || !d) return; this.partialReasoning += d; this.emit('reasoning', { ...this.currentItem, text: d }); }, signal: this.abort?.signal });
       } catch (e) {
         const msg = String(e?.message || e);
         if (this.abort?.signal.aborted || tryNo >= 3 || !RETRY_RE.test(msg)) throw e;
         this.emit('log', `模型连接中断（${msg.slice(0, 80)}），${5 * (tryNo + 1)}s 后重试本步（${tryNo + 1}/3）`);
         this.emit('retry', { step, attempt: tryNo + 1, error: msg.slice(0, 200) });
-        await new Promise(r => setTimeout(r, 5000 * (tryNo + 1)));
-        this.emit('assistant-start', { step });
+        await retryDelay(5000 * (tryNo + 1), undefined, { signal: this.abort?.signal });
+        this.emit('assistant-start', { ...this.currentItem, retry: true });
       }
     }
   }
@@ -386,16 +387,17 @@ class Agent {
         }
         this.emit('usage', { step: steps, ms, last: res.usage || null, total: { ...usage } });
         const phase = res.toolCalls?.length && !final ? 'commentary' : 'final_answer';
+        const reasoning = res.reasoning || this.partialReasoning || '';
         for (const call of res.toolCalls || []) call.itemId = crypto.randomUUID();
-        this.emit('assistant-end', { ...this.currentItem, phase, content: res.content || '', finishReason: res.finishReason || null });
+        this.emit('assistant-end', { ...this.currentItem, phase, content: res.content || '', reasoning, finishReason: res.finishReason || null });
         this.hist.append({
           t: 'assistant',
           ...this.currentItem, phase,
           content: res.content || '',
-          ...(res.reasoning ? { reasoning: res.reasoning } : {}),
+          ...(reasoning ? { reasoning } : {}),
           ...(res.toolCalls?.length ? { calls: res.toolCalls.map(tc => ({ id: tc.id, itemId: tc.itemId, name: tc.name, args: tc.argError ? (tc.rawArgs || '{}') : (tc.args || {}) })) } : {}),
         });
-        this.partial = '';
+        this.partial = ''; this.partialReasoning = '';
         this.currentItem = null;
         this.emitContext();
         if (final || !res.toolCalls?.length) {
@@ -418,13 +420,13 @@ class Agent {
       this.emit('error', e.message || String(e));
     } finally {
       const endedAt = Date.now();
-      if (this.currentItem && this.partial) this.hist.append({ t: 'assistant', ...this.currentItem, phase: 'partial_answer', content: this.partial, interrupted: true });
+      if (this.currentItem && (this.partial || this.partialReasoning)) this.hist.append({ t: 'assistant', ...this.currentItem, phase: 'partial_answer', content: this.partial || '', ...(this.partialReasoning ? { reasoning: this.partialReasoning } : {}), interrupted: true });
       this.hist.append({ t: 'turn-end', turnId: this.turnId, stop, startedAt, endedAt });
       this.running = false; this.abort = null; this.wrapUp = false; this._emergency = null;
       this.persist();
       this.emitContext();
       this.emit('done', { turnId: this.turnId, stop, usage, startedAt, endedAt });
-      this.currentItem = null; this.partial = '';
+      this.currentItem = null; this.partial = ''; this.partialReasoning = '';
     }
     return { stop, usage };
   }

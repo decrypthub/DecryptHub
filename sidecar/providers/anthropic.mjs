@@ -68,7 +68,7 @@ export async function completeAnthropic(cfg, messages, tools, { onDelta, onReaso
         if (j.type === 'content_block_delta') {
           const d = j.delta || {};
           if (d.type === 'text_delta') { content += d.text || ''; if (d.text) emitted = true; onDelta && onDelta(d.text || ''); }
-          else if (d.type === 'thinking_delta') { reasoning += d.thinking || ''; onReasoning && onReasoning(d.thinking || ''); }
+          else if (d.type === 'thinking_delta' && typeof d.thinking === 'string') { if (d.thinking) emitted = true; reasoning += d.thinking; onReasoning && onReasoning(d.thinking); }
           else if (d.type === 'input_json_delta' && calls.has(j.index)) { calls.get(j.index).args += d.partial_json || ''; }
         }
         if (j.type === 'message_delta') {

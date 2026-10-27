@@ -12,6 +12,7 @@ import { commandMatches } from './commands.js';
 import { CommandMenu, HarnessStatus, CommandFeedback, CommandDialogs } from './harness.jsx';
 import { handleWindowDrag } from './window-drag.js';
 import { TodoStrip } from './plan.jsx';
+import { Reasoning } from './reasoning.jsx';
 
 const CTX_PARTS = [['system', '系统提示'], ['tools', '工具定义'], ['summary', '压缩摘要'], ['history', '对话'], ['attachments', '附件'], ['toolResults', '工具结果']];
 
@@ -135,15 +136,16 @@ function MessageStream({ events }) {
 
 function TurnProcess({ turn }) {
   const { cur } = useWorkbench();
-  const [open, setOpen] = useState(false), [now, setNow] = useState(Date.now());
+  const [expanded, setExpanded] = useState(null), [now, setNow] = useState(Date.now());
+  const open = expanded ?? turn.active, hasReasoning = turn.process.some(e => e.type === 'reasoning');
   useEffect(() => { if (!turn.active) return; const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, [turn.active]);
   const currentTool = turn.tools.findLast(t => t.result === undefined);
   const elapsed = turn.startedAt ? elapsedLabel((turn.active ? now : turn.endedAt || turn.startedAt) - turn.startedAt) : '';
   const label = turn.status === 'waiting_approval' ? '等待批准' : turn.status === 'waiting_user' ? '等待你的回答' : turn.active ? currentTool ? toolPresentation(currentTool).title : cur.thinking ? '正在思考' : '正在回复' : turn.status === 'cancelled' ? '已停止' : turn.status === 'failed' ? '执行未完成' : turn.status === 'needs_attention' ? '需要你处理' : turn.status === 'stopped' ? '已暂停' : elapsed ? '用时 ' + elapsed : '执行过程';
   if (!turn.process.length) return turn.active || elapsed ? <div className="turn-meta" role={turn.active ? 'status' : undefined}>{turn.active && <Spinner size="1" />}<span>{label}</span></div> : null;
-  return <details className="turn-process tool-group" open={open} onToggle={e => setOpen(e.currentTarget.open)}>
-    <summary aria-label="执行过程"><span className={'tool-state ' + (turn.active ? 'run' : turn.failures ? 'err' : 'ok')}>{turn.active ? <Spinner size="1" /> : <Icon n={turn.failures ? 'info' : 'check'} size={13} />}</span><span>{label}</span>{turn.active && elapsed && <span>{elapsed}</span>}<span className="tool-count">{turn.tools.length} 项操作{turn.failures ? ` · ${turn.failures} 项失败` : ''}</span><Icon n={open ? 'chevup' : 'chevdown'} size={12} /></summary>
-    {open && <div className="turn-process-items">{turn.process.map((e, i) => e.type === 'tool' ? <ToolEvent key={e.itemId || i} e={e} /> : e.type === 'assistant' ? <div className="process-message" key={e.id || i}><Markdown text={e.content} /></div> : <Event key={e.id || i} e={e} />)}</div>}
+  return <details className="turn-process tool-group" open={open}>
+    <summary aria-label="执行过程" onClick={e => { e.preventDefault(); setExpanded(!open); }}><span className={'tool-state ' + (turn.active ? 'run' : turn.failures ? 'err' : 'ok')}>{turn.active ? <Spinner size="1" /> : <Icon n={turn.failures ? 'info' : 'check'} size={13} />}</span><span>{label}</span>{turn.active && elapsed && <span>{elapsed}</span>}<span className="tool-count">{hasReasoning ? '思考过程' : ''}{hasReasoning && turn.tools.length ? ' · ' : ''}{turn.tools.length ? `${turn.tools.length} 项操作` : ''}{turn.failures ? ` · ${turn.failures} 项失败` : ''}</span><Icon n={open ? 'chevup' : 'chevdown'} size={12} /></summary>
+    {open && <div className="turn-process-items">{turn.process.map((e, i) => e.type === 'tool' ? <ToolEvent key={e.itemId || i} e={e} /> : e.type === 'reasoning' ? <Reasoning key={e.id} event={e} /> : e.type === 'assistant' ? <div className="process-message" key={e.id || i}><Markdown text={e.content} /></div> : <Event key={e.id || i} e={e} />)}</div>}
   </details>;
 }
 

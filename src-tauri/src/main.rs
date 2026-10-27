@@ -390,7 +390,8 @@ fn main() {
             {
                 if std::env::var("JSRA_DESKTOP_SMOKE").as_deref() == Ok("1") {
                     let data = std::env::var_os("DECRYPTHUB_DATA_DIR").map(std::path::PathBuf::from).ok_or("Smoke DECRYPTHUB_DATA_DIR missing")?;
-                    b = b.visible(false).skip_taskbar(true).data_directory(data.join("native-smoke-webview"));
+                    let visible = std::env::var("JSRA_DESKTOP_SMOKE_VISIBLE").as_deref() == Ok("1");
+                    b = b.visible(visible).skip_taskbar(!visible).data_directory(data.join("native-smoke-webview"));
                 } else {
                     b = b.data_directory(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.tmp/desktop-webview"));
                 }

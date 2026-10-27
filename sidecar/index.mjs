@@ -197,7 +197,7 @@ async function startServer() {
     'subagent-start': a => S(a).subagents.spawn(a.task),
     'subagent-result': a => { const s = S(a); return s.subagents.wait(a.id, { waitMs: 0, workspaceId: s.workspace.id }); },
     'subagent-cancel': a => ({ ok: S(a).subagents.cancel(a.id) }),
-    'session-snapshot': a => { const s = S(a), ag = s.ensureAgent(); return { state: s.publicState(), events: ag.hist.events, partial: ag.partial || '', partialItem: ag.currentItem || null, context: ag.stats() }; },
+    'session-snapshot': a => { const s = S(a), ag = s.ensureAgent(); return { state: s.publicState(), events: ag.hist.events, partial: ag.partial || '', partialReasoning: ag.partialReasoning || '', partialItem: ag.currentItem || null, context: ag.stats() }; },
     'test-seed-history': a => {
       if (process.env.JSRA_TEST_FIXTURES !== '1') throw new Error('disabled');
       const ag = S(a).ensureAgent(); if (ag.running) throw new Error('busy');

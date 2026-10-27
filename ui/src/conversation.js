@@ -1,5 +1,5 @@
 // Derive the presentation from persisted events; never rewrite model history.
-export function historyEvents(history, partial = '', partialItem = null) {
+export function historyEvents(history, partial = '', partialItem = null, partialReasoning = '') {
   const events = [];
   for (let i = 0; i < (history || []).length; i++) {
     const e = history[i], meta = { id: e.id || 'history-' + i, turnId: e.turnId, at: e.at };
@@ -7,7 +7,7 @@ export function historyEvents(history, partial = '', partialItem = null) {
       if (e.displayContent === undefined && /^【(?:系统|工作区已切换)】/.test(e.content || '')) { events.push({ ...meta, type: 'note', content: e.content }); continue; }
       events.push({ ...meta, type: 'user', content: e.displayContent ?? String(e.content || '').split('\n\n【当前状态')[0].split('\n\n【附件·')[0], attachments: e.attachments || [] });
     } else if (e.t === 'assistant') {
-      events.push({ ...meta, type: 'assistant', content: e.content || '', phase: e.phase || (e.calls?.length ? 'commentary' : undefined), finished: true });
+      events.push({ ...meta, type: 'assistant', content: e.content || '', reasoning: typeof e.reasoning === 'string' ? e.reasoning : '', phase: e.phase || (e.calls?.length ? 'commentary' : undefined), finished: true });
       for (const call of e.calls || []) events.push({ type: 'tool', id: call.id, itemId: call.itemId, turnId: e.turnId, at: e.at, name: call.name, args: call.args });
     } else if (e.t === 'tool') {
       const item = [...events].reverse().find(t => t.type === 'tool' && (e.itemId ? t.itemId === e.itemId : t.id === e.id && t.result === undefined));
@@ -15,7 +15,7 @@ export function historyEvents(history, partial = '', partialItem = null) {
     } else if (e.t === 'turn-end') events.push({ ...e, type: 'turn-end' });
     else if (e.t === 'summary') events.push({ ...meta, type: 'compact', stage: 'compressed', summary: e.content, ...e.meta });
   }
-  if (partial && !events.some(e => e.id === partialItem?.id)) events.push({ ...partialItem, type: 'assistant', phase: 'streaming', content: partial });
+  if ((partial || partialReasoning) && !events.some(e => e.id === partialItem?.id)) events.push({ ...partialItem, type: 'assistant', phase: 'streaming', content: partial, reasoning: partialReasoning });
   return events;
 }
 
@@ -36,6 +36,7 @@ export function conversationTurns(events, run = null, running = false) {
     turn.process = []; turn.answers = []; turn.alerts = [];
     turn.items.forEach((e, i) => {
       if (e.type === 'assistant') {
+        if (e.reasoning) turn.process.push({ type: 'reasoning', id: 'reasoning-' + e.id, content: e.reasoning, finished: e.finished, at: e.at, turnId: e.turnId });
         const phase = e.phase || (i === lastAssistant && !turn.items.slice(i + 1).some(t => t.type === 'tool') ? 'final_answer' : 'commentary');
         if (e.content) (phase === 'commentary' ? turn.process : turn.answers).push({ ...e, phase });
       } else if (e.type === 'error') turn.alerts.push(e);
@@ -45,7 +46,7 @@ export function conversationTurns(events, run = null, running = false) {
     turn.status = run?.id === turn.id ? run.status : turn.end?.stop === 'interrupted' ? 'cancelled' : turn.end?.stop === 'error' ? 'failed' : turn.end?.stop && turn.end.stop !== 'completed' ? 'stopped' : 'completed';
     if (turn.active && !['waiting_user', 'waiting_approval'].includes(turn.status)) turn.status = 'running';
     turn.endedAt ||= run?.id === turn.id ? run.endedAt : turn.items.at(-1)?.at;
-    if (!turn.active) turn.process = turn.process.map(e => e.type === 'tool' && e.result === undefined ? { ...e, cancelled: true, result: '未收到完成结果；未自动重放此操作。' } : e);
+    if (!turn.active) turn.process = turn.process.map(e => e.type === 'reasoning' ? { ...e, finished: true } : e.type === 'tool' && e.result === undefined ? { ...e, cancelled: true, result: '未收到完成结果；未自动重放此操作。' } : e);
     turn.tools = turn.process.filter(e => e.type === 'tool');
     turn.failures = turn.tools.filter(e => e.isError).length;
   }

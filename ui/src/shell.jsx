@@ -149,7 +149,7 @@ function SessionSearch({ open, onOpenChange }) {
 }
 
 export function Shell() {
-  const { settings, view, sideOpen, firstRun } = useWorkbench();
+  const { settings, view, sideOpen, firstRun, sid, panelLayout, setPanelLayout } = useWorkbench();
   // 默认聊天优先：侧栏收起，只留一条窄边；用户展开后记住选择
   const [railOpen, setRailOpen] = useState(() => localStorage.getItem('wdh_rail') === 'open');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -164,9 +164,9 @@ export function Shell() {
       <div className="body">
         {railOpen && <Rail onSearch={() => setSearchOpen(true)} onCollapse={toggleRail} />}
         <div className="workspace">
-          {view === 'chat' ? <PanelGroup direction="horizontal" autoSaveId="wdh-workbench-layout" className="workbench-panels">
-            <Panel id="assistant" order={1} minSize={34} defaultSize={56}><main className="stage"><ChatStage railOpen={railOpen} onExpandRail={toggleRail} /></main></Panel>
-            {sideOpen && <><PanelResizeHandle className="resize-handle" title="拖动调整面板宽度" /><Panel id="tools" order={2} minSize={30} defaultSize={44}><aside className="dock" aria-label="分析工具"><Dock /></aside></Panel></>}
+          {view === 'chat' ? <PanelGroup key={sid} direction="horizontal" onLayout={sizes => setPanelLayout(sizes, sid)} className="workbench-panels">
+            <Panel id="assistant" order={1} minSize={34} defaultSize={panelLayout[0]}><main className="stage"><ChatStage railOpen={railOpen} onExpandRail={toggleRail} /></main></Panel>
+            {sideOpen && <><PanelResizeHandle className="resize-handle" title="拖动调整面板宽度" /><Panel id="tools" order={2} minSize={30} defaultSize={panelLayout[1]}><aside className="dock" aria-label="分析工具"><Dock /></aside></Panel></>}
           </PanelGroup> : <Screens />}
         </div>
       </div>
