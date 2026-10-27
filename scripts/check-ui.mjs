@@ -774,7 +774,7 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.locator('.msg.assistant').filter({ hasText: '思考展示验证完成。' }).waitFor();
   await page.locator('.turn-process > summary').click();
   await page.locator('.reasoning-body').filter({ hasText: 'UI_THINKING_FINAL' }).waitFor();
-  await page.locator('.reasoning > summary').click(); ok(!await page.locator('.reasoning-body').count(), '[' + scheme + '] 思考内容不能手动收起');
+  await page.locator('.reasoning > summary').click(); await page.locator('.reasoning-body').waitFor({ state: 'hidden' });
   await page.locator('.reasoning > summary').click(); await page.locator('.reasoning-body').waitFor();
   await page.screenshot({ path: path.join(SHOTS, scheme + '-reasoning-saved.png') });
   await page.reload(); await page.locator('.turn-process > summary').filter({ hasText: '思考过程' }).click();
