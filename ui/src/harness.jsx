@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Box, Flex, Text, Badge, Popover, Dialog, TextArea, Spinner } from '@radix-ui/themes';
 import { Button, ActionIcon, Icon, Markdown } from './kit.jsx';
 import { useWorkbench } from './bus.jsx';
+import { GoalDetails } from './goal-details.jsx';
 export function CommandMenu({ items, selected, choose, anchor, id }) {
   const [rect, setRect] = useState(null);
   useEffect(() => {
@@ -25,7 +26,7 @@ export function HarnessStatus() {
   const action = async name => { const r = await inv('goal-action', { action: name }).catch(e => ({ ok: false, error: e.message })); if (!r.ok) toast(r.error, 'warn'); };
   const labels = { active: '进行中', paused: '已暂停', complete: '已完成', needs_attention: '需要处理', running: '研究中', completed: '已完成', failed: '失败', interrupted: '已中断', cancelled: '已取消', limited: '达到上限' };
   return <>
-    {goal && <div className="harness-goal"><Icon n="target" size={16} /><div><Flex align="center" gap="2"><strong className="ellipsis" title={goal.objective}>{goal.objective}</strong><Badge size="1" color={goal.status === 'complete' ? 'green' : goal.status === 'active' ? undefined : 'gray'}>{labels[goal.status]}</Badge></Flex>{goal.summary && <small title={goal.summary}>{goal.summary}</small>}</div>
+    {goal && <div className="harness-goal"><Icon n="target" size={16} /><div><Flex align="center" gap="2"><GoalDetails goal={goal} label={labels[goal.status]} /><Badge size="1" color={goal.status === 'complete' ? 'green' : goal.status === 'active' ? undefined : 'gray'}>{labels[goal.status]}</Badge></Flex>{(goal.resumeNote || goal.summary) && <small title={goal.resumeNote || goal.summary}>{goal.resumeNote || goal.summary}</small>}</div>
       {goal.status === 'active' ? <Button size="1" variant="soft" color="gray" onClick={() => action('pause')}>暂停</Button> : goal.status !== 'complete' && <Button size="1" variant="soft" color="gray" disabled={cur.agentRunning} onClick={() => action('resume')}>继续</Button>}
       <ActionIcon icon="x" size="1" variant="soft" color="gray" onClick={() => action('clear')} title="结束并收起目标" />
     </div>}

@@ -58,13 +58,13 @@ export class History {
       const text = SUMMARY_PREFIX + stripPrefix(last.event.content);
       msgs.push({ role: 'user', content: text, _summary: last.event.meta || {} });
       // 摘要之后若紧跟用户消息，补一条确认，保持 user/assistant 交替
-      if (body[0]?.t === 'user') msgs.push({ role: 'assistant', content: '已了解之前的上下文，继续。', _ack: true });
+      if (['user', 'continuation'].includes(body[0]?.t)) msgs.push({ role: 'assistant', content: '已了解之前的上下文，继续。', _ack: true });
     }
 
     const prunable = prune ? this._prunable(body, prune.keep ?? 6, prune.minChars ?? 1200, prune.dir) : null;
     for (let i = 0; i < body.length; i++) {
       const e = body[i];
-      if (e.t === 'user') { msgs.push({ role: 'user', content: String(e.content ?? ''), ...(e.att ? { _attTok: e.att } : {}), ...(e.images?.length ? { _images: e.images } : {}) }); continue; }
+      if (e.t === 'user' || e.t === 'continuation') { msgs.push({ role: 'user', content: String(e.content ?? ''), ...(e.att ? { _attTok: e.att } : {}), ...(e.images?.length ? { _images: e.images } : {}) }); continue; }
       if (e.t === 'assistant') {
         const m = { role: 'assistant', content: String(e.content ?? '') };
         if (e.reasoning) m.reasoning_content = e.reasoning;

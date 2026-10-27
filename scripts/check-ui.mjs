@@ -56,6 +56,8 @@ async function checkWindowDragging(page, selectors, label) {
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'ui-check-'));
 const MODEL_BASE = 'http://127.0.0.1:' + PORT + '/__ui-model/v1', modelRequests = [];
 const pendingReasoning = new Map();
+const modelRetries = new Map();
+const pendingRetry = new Map(), releasedRetry = new Set();
 const PLAN_STEPS = Array.from({ length: 30 }, (_, i) => ({
   id: 'ui-plan-' + i,
   content: i === 0 ? '完整计划中的长步骤：检查代码、记录证据并核对边界，所有内容应可阅读而非截断。'.repeat(4) : i === 29 ? 'UI_PLAN_LAST_STEP：验证全部步骤并输出最终报告。' : `第 ${i + 1} 步：核对相关文件与验证结果。`,
@@ -88,6 +90,13 @@ const srv = http.createServer((req, res) => {
       modelRequests.push(input);
       if (input.messages[0]?.content?.startsWith('你是上下文检查点生成器')) { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.end('data: ' + JSON.stringify({ choices: [{ delta: { content: '已验证工作区文件、图片和工具操作。保留当前任务、代码路径与后续检查。' }, finish_reason: 'stop' }] }) + '\n\ndata: [DONE]\n\n'); return; }
       const latest = input.messages.findLast(m => m.role === 'user'), text = typeof latest?.content === 'string' ? latest.content : latest?.content.find(p => p.type === 'text')?.text || '';
+      const retryFixture = text.match(/UI_RETRY_CHECK_(dark|light)/)?.[1];
+      if (retryFixture) {
+        const count = (modelRetries.get(retryFixture) || 0) + 1; modelRetries.set(retryFixture, count);
+        if (count === 2 && !releasedRetry.has(retryFixture)) { pendingRetry.set(retryFixture, () => { res.writeHead(503, { 'Retry-After': '2' }); res.end('fixture temporarily unavailable'); }); res.once('close', () => pendingRetry.delete(retryFixture)); return; }
+        if (count <= 2) { res.writeHead(503, { 'Retry-After': '2' }); res.end('fixture temporarily unavailable'); return; }
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.end('data: ' + JSON.stringify({ choices: [{ delta: { content: '模型重试验证完成。' }, finish_reason: 'stop' }] }) + '\n\ndata: [DONE]\n\n'); return;
+      }
       const thinkingFixture = text.match(/UI_THINKING_CHECK_(dark|light)/)?.[1];
       if (thinkingFixture) {
         const write = delta => res.write('data: ' + JSON.stringify({ choices: [{ delta }] }) + '\n\n');
@@ -106,7 +115,7 @@ const srv = http.createServer((req, res) => {
         { index: 1, id: 'ui-snapshot', type: 'function', function: { name: 'browser_snapshot', arguments: '{}' } },
       ] };
       if (text.includes('你是主代理创建的研究子代理')) delta = input.messages.at(-1)?.role === 'tool' ? { content: '研究完成：工作区证据已核对。' } : { tool_calls: [{ index: 0, id: 'child-list', type: 'function', function: { name: 'workspace_list', arguments: '{}' } }] };
-      if (text.includes('验证目标机制')) delta = input.messages.at(-1)?.role === 'tool' ? { content: '目标验证完成。' } : { tool_calls: [{ index: 0, id: 'goal-done', type: 'function', function: { name: 'goal_update', arguments: JSON.stringify({ status: 'complete', summary: '目标机制验证通过。' }) } }] };
+      if (text.includes('验证目标机制')) delta = input.messages.at(-1)?.role === 'tool' ? { content: '目标验证完成。' } : { tool_calls: [{ index: 0, id: 'goal-done', type: 'function', function: { name: 'goal_update', arguments: JSON.stringify({ status: 'complete', summary: '目标机制验证通过。', criteria: [{ content: '验证目标更新和会话持久化', status: 'verified' }], evidence: ['UI_GOAL_EVIDENCE：本地模型调用 goal_update，状态已持久化。'] }) } }] };
       if (text.includes('UI_MEMORY_CHECK')) delta = input.messages.at(-1)?.role === 'tool' ? { content: '记忆保存验证完成。' } : { tool_calls: [{ index: 0, id: 'memory-write', type: 'function', function: { name: 'memory_manage', arguments: JSON.stringify({ action: 'write', name: 'ui-memory', scope: 'session', content: 'UI_MEMORY_SAVED: verified fixture fact' }) } }] };
       if (text.includes('UI_SKILL_CHECK')) delta = input.messages.at(-1)?.role === 'tool' ? { content: '技能保存验证完成。' } : { tool_calls: [{ index: 0, id: 'skill-write', type: 'function', function: { name: 'skill_manage', arguments: JSON.stringify({ action: 'write', name: 'ui-workflow', scope: 'session', content: '---\nname: ui-workflow\ndescription: Verify project evidence\n---\n\nRead sources, verify claims, record results.' }) } }] };
       const lastUser = input.messages.findLast(m => m.role === 'user')?.content;
@@ -595,6 +604,13 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.locator('.harness-goal').filter({ hasText: '已完成' }).waitFor();
   await page.locator('.msg.assistant').filter({ hasText: '目标验证完成。' }).waitFor();
   await page.screenshot({ path: path.join(SHOTS, scheme + '-harness-goal.png') });
+  await page.getByRole('button', { name: '查看目标进展', exact: true }).click();
+  await page.locator('.goal-details').waitFor();
+  await page.locator('.goal-details').evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished.catch(() => {}))));
+  await page.locator('.goal-details').getByText('UI_GOAL_EVIDENCE：本地模型调用 goal_update，状态已持久化。', { exact: true }).waitFor();
+  ok(await page.locator('.goal-criteria').getByText('已验证', { exact: true }).count() === 1, '[' + scheme + '] 目标完成条件未展示验证状态');
+  await page.screenshot({ path: path.join(SHOTS, scheme + '-goal-details.png') });
+  await page.keyboard.press('Escape');
   await page.reload(); await page.locator('.harness-goal').filter({ hasText: '目标机制验证通过。' }).waitFor();
   await page.getByRole('button', { name: '结束并收起目标', exact: true }).click();
   await page.locator('.harness-goal').waitFor({ state: 'detached' });
@@ -779,6 +795,16 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.screenshot({ path: path.join(SHOTS, scheme + '-reasoning-saved.png') });
   await page.reload(); await page.locator('.turn-process > summary').filter({ hasText: '思考过程' }).click();
   await page.locator('.reasoning-body').filter({ hasText: 'UI_THINKING_FINAL' }).waitFor();
+  const retryChat = await rpc('session-create', { title: '模型恢复验证', managed: true }); await rpc('session-focus', { sessionId: retryChat.id });
+  await page.getByRole('textbox', { name: '任务指令' }).fill('UI_RETRY_CHECK_' + scheme);
+  await page.getByRole('button', { name: '发送（Enter）', exact: true }).click();
+  await page.getByText(/模型连接重试 1\/10/).waitFor();
+  await page.screenshot({ path: path.join(SHOTS, scheme + '-model-retry.png') });
+  await page.reload(); await page.getByText(/模型连接重试 [12]\/10/).waitFor();
+  releasedRetry.add(scheme); pendingRetry.get(scheme)?.();
+  await page.locator('.msg.assistant').filter({ hasText: '模型重试验证完成。' }).waitFor();
+  ok(modelRetries.get(scheme) === 3, '[' + scheme + '] 模型恢复请求次数错误');
+  ok(await page.getByText(/模型连接重试 [12]\/10/).count() === 0, '[' + scheme + '] 模型恢复后仍残留重试状态');
   ok(errs.length === 0, '[' + scheme + '] 遍历后报错: ' + (errs[0] || ''));
   await ctx.close();
 } } catch (error) {
@@ -791,7 +817,7 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   }
   throw error;
 } finally {
-  await browser.close(); srv.close(); sidecar.kill();
+  await browser.close(); srv.closeAllConnections(); srv.close(); sidecar.kill();
 }
 
 if (fails.length) {

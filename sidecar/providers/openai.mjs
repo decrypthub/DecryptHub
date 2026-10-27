@@ -1,6 +1,6 @@
 // OpenAI 兼容适配器：流式 + 工具调用 + reasoning_content 兼容。
 // 返回统一形状 { content, reasoning, toolCalls, usage, finishReason }。
-import { post, sleep, retryable, sseData } from './http.mjs';
+import { post, sseData, modelStreamError } from './http.mjs';
 
 export function toOpenAITools(tools) {
   return tools.map(t => ({ type: 'function', function: { name: t.name, description: (t.description || '').slice(0, 1024), parameters: t.schema || t.inputSchema || { type: 'object', properties: {} } } }));
@@ -24,19 +24,20 @@ export async function completeOpenAI(cfg, messages, tools, { onDelta, onReasonin
     if (cfg.requestPurpose === 'session-title' && /deepseek[-_/](?:v4|flash)/i.test(cfg.model || '')) body.thinking = { type: 'disabled' };
     if (useStreamOpts) body.stream_options = { include_usage: true };
     if (tools.length) { body.tools = toOpenAITools(tools); body.tool_choice = 'auto'; }
-    let content = '', reasoning = '', usage = null, finishReason = null, emitted = false; const calls = {};
+    let content = '', reasoning = '', usage = null, finishReason = null, completed = false; const calls = {};
     try {
       await post(cfg.baseUrl.replace(/\/$/, '') + '/chat/completions', headers, body, line => {
+        if (/^data:\s*\[DONE\]\s*$/.test(line)) completed = true;
         const data = sseData(line); if (!data) return;
         let j; try { j = JSON.parse(data); } catch { return; }
-        if (j.error) { const e = new Error('模型返回错误: ' + (j.error.message || JSON.stringify(j.error)).slice(0, 300)); e.retryable = true; throw e; }
+        if (j.error) throw modelStreamError(j.error);
         if (j.usage) usage = j.usage;
         const ch = j.choices?.[0]; if (!ch) return;
         if (ch.finish_reason) finishReason = ch.finish_reason;
         const d = ch.delta; if (!d) return;
         const rc = d.reasoning_content ?? d.reasoning;
-        if (typeof rc === 'string' && rc) { emitted = true; reasoning += rc; onReasoning && onReasoning(rc); }
-        if (d.content) { content += d.content; emitted = true; onDelta && onDelta(d.content); }
+        if (typeof rc === 'string' && rc) { reasoning += rc; onReasoning && onReasoning(rc); }
+        if (d.content) { content += d.content; onDelta && onDelta(d.content); }
         for (const tc of d.tool_calls || []) {
           const idx = tc.index ?? 0;
           calls[idx] = calls[idx] || { id: tc.id, name: '', args: '' };
@@ -49,10 +50,13 @@ export async function completeOpenAI(cfg, messages, tools, { onDelta, onReasonin
       const msg = String(e.message || e);
       if (e.status === 400 && !stripReasoning && /reasoning/i.test(msg)) { stripReasoning = true; continue; }
       if (e.status === 400 && useStreamOpts && /stream_options/i.test(msg)) { useStreamOpts = false; continue; }
-      if (!emitted && attempt < 2 && retryable(e)) { await sleep((cfg.retryBaseMs ?? 2000) * (attempt + 1)); continue; }
       throw e;
     }
     const toolCalls = normalizeCalls(calls);
+    if ((!finishReason && !completed) || (!content && !toolCalls.length)) {
+      const terminal = ['length', 'content_filter', 'refusal'].includes(finishReason);
+      throw Object.assign(new Error(terminal ? `模型未输出答案（${finishReason}），请检查输出长度或服务限制` : '模型响应流未完整结束或返回空响应'), { code: 'EMPTY_COMPLETION', retryable: !terminal });
+    }
     return { content, reasoning, toolCalls, usage, finishReason };
   }
 }

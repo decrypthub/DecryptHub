@@ -1,7 +1,7 @@
 // Anthropic 适配器：流式 + tool_use + extended thinking。
 // usage / finishReason 归一化成 OpenAI 形状（prompt_tokens / completion_tokens / cached_tokens），
 // 这样 agent 的用量统计、上下文校准和压缩阈值对两个 provider 走同一条路径。
-import { post, sleep, retryable, sseData } from './http.mjs';
+import { post, sseData, modelStreamError } from './http.mjs';
 
 function toAnthropicTools(tools) {
   return tools.map(t => ({ name: t.name, description: (t.description || '').slice(0, 1024), input_schema: t.schema || t.inputSchema || { type: 'object', properties: {} } }));
@@ -50,14 +50,15 @@ export async function completeAnthropic(cfg, messages, tools, { onDelta, onReaso
   if (tools.length) body.tools = toAnthropicTools(tools);
 
   for (let attempt = 0; ; attempt++) {
-    let content = '', reasoning = '', emitted = false;
+    let content = '', reasoning = '', completed = false;
     let inputTokens = 0, outputTokens = 0, cachedTokens = 0, finishReason = null;
     const calls = new Map();
     try {
       await post(cfg.baseUrl.replace(/\/$/, '') + '/v1/messages', headers, body, line => {
         const data = sseData(line); if (!data) return;
         let j; try { j = JSON.parse(data); } catch { return; }
-        if (j.type === 'error') { const e = new Error('模型返回错误: ' + (j.error?.message || JSON.stringify(j.error)).slice(0, 300)); e.retryable = true; throw e; }
+        if (j.type === 'message_stop') completed = true;
+        if (j.type === 'error') throw modelStreamError(j.error);
         if (j.type === 'message_start') {
           inputTokens = j.message?.usage?.input_tokens || 0;
           cachedTokens = j.message?.usage?.cache_read_input_tokens || 0;
@@ -67,8 +68,8 @@ export async function completeAnthropic(cfg, messages, tools, { onDelta, onReaso
         }
         if (j.type === 'content_block_delta') {
           const d = j.delta || {};
-          if (d.type === 'text_delta') { content += d.text || ''; if (d.text) emitted = true; onDelta && onDelta(d.text || ''); }
-          else if (d.type === 'thinking_delta' && typeof d.thinking === 'string') { if (d.thinking) emitted = true; reasoning += d.thinking; onReasoning && onReasoning(d.thinking); }
+          if (d.type === 'text_delta') { content += d.text || ''; onDelta && onDelta(d.text || ''); }
+          else if (d.type === 'thinking_delta' && typeof d.thinking === 'string') { reasoning += d.thinking; onReasoning && onReasoning(d.thinking); }
           else if (d.type === 'input_json_delta' && calls.has(j.index)) { calls.get(j.index).args += d.partial_json || ''; }
         }
         if (j.type === 'message_delta') {
@@ -77,7 +78,6 @@ export async function completeAnthropic(cfg, messages, tools, { onDelta, onReaso
         }
       }, signal, cfg.idleTimeoutMs || 180000);
     } catch (e) {
-      if (!emitted && attempt < 2 && retryable(e)) { await sleep((cfg.retryBaseMs ?? 2000) * (attempt + 1)); continue; }
       throw e;
     }
     const toolCalls = [...calls.values()].filter(c => c.name).map(c => {
@@ -86,6 +86,10 @@ export async function completeAnthropic(cfg, messages, tools, { onDelta, onReaso
       try { return { id: c.id, name: c.name, args: JSON.parse(raw), rawArgs: raw }; }
       catch { return { id: c.id, name: c.name, args: {}, rawArgs: raw, argError: '工具参数不是合法 JSON：' + raw.slice(0, 200) }; }
     });
+    if ((!finishReason && !completed) || (!content && !toolCalls.length)) {
+      const terminal = ['max_tokens', 'refusal'].includes(finishReason);
+      throw Object.assign(new Error(terminal ? `模型未输出答案（${finishReason}），请检查输出长度或服务限制` : '模型响应流未完整结束或返回空响应'), { code: 'EMPTY_COMPLETION', retryable: !terminal });
+    }
     return {
       content, reasoning, toolCalls,
       usage: inputTokens || outputTokens ? { prompt_tokens: inputTokens, completion_tokens: outputTokens, prompt_tokens_details: cachedTokens ? { cached_tokens: cachedTokens } : undefined } : null,

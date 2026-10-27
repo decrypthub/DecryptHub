@@ -118,7 +118,7 @@ test('anthropic: 500 后重试成功；400 立即失败', async () => {
   let n = 0;
   const srv = await serve((req, body, res) => {
     if (n++ === 0) { res.writeHead(500); res.end('boom'); return; }
-    sse(res, [{ type: 'message_start', message: { usage: { input_tokens: 10 } } }, { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'ok' } }]);
+    sse(res, [{ type: 'message_start', message: { usage: { input_tokens: 10 } } }, { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'ok' } }, { type: 'message_delta', delta: { stop_reason: 'end_turn' } }]);
   });
   try {
     const p = resolveProvider(anthropicCfg(srv.url));

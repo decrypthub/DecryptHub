@@ -34,7 +34,7 @@ test('goal continues only within its bound, persists as paused, and requires exp
   assert.equal((await s.startGoal('验证长期目标')).ok, true); s.goal.maxTurns = 2;
   await until(() => s.goal.status === 'paused' && !s.agent.running);
   assert.equal(s.goal.turns, 2); assert.equal(manager(dir).get('main').goal.status, 'paused');
-  const complete = s.ensureAgent(); let calls = 0; complete.chat = async () => ++calls === 1 ? { content: '', toolCalls: [{ id: 'complete', name: 'goal_update', args: { status: 'complete', summary: '测试已验证，目标完成。' } }] } : result('目标完成。');
+  const complete = s.ensureAgent(); let calls = 0; complete.chat = async () => ++calls === 1 ? { content: '', toolCalls: [{ id: 'complete', name: 'goal_update', args: { status: 'complete', summary: '测试已验证，目标完成。', criteria: [{ content: '验证目标生命周期', status: 'verified' }], evidence: ['本地 fixture 生命周期断言通过'] } }] } : result('目标完成。');
   assert.equal((await s.goalAction('resume')).ok, true); await until(() => s.goal.status === 'complete' && !s.agent.running);
   assert.equal(s.goal.summary, '测试已验证，目标完成。'); assert.equal(s.goal.turns, 1);
   await s.goalAction('clear'); assert.equal(s.goal, null);
@@ -54,7 +54,7 @@ test('goal token budget pauses continuation without claiming completion', async 
 test('user steering between automatic turns remains part of the active goal', async t => {
   const dir = root(t), mgr = manager(dir), s = mgr.get('main'); t.after(() => mgr.closeAll());
   s.ensureAgent().chat = async () => result('先记录已有进展。'); await s.startGoal('等待补充要求'); await s.completion;
-  let calls = 0; s.agent.chat = async () => ++calls === 1 ? { content: '', toolCalls: [{ id: 'done', name: 'goal_update', args: { status: 'complete', summary: '已结合用户补充验证完成。' } }] } : result('目标完成。');
+  let calls = 0; s.agent.chat = async () => ++calls === 1 ? { content: '', toolCalls: [{ id: 'done', name: 'goal_update', args: { status: 'complete', summary: '已结合用户补充验证完成。', criteria: [{ content: '验证用户补充已进入当前目标', status: 'verified' }], evidence: ['用户补充消息和当前目标在同一会话'] } }] } : result('目标完成。');
   assert.equal(s.send({ text: '补充要求：先核对验证证据' }).ok, true); await s.completion;
   assert.equal(s.goal.status, 'complete'); assert.equal(s.goal.turns, 2);
 });
