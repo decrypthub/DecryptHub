@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Box, Flex, Text, Badge, Card, Callout, Spinner, TextArea, Separator, Popover } from '@radix-ui/themes';
 import { useWorkbench } from './bus.jsx';
 import { Button, ActionIcon, Icon, Markdown, Dropdown } from './kit.jsx';
-import { fmtK, hostOf, sessionLabel, FALLBACK_TODOS } from './state.js';
+import { fmtK, hostOf, sessionLabel } from './state.js';
 import { native } from './transport.js';
 import { WorkspaceBar, PermissionPicker, PendingActions } from './workspace.jsx';
 import { AttachmentTiles } from './attachments.jsx';
@@ -11,6 +11,7 @@ import { conversationTurns, toolPresentation, elapsedLabel } from './conversatio
 import { commandMatches } from './commands.js';
 import { CommandMenu, HarnessStatus, CommandFeedback, CommandDialogs } from './harness.jsx';
 import { handleWindowDrag } from './window-drag.js';
+import { TodoStrip } from './plan.jsx';
 
 const CTX_PARTS = [['system', '系统提示'], ['tools', '工具定义'], ['summary', '压缩摘要'], ['history', '对话'], ['attachments', '附件'], ['toolResults', '工具结果']];
 
@@ -61,7 +62,7 @@ export function ChatStage({ railOpen, onExpandRail }) {
     {cur.run?.status === 'interrupted' && <div className="banner amber"><Icon n="info" /><Text size="1">上次任务已中断。已有改动已保留，可以检查后继续。</Text></div>}
     {cur.run?.status === 'needs_attention' && <div className="banner amber"><Icon n="info" /><Text size="1">自动化需要权限或补充信息，请在此对话中继续处理。</Text></div>}
 
-    {cur.events.length > 0 && <TodoStrip />}
+    <TodoStrip key={w.sid} />
 
     <div className="msgs" ref={refs.chatRef}>
       {cur.events.length === 0
@@ -112,22 +113,6 @@ export function ChatStage({ railOpen, onExpandRail }) {
         </div>
       </Card>
     </div>
-  </div>;
-}
-
-function TodoStrip() {
-  const { cur } = useWorkbench();
-  const list = cur.todos || [];
-  // The engine supplies an untouched template even before an analysis has a plan.
-  const untouched = list.length === FALLBACK_TODOS.length && list.every((t, i) => t.id === FALLBACK_TODOS[i].id && t.content === FALLBACK_TODOS[i].content && t.status === 'pending');
-  if (!list.length || untouched) return null;
-  const done = list.filter(t => t.status === 'completed').length;
-  const active = list.find(t => t.status === 'in_progress');
-  return <div className="todo-strip">
-    <Icon n="check" size={12} />
-    <Text size="1" weight="medium">{active ? active.content : done === list.length ? '全部完成' : '任务计划'}</Text>
-    <div className="todo-bar"><i style={{ width: (done / list.length * 100) + '%' }} /></div>
-    <Text size="1" color="gray">{done}/{list.length}</Text>
   </div>;
 }
 
