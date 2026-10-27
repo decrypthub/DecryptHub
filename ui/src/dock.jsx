@@ -8,6 +8,7 @@ import { parseBody } from '../../sidecar/sig.mjs';
 import { native } from './transport.js';
 import { WorkspaceFiles } from './files.jsx';
 import { handleWindowDrag } from './window-drag.js';
+import { BrowserPanel } from './browser-panel.jsx';
 
 const TABS = [['browser', '浏览器', 'globe'], ['evidence', '网络请求', 'network'], ['code', '工作区文件', 'folder']];
 
@@ -26,48 +27,6 @@ export function Dock() {
       {side === 'code' && <WorkspaceFiles />}
     </Tabs.Content>
   </Tabs.Root>;
-}
-
-// ---------------- 浏览器 ----------------
-function BrowserPanel() {
-  const { cur, inv, go, dispatch, sid, launching, conn, cleanRetry, refs, sendInput, embedOn, embedCovered, setView, toast } = useWorkbench();
-  const [component, setComponent] = useState(null);
-  useEffect(() => { let live = true; window.api.invoke('component-info').then(value => { if (live) setComponent(value); }).catch(() => {}); return () => { live = false; }; }, []);
-  const running = cur.status.running;
-  if (component && (!component.installed || !component.enabled)) return <EmptyState icon="globe" title={component.installed ? "启用 WebDecryptHub" : "安装 WebDecryptHub"} description="添加浏览器组件后，即可浏览网页、抓取请求和调试网站。"><Button variant="soft" onClick={() => setView('plugins')}>管理插件</Button></EmptyState>;
-  return <>
-    <div className="bar browser-bar">
-      <ActionIcon icon="back" variant="soft" color="gray" disabled={!running} onClick={() => inv('go-back')} title="后退" />
-      <ActionIcon icon="reload" variant="soft" color="gray" disabled={!running} onClick={() => inv('reload')} title="刷新" />
-      <Box flexGrow="1" style={{ minWidth: 0 }}>
-        <TextField.Root ref={refs.urlRef} size="2" value={cur.url} aria-label="目标网址"
-          onChange={e => dispatch({ t: 'patch', sid, patch: { url: e.target.value } })}
-          onKeyDown={e => e.key === 'Enter' && go()} onFocus={e => e.target.select()}
-          placeholder="输入目标网址（Ctrl+L）" spellCheck={false}><TextField.Slot><Icon n="globe" size={13} /></TextField.Slot></TextField.Root>
-      </Box>
-      <Button size="2" className="browser-launch" onClick={() => go()} disabled={launching[sid] || cur.navigating || conn !== 'connected'} loading={launching[sid] || cur.navigating}><Icon n="go" />{running ? '前往' : '打开'}</Button>
-      {running && <ActionIcon icon="stop" variant="soft" color="gray" onClick={() => inv('browser-close')} title="关闭此会话的浏览器" />}
-      <ActionIcon icon="broom" variant="soft" color="gray" disabled={!running} onClick={cleanRetry} title="清除站点数据并刷新（Shift：新浏览器配置）" />
-    </div>
-    {cur.status.pages.length > 1 && <div className="bar">
-      {cur.status.pages.map(p => <Button key={p.index} size="2" variant={p.active ? 'soft' : 'ghost'} color="gray" onClick={() => inv('select-page', { index: p.index })} title={p.url}>{hostOf(p.url) || '空白页'}</Button>)}
-    </div>}
-    {cur.browserError && <div className="browser-error" role="alert"><Icon n="info" size={16} /><span style={{ flex: 1 }}>{cur.browserError}</span><Button size="1" variant="soft" color="red" onClick={() => setView('settings')}>设置</Button></div>}
-    {cur.browserActivity?.active && <div className="browser-control-status" role="status"><span className="ai-control-dot" />AI 正在操控浏览器 </div>}
-    {running && cur.debuggerPaused && <div className="browser-control-status"><Icon n="target" size={14} /><Text size="1">已暂停于断点</Text><Box flexGrow="1" /><Button size="1" variant="soft" color="gray" onClick={() => inv('debug-resume').then(r => !r.ok && toast(r.error, 'err')).catch(e => toast(e.message, 'err'))}>恢复网页执行</Button></div>}
-    <div className={'screen' + (cur.browserActivity?.active ? ' ai-controlled' : '')} ref={refs.viewRef} aria-label={cur.browserActivity?.active ? 'AI 正在操控的浏览器画面' : '浏览器画面'}>
-      {embedOn
-        ? <div className="screen-note"><Text size="1" color="gray">{embedCovered ? '画面已暂时隐藏（关闭浮层后恢复）' : '原生窗口已嵌入'}</Text></div>
-        : running
-        ? <canvas ref={refs.canvasRef} className="screen-canvas" tabIndex={0}
-            onMouseDown={e => { e.currentTarget.focus(); sendInput(e, 'mouse', { type: 'mousePressed', clickCount: e.detail || 1 }); }}
-            onMouseUp={e => sendInput(e, 'mouse', { type: 'mouseReleased', clickCount: e.detail || 1 })}
-            onMouseMove={e => sendInput(e, 'mouse', { type: 'mouseMoved' })}
-            onWheel={e => sendInput(e, 'wheel', { dx: e.deltaX, dy: e.deltaY })}
-            onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && ['l', 't', ','].includes(e.key.toLowerCase())) return; e.preventDefault(); window.api.sendInput({ kind: 'key', type: 'keyDown', key: e.key, code: e.code, text: e.key.length === 1 ? e.key : undefined }); }} />
-        : <div className="browser-welcome"><span className="browser-empty-icon"><Icon n="globe" size={28} /></span><h2>打开目标网站</h2><Button size="2" variant="soft" color="gray" onClick={() => { refs.urlRef.current?.focus(); refs.urlRef.current?.select(); }}>输入网址<Icon n="go" size={16} /></Button></div>}
-    </div>
-  </>;
 }
 
 // ---------------- 请求 ----------------

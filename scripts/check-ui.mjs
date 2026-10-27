@@ -55,6 +55,7 @@ async function checkWindowDragging(page, selectors, label) {
 
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'ui-check-'));
 const MODEL_BASE = 'http://127.0.0.1:' + PORT + '/__ui-model/v1', modelRequests = [];
+const pendingReasoning = new Map();
 const PLAN_STEPS = Array.from({ length: 30 }, (_, i) => ({
   id: 'ui-plan-' + i,
   content: i === 0 ? '完整计划中的长步骤：检查代码、记录证据并核对边界，所有内容应可阅读而非截断。'.repeat(4) : i === 29 ? 'UI_PLAN_LAST_STEP：验证全部步骤并输出最终报告。' : `第 ${i + 1} 步：核对相关文件与验证结果。`,
@@ -87,6 +88,14 @@ const srv = http.createServer((req, res) => {
       modelRequests.push(input);
       if (input.messages[0]?.content?.startsWith('你是上下文检查点生成器')) { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.end('data: ' + JSON.stringify({ choices: [{ delta: { content: '已验证工作区文件、图片和工具操作。保留当前任务、代码路径与后续检查。' }, finish_reason: 'stop' }] }) + '\n\ndata: [DONE]\n\n'); return; }
       const latest = input.messages.findLast(m => m.role === 'user'), text = typeof latest?.content === 'string' ? latest.content : latest?.content.find(p => p.type === 'text')?.text || '';
+      const thinkingFixture = text.match(/UI_THINKING_CHECK_(dark|light)/)?.[1];
+      if (thinkingFixture) {
+        const write = delta => res.write('data: ' + JSON.stringify({ choices: [{ delta }] }) + '\n\n');
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        write({ reasoning_content: 'UI_THINKING_LIVE：先读取证据，再验证结论。\n\n<script>window.__thinkingScriptExecuted=true</script>' });
+        pendingReasoning.set(thinkingFixture, () => { write({ reasoning_content: '\n\nUI_THINKING_FINAL：证据已核对。' }); write({ content: '思考展示验证完成。' }); res.end('data: [DONE]\n\n'); });
+        res.once('close', () => pendingReasoning.delete(thinkingFixture)); return;
+      }
       const fileTask = text.includes('创建一个测试文件');
       let delta = fileTask && input.messages.at(-1)?.role !== 'tool' ? { tool_calls: [
         { index: 0, id: 'ui-write', type: 'function', function: { name: 'workspace_write', arguments: JSON.stringify({ path: 'ui-example.txt', content: 'UI change verified' }) } },
@@ -499,16 +508,27 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   // Only use a local page. Browser launch, streaming, capture and detail are real.
   await page.getByRole('textbox', { name: '目标网址' }).fill('http://127.0.0.1:' + PORT + '/__ui-fixture');
   await page.getByRole('textbox', { name: '目标网址' }).press('Enter');
-  await page.locator('.screen-canvas').waitFor({ state: 'visible', timeout: 25000 });
+  // Windows integrity preparation (45s) precedes Chromium's own 30s launch budget.
+  await page.locator('.screen-canvas').waitFor({ state: 'visible', timeout: 90000 });
   await page.getByRole('button', { name: '前往', exact: true }).waitFor({ state: 'visible' });
   await page.getByRole('textbox', { name: '任务指令' }).fill('打开测试浏览器');
   await page.getByRole('button', { name: '发送（Enter）', exact: true }).click();
   await page.locator('.screen.ai-controlled').waitFor({ state: 'visible' });
+  await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('.screen'), '::before').opacity) > .7);
+  ok(await page.getByText('AI 正在操控浏览器', { exact: true }).count() === 0, '[' + scheme + '] 不应显示额外的浏览器操控提示');
+  ok(await page.locator('.screen').evaluate(el => getComputedStyle(el, '::before').filter.includes('blur') && getComputedStyle(el, '::after').filter.includes('blur')), '[' + scheme + '] 浏览器应该使用柔和光晕而非硬边框');
+  const activeViewport = await page.locator('.browser-viewport').boundingBox();
   await page.screenshot({ path: path.join(SHOTS, scheme + '-browser-ai-control.png') });
   await page.locator('.msg.assistant').filter({ hasText: '浏览器操控完成。' }).waitFor();
   await page.locator('.screen.ai-controlled').waitFor({ state: 'detached' });
+  const idleViewport = await page.locator('.browser-viewport').boundingBox();
+  ok(Math.abs(activeViewport.width - idleViewport.width) < 1 && Math.abs(activeViewport.height - idleViewport.height) < 1, '[' + scheme + '] 光晕改变了网页视口尺寸');
   await page.waitForFunction(() => { const c = document.querySelector('.screen-canvas'); return c?.width > 50 && c.getContext('2d').getImageData(0, 0, 1, 1).data[3] > 0; });
   await page.screenshot({ path: path.join(SHOTS, scheme + '-browser-loaded.png') });
+  await page.getByRole('button', { name: '浏览器菜单', exact: true }).click();
+  for (const name of ['清除当前站点数据并刷新…', '使用全新浏览器配置重启…', '关闭浏览器（保留会话）']) ok(await page.getByRole('menuitem', { name, exact: true }).count() === 1, '[' + scheme + '] 浏览器操作缺少明确名称：' + name);
+  await page.screenshot({ path: path.join(SHOTS, scheme + '-browser-menu.png') });
+  await page.keyboard.press('Escape');
   await page.getByRole('button', { name: '上下文用量', exact: true }).click();
   ok(await page.getByRole('slider').count() === 0, '[' + scheme + '] 不应再显示调整上下文窗口的滑块');
   await page.keyboard.press('Escape');
@@ -544,7 +564,8 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   ok((await page.locator('.detail-body').innerText()).includes('UI capture verified'), '[' + scheme + '] 请求响应没有正确显示');
   await page.screenshot({ path: path.join(SHOTS, scheme + '-network.png') });
   await page.keyboard.press('Control+Alt+2');
-  await page.locator('button[aria-label="关闭此会话的浏览器"]').click();
+  await page.getByRole('button', { name: '浏览器菜单', exact: true }).click();
+  await page.getByRole('menuitem', { name: '关闭浏览器（保留会话）', exact: true }).click();
 
   await page.locator('.rail .new-session').click();
   await page.locator('.welcome').waitFor();
@@ -714,11 +735,57 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
     await page.screenshot({ path: path.join(SHOTS, scheme + '-plan-' + viewport.width + '.png') });
     await planPanel.getByRole('button', { name: '关闭计划', exact: true }).click(); await planPanel.waitFor({ state: 'detached' });
   }
+  // Tool panels, selected tabs and widths belong to their owning conversation.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const viewA = await rpc('session-create', { title: 'UI 独立布局 A', managed: true }), viewB = await rpc('session-create', { title: 'UI 独立布局 B', managed: true });
+  await rpc('session-focus', { sessionId: viewA.id });
+  await page.getByRole('button', { name: '展开工具面板', exact: true }).click();
+  await page.getByRole('tab', { name: '工作区文件', exact: true }).click();
+  await page.getByRole('button', { name: '收起工具面板', exact: true }).click();
+  await rpc('session-focus', { sessionId: viewB.id });
+  await page.getByRole('button', { name: '展开工具面板', exact: true }).click();
+  await page.getByRole('tab', { name: '浏览器', exact: true }).click();
+  const resizeBar = await page.locator('.resize-handle').boundingBox();
+  await page.mouse.move(resizeBar.x + resizeBar.width / 2, resizeBar.y + 120); await page.mouse.down(); await page.mouse.move(resizeBar.x + 100, resizeBar.y + 120); await page.mouse.up();
+  const viewBWidth = (await page.locator('.dock').boundingBox()).width;
+  await rpc('session-focus', { sessionId: viewA.id });
+  await page.getByRole('button', { name: '展开工具面板', exact: true }).waitFor();
+  ok(await page.locator('.dock').count() === 0, '[' + scheme + '] B 的展开状态泄漏到 A');
+  await page.reload(); await page.getByRole('button', { name: '展开工具面板', exact: true }).waitFor();
+  await page.getByRole('button', { name: '展开工具面板', exact: true }).click();
+  ok(await page.getByRole('tab', { name: '工作区文件', exact: true }).getAttribute('aria-selected') === 'true', '[' + scheme + '] A 丢失了独立工具页签');
+  await page.getByRole('button', { name: '收起工具面板', exact: true }).click();
+  await rpc('session-focus', { sessionId: viewB.id }); await page.locator('.browser-bar').waitFor();
+  const restoredViewBWidth = (await page.locator('.dock').boundingBox()).width;
+  ok(Math.abs(restoredViewBWidth - viewBWidth) < 2, '[' + scheme + '] B 丢失了独立面板宽度：' + viewBWidth + ' → ' + restoredViewBWidth);
+  await rpc('session-focus', { sessionId: viewA.id });
+  await page.getByRole('textbox', { name: '任务指令' }).fill('UI_THINKING_CHECK_' + scheme);
+  await page.getByRole('button', { name: '发送（Enter）', exact: true }).click();
+  await page.locator('.reasoning-body').filter({ hasText: 'UI_THINKING_LIVE' }).waitFor();
+  ok(await page.locator('.reasoning-body script').count() === 0 && !await page.evaluate(() => window.__thinkingScriptExecuted), '[' + scheme + '] 思考内容被当作脚本执行');
+  const thoughtSnapshot = await rpc('session-snapshot', { sessionId: viewA.id });
+  ok(thoughtSnapshot.partialReasoning.includes('UI_THINKING_LIVE') && !thoughtSnapshot.partial, '[' + scheme + '] 思考流没有独立保存');
+  await page.screenshot({ path: path.join(SHOTS, scheme + '-reasoning-live.png') });
+  await page.reload(); await page.locator('.reasoning-body').filter({ hasText: 'UI_THINKING_LIVE' }).waitFor();
+  await rpc('session-focus', { sessionId: viewB.id }); await page.locator('.browser-bar').waitFor();
+  ok(await page.locator('.reasoning-body').count() === 0, '[' + scheme + '] 思考内容泄漏到另一会话');
+  await rpc('session-focus', { sessionId: viewA.id }); await page.locator('.reasoning-body').waitFor();
+  pendingReasoning.get(scheme)();
+  await page.locator('.msg.assistant').filter({ hasText: '思考展示验证完成。' }).waitFor();
+  await page.locator('.turn-process > summary').click();
+  await page.locator('.reasoning-body').filter({ hasText: 'UI_THINKING_FINAL' }).waitFor();
+  await page.locator('.reasoning > summary').click(); await page.locator('.reasoning-body').waitFor({ state: 'hidden' });
+  await page.locator('.reasoning > summary').click(); await page.locator('.reasoning-body').waitFor();
+  await page.screenshot({ path: path.join(SHOTS, scheme + '-reasoning-saved.png') });
+  await page.reload(); await page.locator('.turn-process > summary').filter({ hasText: '思考过程' }).click();
+  await page.locator('.reasoning-body').filter({ hasText: 'UI_THINKING_FINAL' }).waitFor();
   ok(errs.length === 0, '[' + scheme + '] 遍历后报错: ' + (errs[0] || ''));
   await ctx.close();
 } } catch (error) {
   if (activePage && !activePage.isClosed()) {
     await activePage.screenshot({ path: path.join(SHOTS, 'failure.png') }).catch(() => {});
+    const browserErrors = await activePage.locator('.browser-error').allTextContents().catch(() => []);
+    if (browserErrors.length) console.error('Browser UI diagnostics: ' + browserErrors.join(' | '));
     const metrics = await activePage.locator('.project-picker-panel').evaluateAll(nodes => nodes.map(node => ({ rect: node.getBoundingClientRect().toJSON(), side: node.getAttribute('data-side'), animations: node.getAnimations().map(a => ({ state: a.playState, time: a.currentTime })) }))).catch(() => []);
     if (metrics.length) console.error('Project popup diagnostics: ' + JSON.stringify(metrics));
   }

@@ -35,7 +35,7 @@ export async function completeOpenAI(cfg, messages, tools, { onDelta, onReasonin
         if (ch.finish_reason) finishReason = ch.finish_reason;
         const d = ch.delta; if (!d) return;
         const rc = d.reasoning_content ?? d.reasoning;
-        if (rc) { reasoning += rc; onReasoning && onReasoning(rc); }
+        if (typeof rc === 'string' && rc) { emitted = true; reasoning += rc; onReasoning && onReasoning(rc); }
         if (d.content) { content += d.content; emitted = true; onDelta && onDelta(d.content); }
         for (const tc of d.tool_calls || []) {
           const idx = tc.index ?? 0;
