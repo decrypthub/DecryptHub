@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import WebSocket from 'ws';
+import { DEFAULT_TODOS } from '../sidecar/todos.mjs';
 import { folderProof } from '../sidecar/grants.mjs';
 
 const ROOT = process.cwd();
@@ -54,6 +55,11 @@ async function checkWindowDragging(page, selectors, label) {
 
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'ui-check-'));
 const MODEL_BASE = 'http://127.0.0.1:' + PORT + '/__ui-model/v1', modelRequests = [];
+const PLAN_STEPS = Array.from({ length: 30 }, (_, i) => ({
+  id: 'ui-plan-' + i,
+  content: i === 0 ? '完整计划中的长步骤：检查代码、记录证据并核对边界，所有内容应可阅读而非截断。'.repeat(4) : i === 29 ? 'UI_PLAN_LAST_STEP：验证全部步骤并输出最终报告。' : `第 ${i + 1} 步：核对相关文件与验证结果。`,
+  status: i < 2 ? 'completed' : i === 2 ? 'in_progress' : i === 3 ? 'cancelled' : 'pending',
+}));
 fs.mkdirSync(path.join(DATA, 'WebDecryptHub'), { recursive: true });
 fs.writeFileSync(path.join(DATA, 'WebDecryptHub', 'settings.json'), JSON.stringify({
   provider: 'openai', headless: true, embedMode: 'screencast', activeProviderId: 'ui-openai', activeModel: 'gpt-4o',
@@ -94,6 +100,11 @@ const srv = http.createServer((req, res) => {
       if (text.includes('验证目标机制')) delta = input.messages.at(-1)?.role === 'tool' ? { content: '目标验证完成。' } : { tool_calls: [{ index: 0, id: 'goal-done', type: 'function', function: { name: 'goal_update', arguments: JSON.stringify({ status: 'complete', summary: '目标机制验证通过。' }) } }] };
       if (text.includes('UI_MEMORY_CHECK')) delta = input.messages.at(-1)?.role === 'tool' ? { content: '记忆保存验证完成。' } : { tool_calls: [{ index: 0, id: 'memory-write', type: 'function', function: { name: 'memory_manage', arguments: JSON.stringify({ action: 'write', name: 'ui-memory', scope: 'session', content: 'UI_MEMORY_SAVED: verified fixture fact' }) } }] };
       if (text.includes('UI_SKILL_CHECK')) delta = input.messages.at(-1)?.role === 'tool' ? { content: '技能保存验证完成。' } : { tool_calls: [{ index: 0, id: 'skill-write', type: 'function', function: { name: 'skill_manage', arguments: JSON.stringify({ action: 'write', name: 'ui-workflow', scope: 'session', content: '---\nname: ui-workflow\ndescription: Verify project evidence\n---\n\nRead sources, verify claims, record results.' }) } }] };
+      const lastUser = input.messages.findLast(m => m.role === 'user')?.content;
+      if (typeof lastUser === 'string' && /UI_PLAN_(CHECK|UPDATE|TEMPLATE)/.test(lastUser)) {
+        const updated = lastUser.includes('UI_PLAN_UPDATE'), template = lastUser.includes('UI_PLAN_TEMPLATE');
+        delta = input.messages.at(-1)?.role === 'tool' ? { content: updated ? '计划状态更新完成。' : template ? '默认步骤计划已建立。' : '完整计划已建立。' } : { tool_calls: [{ index: 0, id: 'plan-write', type: 'function', function: { name: 'todo_write', arguments: JSON.stringify({ merge: updated, steps: updated ? [{ ...PLAN_STEPS[29], status: 'completed' }] : template ? DEFAULT_TODOS : PLAN_STEPS }) } }] };
+      }
       res.writeHead(200, { 'Content-Type': 'text/event-stream' });
       res.end('data: ' + JSON.stringify({ choices: [{ delta, finish_reason: delta.tool_calls ? 'tool_calls' : 'stop' }] }) + '\n\ndata: [DONE]\n\n');
     }); return;
@@ -654,6 +665,55 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.locator('.msgs').evaluate(el => { el.style.scrollBehavior = 'auto'; el.scrollTop = 0; });
   await page.screenshot({ path: path.join(SHOTS, scheme + '-conversation-focused.png') });
+
+  // Exercise the actual plan tool, live events, saved state and manual UI reading.
+  const priorPlanSession = (await rpc('session-list')).focused;
+  const planSession = await rpc('session-create', { title: '完整计划 UI 验证', managed: true });
+  await rpc('session-focus', { sessionId: planSession.id });
+  await page.getByRole('textbox', { name: '任务指令' }).fill('UI_PLAN_TEMPLATE');
+  await page.getByRole('button', { name: '发送（Enter）', exact: true }).click();
+  await page.locator('.msg.assistant').filter({ hasText: '默认步骤计划已建立。' }).waitFor();
+  const planTrigger = page.getByRole('button', { name: '查看完整计划', exact: true });
+  const planPanel = page.getByRole('dialog', { name: '任务计划', exact: true });
+  await planTrigger.click(); await planPanel.waitFor();
+  ok(await planPanel.locator('li').count() === DEFAULT_TODOS.length, '[' + scheme + '] AI 明确建立的计划不应被当作未使用模板隐藏');
+  await page.keyboard.press('Escape'); await planPanel.waitFor({ state: 'detached' });
+  await page.getByRole('textbox', { name: '任务指令' }).fill('UI_PLAN_CHECK');
+  await page.getByRole('button', { name: '发送（Enter）', exact: true }).click();
+  await page.locator('.msg.assistant').filter({ hasText: '完整计划已建立。' }).waitFor();
+  await planTrigger.focus(); await planTrigger.press('Enter');
+  await planPanel.waitFor();
+  ok(await planPanel.locator('li').count() === 30, '[' + scheme + '] 完整计划未列出所有步骤');
+  ok(await planPanel.locator('.todo-step-content').first().innerText() === PLAN_STEPS[0].content, '[' + scheme + '] 长步骤内容被截断');
+  for (const status of ['completed', 'in_progress', 'cancelled', 'pending']) ok(await planPanel.locator('[data-status="' + status + '"]').count() > 0, '[' + scheme + '] 计划缺少状态：' + status);
+  await planPanel.locator('ol').focus(); await planPanel.locator('ol').press('End');
+  await page.waitForFunction(() => { const list = document.querySelector('.todo-plan-list'); return list && list.scrollTop > 0 && list.scrollTop + list.clientHeight >= list.scrollHeight - 2; });
+  const lastStepBounds = await planPanel.locator('li').last().boundingBox(), planListBounds = await planPanel.locator('ol').boundingBox();
+  ok(lastStepBounds.y >= planListBounds.y && lastStepBounds.y + lastStepBounds.height <= planListBounds.y + planListBounds.height + 2, '[' + scheme + '] 不能手动滚动到最后一步');
+  await planPanel.getByRole('button', { name: '复制计划', exact: true }).click();
+  const copiedPlan = await page.evaluate(() => navigator.clipboard.readText());
+  ok(PLAN_STEPS.every(step => copiedPlan.includes(step.content)) && copiedPlan.includes('已取消'), '[' + scheme + '] 复制的计划不完整');
+  await rpc('agent-send', { sessionId: planSession.id, text: 'UI_PLAN_UPDATE' });
+  await planPanel.locator('li[data-status="completed"]').filter({ hasText: 'UI_PLAN_LAST_STEP' }).waitFor();
+  ok(await planPanel.locator('li').count() === 30 && (await planPanel.innerText()).includes('已完成 3 / 30 项'), '[' + scheme + '] 打开中的计划没有实时更新');
+  await page.keyboard.press('Escape'); await planPanel.waitFor({ state: 'detached' });
+  await planTrigger.click(); await planPanel.waitFor();
+  await rpc('session-focus', { sessionId: priorPlanSession });
+  await planPanel.waitFor({ state: 'detached' });
+  ok(await page.locator('.todo-strip').count() === 0, '[' + scheme + '] 计划浮层泄漏到其他会话');
+  await rpc('session-focus', { sessionId: planSession.id });
+  await planTrigger.waitFor(); await page.reload(); await planTrigger.waitFor();
+  ok((await planTrigger.innerText()).includes('3/30'), '[' + scheme + '] 重开会话丢失计划状态');
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1080, height: 680 }]) {
+    await page.setViewportSize(viewport); await planTrigger.click(); await planPanel.waitFor();
+    await planPanel.evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished.catch(() => {}))));
+    const panelBounds = await planPanel.boundingBox();
+    ok(panelBounds.x >= 0 && panelBounds.y >= 0 && panelBounds.x + panelBounds.width <= viewport.width && panelBounds.y + panelBounds.height <= viewport.height, '[' + scheme + '] 计划浮层超出窗口');
+    ok(await planPanel.locator('ol').evaluate(el => el.scrollHeight > el.clientHeight && el.scrollWidth <= el.clientWidth + 1), '[' + scheme + '] 长计划未提供可用滚动区域');
+    for (const c of (await page.evaluate(contrast)).slice(0, 8)) ok(false, '[' + scheme + '] 完整计划对比度不足 ' + c);
+    await page.screenshot({ path: path.join(SHOTS, scheme + '-plan-' + viewport.width + '.png') });
+    await planPanel.getByRole('button', { name: '关闭计划', exact: true }).click(); await planPanel.waitFor({ state: 'detached' });
+  }
   ok(errs.length === 0, '[' + scheme + '] 遍历后报错: ' + (errs[0] || ''));
   await ctx.close();
 } } catch (error) {
