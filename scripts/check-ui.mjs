@@ -508,7 +508,8 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   // Only use a local page. Browser launch, streaming, capture and detail are real.
   await page.getByRole('textbox', { name: '目标网址' }).fill('http://127.0.0.1:' + PORT + '/__ui-fixture');
   await page.getByRole('textbox', { name: '目标网址' }).press('Enter');
-  await page.locator('.screen-canvas').waitFor({ state: 'visible', timeout: 25000 });
+  // Windows integrity preparation (45s) precedes Chromium's own 30s launch budget.
+  await page.locator('.screen-canvas').waitFor({ state: 'visible', timeout: 90000 });
   await page.getByRole('button', { name: '前往', exact: true }).waitFor({ state: 'visible' });
   await page.getByRole('textbox', { name: '任务指令' }).fill('打开测试浏览器');
   await page.getByRole('button', { name: '发送（Enter）', exact: true }).click();
@@ -783,6 +784,8 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
 } } catch (error) {
   if (activePage && !activePage.isClosed()) {
     await activePage.screenshot({ path: path.join(SHOTS, 'failure.png') }).catch(() => {});
+    const browserErrors = await activePage.locator('.browser-error').allTextContents().catch(() => []);
+    if (browserErrors.length) console.error('Browser UI diagnostics: ' + browserErrors.join(' | '));
     const metrics = await activePage.locator('.project-picker-panel').evaluateAll(nodes => nodes.map(node => ({ rect: node.getBoundingClientRect().toJSON(), side: node.getAttribute('data-side'), animations: node.getAnimations().map(a => ({ state: a.playState, time: a.currentTime })) }))).catch(() => []);
     if (metrics.length) console.error('Project popup diagnostics: ' + JSON.stringify(metrics));
   }
