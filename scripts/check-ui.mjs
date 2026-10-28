@@ -788,7 +788,8 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await rpc('session-focus', { sessionId: viewA.id }); await page.locator('.reasoning-body').waitFor();
   pendingReasoning.get(scheme)();
   await page.locator('.msg.assistant').filter({ hasText: '思考展示验证完成。' }).waitFor();
-  await page.locator('.turn-process > summary').click();
+  // A final message can arrive before the run-complete event closes the process.
+  await page.locator('.turn-process:not([open]) > summary').click();
   await page.locator('.reasoning-body').filter({ hasText: 'UI_THINKING_FINAL' }).waitFor();
   await page.locator('.reasoning > summary').click(); await page.locator('.reasoning-body').waitFor({ state: 'hidden' });
   await page.locator('.reasoning > summary').click(); await page.locator('.reasoning-body').waitFor();
