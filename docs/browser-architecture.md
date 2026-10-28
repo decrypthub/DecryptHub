@@ -35,7 +35,7 @@
 
 - 原生显示操作统一经过 BrowserSurface 队列。新请求使旧请求过期；已经开始的 native 操作完成后，后续 hide/show 才执行。快速切换不会让晚到的旧 show 越过 hide，新会话不会继承旧会话的 attach 错误。
 - 显示失败不能破坏后续 hide/release；旧 React effect 的异步失败不再触发新会话的回退。
-- 浏览器光晕位于原生网页矩形以外的宿主区域，串流与原生显示使用同一个内部视口。覆盖原生页面的浮层仍沿用 BrowserSurface 的隐藏/恢复机制，暂未实现冻结页预览。可见的 Windows 验收窗口使用 debug 专用的 `JSRA_DESKTOP_SMOKE=1` 与 `JSRA_DESKTOP_SMOKE_VISIBLE=1`，沿用独立数据目录中的 WebView profile，避免覆盖日常 UI 配置；生产构建不使用此分支。
+- 浏览器光晕由宿主合成在显示矩形上：Windows 使用鼠标穿透、无焦点的透明子窗口，串流使用宿主 DOM 遮罩，均不注入被分析网页。边缘向内渐隐，不预留边框或改变网页视口；原生遮罩不受支持时回退到串流。Windows 应用清单声明 Windows 8+ 兼容以支持 layered child window。点击 Chrome 后显式交接 Win32 键盘焦点，不依赖 DOM 焦点推测。其他覆盖原生页面的浮层仍沿用 BrowserSurface 的隐藏/恢复机制，暂未实现冻结页预览。可见验收窗口使用 debug 专用的 `JSRA_DESKTOP_SMOKE=1` 与 `JSRA_DESKTOP_SMOKE_VISIBLE=1`，沿用独立数据目录中的 WebView profile，避免覆盖日常 UI 配置；生产构建不使用此分支。详见 [交互收敛设计](ui-refinement.md)。
 - 标题先用任务文本给出即时名称，后台再请求当前模型概括。网页地址不能覆盖标题；手动命名以修订号和取消信号阻止晚到的结果覆盖。
 - 标题请求不带工具，只提交首次任务的有限文本；最多同时两项、单项 12 秒、输出最多 256 tokens。关闭会话取消请求，排队中取消不会请求模型；失败保留任务名称，不重试用户任务。标题属于额外的元数据请求，不计入 Agent Run 的 usage。
 - DeepSeek V4 的标题请求按官方协议关闭 thinking，避免推理耗尽短输出预算；用户任务的 thinking 设置不受影响。参考 [DeepSeek Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/)。

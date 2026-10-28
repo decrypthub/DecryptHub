@@ -44,7 +44,7 @@ pub fn child_exstyle(e: u32) -> u32 { (e & !(WS_EX_APPWINDOW | WS_EX_WINDOWEDGE 
 
 struct Entry { pid: u32, host: u64, wins: Vec<u64> }
 #[derive(Default)]
-pub struct EmbedState { entries: HashMap<String, Entry>, focused: Option<String>, rect: PxRect, inset: CssInset, dpr: f64, visible: bool }
+pub struct EmbedState { entries: HashMap<String, Entry>, focused: Option<String>, rect: PxRect, inset: CssInset, dpr: f64, visible: bool, active: bool }
 pub static STATE: Mutex<Option<EmbedState>> = Mutex::new(None);
 
 fn with<R>(f: impl FnOnce(&mut EmbedState) -> R) -> R {
@@ -64,11 +64,11 @@ fn parent_of(win: &tauri::WebviewWindow) -> Result<u64, String> {
 }
 
 /// 显示某会话的 Chrome（必要时先找到并收养窗口），隐藏其它会话
-pub fn show(win: &tauri::WebviewWindow, sid: &str, pid: u32, rect: CssRect, dpr: f64, inset: CssInset) -> Result<serde_json::Value, String> {
+pub fn show(win: &tauri::WebviewWindow, sid: &str, pid: u32, rect: CssRect, dpr: f64, inset: CssInset, active: bool) -> Result<serde_json::Value, String> {
     let parent = parent_of(win)?;
     let hr = host_rect(rect, dpr);
     with(|st| {
-        st.rect = hr; st.inset = inset; st.dpr = dpr; st.visible = true; st.focused = Some(sid.to_string());
+        st.rect = hr; st.inset = inset; st.dpr = dpr; st.visible = true; st.active = active; st.focused = Some(sid.to_string());
         if st.entries.get(sid).map(|e| e.pid != pid || !imp::alive(e.host)).unwrap_or(false) {
             if let Some(e) = st.entries.remove(sid) { imp::destroy_host(e.host); }
         }
@@ -80,6 +80,7 @@ pub fn show(win: &tauri::WebviewWindow, sid: &str, pid: u32, rect: CssRect, dpr:
         let e = st.entries.get(sid).unwrap();
         if e.wins.is_empty() { return Err(format!("未找到 PID {} 的 Chrome 顶层窗口", pid)); }
         apply(st);
+        crate::activity_overlay::sync(e.host, hr.w, hr.h, dpr, true, active).map_err(|e| format!("ACTIVITY_OVERLAY_UNAVAILABLE: {}", e))?;
         Ok(serde_json::json!({ "host": hr.w.to_string() + "x" + &hr.h.to_string(), "windows": st.entries[sid].wins.len() }))
     })
 }
@@ -102,6 +103,7 @@ fn apply(st: &EmbedState) {
             for w in &e.wins { imp::place(*w, cr); imp::raise(*w); }
         }
         imp::set_visible(e.host, on);
+        if !on { let _ = crate::activity_overlay::sync(e.host, st.rect.w, st.rect.h, st.dpr, false, false); }
     }
 }
 
@@ -129,6 +131,7 @@ pub fn tick() {
             }
         }
         imp::focus_follow(st.entries.get(st.focused.as_deref().unwrap_or("")).filter(|_| st.visible).map(|e| (e.host, e.wins.clone())));
+        crate::activity_overlay::tick();
     });
 }
 
@@ -150,7 +153,7 @@ mod imp {
             Ok(hw.0 as isize as u64)
         }
     }
-    pub fn destroy_host(v: u64) { unsafe { let _ = DestroyWindow(h(v)); } }
+    pub fn destroy_host(v: u64) { crate::activity_overlay::release(v); unsafe { let _ = DestroyWindow(h(v)); } }
     struct Ctx { pid: u32, out: Vec<u64> }
     unsafe extern "system" fn cb(hwnd: HWND, lp: LPARAM) -> BOOL {
         let ctx = &mut *(lp.0 as *mut Ctx);
@@ -192,7 +195,26 @@ mod imp {
     pub fn raise(v: u64) { unsafe { let _ = SetWindowPos(h(v), Some(HWND_TOP), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS); } }
     pub fn set_visible(v: u64, on: bool) { unsafe { let _ = ShowWindow(h(v), if on { SW_SHOWNA } else { SW_HIDE }); } }
     pub fn ensure_embedded(host: u64, v: u64) -> bool { unsafe { if GetParent(h(v)).ok() != Some(h(host)) { let _ = adopt(host, v); return true; } if IsWindowVisible(h(v)).as_bool() { false } else { let _ = ShowWindow(h(v), SW_SHOWNA); true } } }
-    pub fn focus_follow(_cur: Option<(u64, Vec<u64>)>) {} // Win32 子窗口点击即获得焦点（SetParent 后输入队列已关联）
+    pub fn focus_follow(cur: Option<(u64, Vec<u64>)>) {
+        // Reparenting preserves Chrome's DOM focus but may leave Win32 keyboard
+        // focus in the host WebView. Transfer it only on a click inside Chrome.
+        use windows::Win32::{Foundation::POINT, System::Threading::{AttachThreadInput, GetCurrentThreadId}, UI::Input::KeyboardAndMouse::{GetAsyncKeyState, SetFocus, VK_LBUTTON}};
+        let Some((host, wins)) = cur else { return };
+        unsafe {
+            if GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8001 == 0 { return; }
+            let mut point = POINT::default();
+            if GetCursorPos(&mut point).is_err() { return; }
+            let target = WindowFromPoint(point);
+            if target.0.is_null() || !IsChild(h(host), target).as_bool() { return; }
+            if wins.iter().any(|w| target == h(*w) || IsChild(h(*w), target).as_bool()) {
+                let current = GetCurrentThreadId();
+                let target_thread = GetWindowThreadProcessId(target, None);
+                let attached = current != target_thread && AttachThreadInput(current, target_thread, true).as_bool();
+                let _ = SetFocus(Some(target));
+                if attached { let _ = AttachThreadInput(current, target_thread, false); }
+            }
+        }
+    }
 }
 
 // ------------------------------------------------------------------ Linux X11 (Xlib 动态加载)

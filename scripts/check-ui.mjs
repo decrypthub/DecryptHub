@@ -375,7 +375,12 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   ok(copied.includes(focusedId) && copied.includes('UI change verified') && copied.includes('workspace_write'), '[' + scheme + '] Markdown 缺少会话信息或工具结果');
   await page.locator('.session-menu').waitFor({ state: 'hidden' });
   ok(await page.locator('.dock-tabs [role="tab"]').count() === 3, '[' + scheme + '] 工具面板应只保留三个页签');
-  ok(await page.locator('.git-changes').count() === 0, '[' + scheme + '] 无 Git 仓库不应显示改动面板');
+  await page.getByRole('tab', { name: 'Git 改动', exact: true }).click();
+  await page.getByText('当前目录没有可用的Git仓库', { exact: true }).waitFor();
+  ok(await page.locator('.workspace-tree').isVisible() === false, '[' + scheme + '] Git 页签不应混入本地目录');
+  ok(await page.locator('.detail').count() === 0, '[' + scheme + '] 切换文件页签应清除旧文件预览');
+  await page.getByRole('tab', { name: '本地文件', exact: true }).click();
+  await page.locator('.workspace-tree').waitFor({ state: 'visible' });
   await page.screenshot({ path: path.join(SHOTS, scheme + '-real-file-change.png') });
   await page.locator('.rail .new-session').click();
   await page.locator('.welcome').waitFor();
@@ -413,7 +418,7 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.locator('.session-item.on').hover();
   for (const issue of await page.evaluate(actionGeometry)) ok(false, '[' + scheme + '] 会话操作 ' + issue);
   await page.locator('.session-item.on button[aria-label="会话操作"]').press('Enter');
-  ok(await page.getByRole('menuitem', { name: '关闭对话', exact: true }).isVisible(), '[' + scheme + '] 会话菜单缺少关闭操作');
+  ok(await page.getByRole('menuitem', { name: '删除对话', exact: true }).isVisible(), '[' + scheme + '] 会话菜单缺少删除操作');
   await page.locator('.session-menu').evaluate(el => Promise.all(el.getAnimations().map(a => a.finished.catch(() => {}))));
   for (const c of (await page.evaluate(contrast)).slice(0, 5)) ok(false, '[' + scheme + '] 会话菜单对比度不足 ' + c);
   await page.screenshot({ path: path.join(SHOTS, scheme + '-session-menu.png') });
@@ -519,13 +524,14 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.getByRole('textbox', { name: '目标网址' }).press('Enter');
   // Windows integrity preparation (45s) precedes Chromium's own 30s launch budget.
   await page.locator('.screen-canvas').waitFor({ state: 'visible', timeout: 90000 });
-  await page.getByRole('button', { name: '前往', exact: true }).waitFor({ state: 'visible' });
+  await page.getByRole('button', { name: '刷新', exact: true }).waitFor({ state: 'visible' });
+  ok(await page.locator('.browser-launch').count() === 0, '[' + scheme + '] 地址栏不应有独立前往按钮');
   await page.getByRole('textbox', { name: '任务指令' }).fill('打开测试浏览器');
   await page.getByRole('button', { name: '发送（Enter）', exact: true }).click();
   await page.locator('.screen.ai-controlled').waitFor({ state: 'visible' });
-  await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('.screen'), '::before').opacity) > .7);
+  await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('.browser-halo')).opacity) > .7);
   ok(await page.getByText('AI 正在操控浏览器', { exact: true }).count() === 0, '[' + scheme + '] 不应显示额外的浏览器操控提示');
-  ok(await page.locator('.screen').evaluate(el => getComputedStyle(el, '::before').filter.includes('blur') && getComputedStyle(el, '::after').filter.includes('blur')), '[' + scheme + '] 浏览器应该使用柔和光晕而非硬边框');
+  ok(await page.locator('.screen').evaluate(el => getComputedStyle(el.querySelector('.browser-halo')).backgroundImage.includes('linear-gradient') && getComputedStyle(el).padding === '0px'), '[' + scheme + '] 浏览器应该使用柔和光晕而非硬边框');
   const activeViewport = await page.locator('.browser-viewport').boundingBox();
   await page.screenshot({ path: path.join(SHOTS, scheme + '-browser-ai-control.png') });
   await page.locator('.msg.assistant').filter({ hasText: '浏览器操控完成。' }).waitFor();
@@ -559,7 +565,7 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await debugUiCdp.detach();
 
   await page.keyboard.press('Control+Alt+3');
-  const recordNetwork = page.getByRole('button', { name: '开始记录网络', exact: true });
+  const recordNetwork = page.getByRole('button', { name: /^(开始|继续)抓取网络请求$/ });
   if (await recordNetwork.count()) {
     await recordNetwork.click();
     await page.keyboard.press('Control+Alt+2');
@@ -567,6 +573,15 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
     await page.keyboard.press('Control+Alt+3');
   }
   await page.locator('.req-row').filter({ hasText: /api/ }).first().waitFor({ timeout: 15000 });
+  const pauseNetwork = page.getByRole('button', { name: '暂停抓取网络请求', exact: true });
+  ok(await pauseNetwork.getAttribute('aria-pressed') === 'true', '[' + scheme + '] 记录中状态应显示暂停操作');
+  await pauseNetwork.click();
+  await recordNetwork.waitFor();
+  ok(await recordNetwork.getAttribute('aria-pressed') === 'false', '[' + scheme + '] 暂停状态应显示继续操作');
+  await recordNetwork.click();
+  await pauseNetwork.waitFor();
+  ok(await page.locator('.request-filters').evaluate(el => parseFloat(getComputedStyle(el).gap) >= 8 && getComputedStyle(el).flexWrap === 'nowrap'), '[' + scheme + '] 快捷筛选需要独立间距并在窄面板内横向滚动');
+  ok(await page.locator('.dock-body > .bar').first().innerText().then(text => !/网络请求\s*\d/.test(text)), '[' + scheme + '] 不应重复网络请求标题与数量');
   await page.locator('.req-row').filter({ hasText: /api/ }).first().click();
   await page.locator('.detail-tabs').getByRole('tab', { name: '响应', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('.detail-body')?.textContent.includes('UI capture verified'), { timeout: 10000 });
@@ -778,6 +793,9 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.getByRole('textbox', { name: '任务指令' }).fill('UI_THINKING_CHECK_' + scheme);
   await page.getByRole('button', { name: '发送（Enter）', exact: true }).click();
   await page.locator('.reasoning-body').filter({ hasText: 'UI_THINKING_LIVE' }).waitFor();
+  ok(await page.getByRole('button', { name: '停止响应', exact: true }).count() === 1 && await page.getByRole('button', { name: '发送（Enter）', exact: true }).count() === 0, '[' + scheme + '] 运行中应仅显示一个停止按钮');
+  ok(await page.locator('.composer').evaluate(el => !el.classList.contains('rt-Card') && ['borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomLeftRadius', 'borderBottomRightRadius'].every(k => getComputedStyle(el)[k] === '22px')), '[' + scheme + '] 输入框应使用完整且一致的四角圆角');
+  ok(await page.locator('.stage-identity').innerText().then(text => !/https?:\/\//.test(text)), '[' + scheme + '] 对话顶部不应重复网址');
   ok(await page.locator('.reasoning-body script').count() === 0 && !await page.evaluate(() => window.__thinkingScriptExecuted), '[' + scheme + '] 思考内容被当作脚本执行');
   const thoughtSnapshot = await rpc('session-snapshot', { sessionId: viewA.id });
   ok(thoughtSnapshot.partialReasoning.includes('UI_THINKING_LIVE') && !thoughtSnapshot.partial, '[' + scheme + '] 思考流没有独立保存');
@@ -806,6 +824,21 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.locator('.msg.assistant').filter({ hasText: '模型重试验证完成。' }).waitFor();
   ok(modelRetries.get(scheme) === 3, '[' + scheme + '] 模型恢复请求次数错误');
   ok(await page.getByText(/模型连接重试 [12]\/10/).count() === 0, '[' + scheme + '] 模型恢复后仍残留重试状态');
+  const disposable = await rpc('session-create', { title: '仅删除这个测试对话', managed: true });
+  await rpc('session-focus', { sessionId: disposable.id });
+  const openRail = page.getByRole('button', { name: '展开会话列表', exact: true });
+  if (await openRail.count()) await openRail.click();
+  await page.locator('.session-item.on').hover();
+  await page.locator('.session-item.on button[aria-label="会话操作"]').click();
+  await page.getByRole('menuitem', { name: '删除对话', exact: true }).click();
+  const deletion = page.getByRole('dialog', { name: '确认操作' });
+  await deletion.waitFor();
+  ok((await deletion.innerText()).includes('外部项目文件保留'), '[' + scheme + '] 删除应明确告知外部目录保留');
+  await deletion.getByRole('button', { name: '删除对话', exact: true }).click();
+  await page.locator('.session-item[data-session-id="' + disposable.id + '"]').waitFor({ state: 'detached' });
+  ok(!fs.existsSync(disposable.projectDir), '[' + scheme + '] 删除后不应遗留会话私有目录');
+  await page.reload(); await page.locator('.stage-identity').waitFor();
+  ok(!(await rpc('session-list')).sessions.some(s => s.id === disposable.id), '[' + scheme + '] 已删除对话不应在重载后复活');
   ok(errs.length === 0, '[' + scheme + '] 遍历后报错: ' + (errs[0] || ''));
   await ctx.close();
 } } catch (error) {

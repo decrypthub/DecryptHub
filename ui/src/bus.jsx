@@ -39,6 +39,9 @@ export function Workbench({ children }) {
   const sid = sessions.focused;
   const session = sessions.sessions.find(s => s.id === sid) || null;
   const cur = (sid && S[sid]) || blankSession();
+  const activityRef = useRef(false), activityKick = useRef(null);
+  activityRef.current = !!cur.browserActivity?.active;
+  useEffect(() => { activityKick.current?.(); }, [sid, cur.browserActivity?.active]);
 
   const sidRef = useRef(sid); sidRef.current = sid;
   const input = drafts[sid] || '';
@@ -292,25 +295,27 @@ export function Workbench({ children }) {
       if (cov || document.hidden) { if (lastKey !== 'hidden') surface.current.hide().catch(() => {}); lastKey = 'hidden'; return; }
       if (!inset || Date.now() - insetAt > 3000) { inset = await api.invoke('embed-inset', { sessionId: mySid }).catch(() => null) || inset; insetAt = Date.now(); if (dead) return; }
       const r = el.getBoundingClientRect();
-      const key = [r.left, r.top, r.width, r.height, window.devicePixelRatio, JSON.stringify(inset)].join();
+      const active = activityRef.current;
+      const key = [r.left, r.top, r.width, r.height, window.devicePixelRatio, JSON.stringify(inset), active].join();
       if (key === lastKey && !force) return;
       lastKey = key; force = false;
-      try { const result = await surface.current.show({ sessionId: mySid, pid, rect: { x: r.left, y: r.top, w: r.width, h: r.height }, dpr: window.devicePixelRatio || 1, inset }); if (dead || result.state === 'superseded') return; embedTry.current[mySid] = 0; }
+      try { const result = await surface.current.show({ sessionId: mySid, pid, rect: { x: r.left, y: r.top, w: r.width, h: r.height }, dpr: window.devicePixelRatio || 1, inset, active }); if (dead || result.state === 'superseded') return; embedTry.current[mySid] = 0; }
       catch (e) {
         if (dead) return;
         const n = (embedTry.current[mySid] || 0) + 1; embedTry.current[mySid] = n;
-        if (n < 24) { force = true; clearTimeout(t); t = setTimeout(sync, 250); return; }
+        if (n < 24 && !String(e?.message || e).includes('ACTIVITY_OVERLAY_UNAVAILABLE')) { force = true; clearTimeout(t); t = setTimeout(sync, 250); return; }
         surface.current.hide().catch(() => {}); api.invoke('embed-fallback', { sessionId: mySid, reason: String(e?.message || e) }).catch(() => {});
         toast('原生嵌入失败，已改用画面串流：' + String(e?.message || e), 'warn', 6000);
       }
     };
     let raf = 0; const kick = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(sync); };
+    activityKick.current = kick;
     const ro = new ResizeObserver(kick); ro.observe(el);
     const mo = new MutationObserver(kick); mo.observe(document.body, { childList: true, subtree: true });
     window.addEventListener('resize', kick); document.addEventListener('visibilitychange', kick);
     const iv = setInterval(() => { force = true; kick(); }, 1500);
     kick();
-    return () => { dead = true; clearTimeout(t); clearInterval(iv); cancelAnimationFrame(raf); ro.disconnect(); mo.disconnect(); window.removeEventListener('resize', kick); document.removeEventListener('visibilitychange', kick); surface.current.hide().catch(() => {}); };
+    return () => { dead = true; if (activityKick.current === kick) activityKick.current = null; clearTimeout(t); clearInterval(iv); cancelAnimationFrame(raf); ro.disconnect(); mo.disconnect(); window.removeEventListener('resize', kick); document.removeEventListener('visibilitychange', kick); surface.current.hide().catch(() => {}); };
   }, [embedOn, sid, cur.status.chromePid, toast, view, side, sideOpen]);
 
   // 会话浏览器关闭 → 释放宿主窗口
@@ -368,8 +373,11 @@ export function Workbench({ children }) {
 
   async function closeSession(id) {
     const s = sessions.sessions.find(x => x.id === id);
-    if (s?.agentRunning && !await askConfirm(`「${s.title || '对话'}」的 AI 正在分析，关闭将中断并关闭其浏览器。继续？`, { ok: '关闭', danger: true })) return;
-    await api.invoke('session-close', { sessionId: id });
+    if (!s || !await askConfirm(`删除「${s.title || '对话'}」？聊天记录、附件、浏览器数据及会话内的托管工作区会永久删除。外部项目文件保留，关联自动化将暂停。`, { ok: '删除对话', danger: true })) return;
+    try { await api.invoke('session-delete', { sessionId: id }); }
+    catch (e) { toast('删除失败：' + e.message, 'err'); return; }
+    await surface.current.release(id).catch(() => {});
+    delete prevRun.current[id];
     dispatch({ t: 'drop', sid: id });
     presentation.forget(id);
     localStorage.removeItem('wdh_ev_' + id);

@@ -1,9 +1,9 @@
 // 对话区：顶栏（会话身份 + 权限/模型/上下文）、消息流、输入坞。
 import React, { useEffect, useRef, useState } from 'react';
-import { Box, Flex, Text, Badge, Card, Callout, Spinner, TextArea, Separator, Popover } from '@radix-ui/themes';
+import { Box, Flex, Text, Badge, Callout, Spinner, TextArea, Separator, Popover } from '@radix-ui/themes';
 import { useWorkbench } from './bus.jsx';
 import { Button, ActionIcon, Icon, Markdown, Dropdown } from './kit.jsx';
-import { fmtK, hostOf, sessionLabel } from './state.js';
+import { fmtK, sessionLabel } from './state.js';
 import { native } from './transport.js';
 import { WorkspaceBar, PermissionPicker, PendingActions } from './workspace.jsx';
 import { AttachmentTiles } from './attachments.jsx';
@@ -21,7 +21,7 @@ export function ChatStage({ railOpen, onExpandRail }) {
   const fileRef = useRef(null), [dragging, setDragging] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0), [commandDismissed, setCommandDismissed] = useState(false);
   const { cur, session, input, setInput, send, atts, rmAtt, settings, pickModel, inv, refs } = w;
-  const host = hostOf(cur.url);
+  const responding = cur.agentRunning || cur.subagents?.some(a => a.status === 'running');
   const providers = settings.providers || [];
   const activeProvider = providers.find(p => p.id === settings.activeProviderId);
   const keyOk = !!(activeProvider?.apiKey || activeProvider?.hasKey || (settings.provider === 'anthropic' ? settings.anthropic : settings.openai)?.apiKey);
@@ -46,7 +46,6 @@ export function ChatStage({ railOpen, onExpandRail }) {
       {!railOpen && <ActionIcon icon="sidebar" variant="soft" color="gray" onClick={onExpandRail} title="展开会话列表" />}
       <div className="stage-identity">
         <strong className="ellipsis">{sessionLabel(session || {})}</strong>
-        {host && <span className="ellipsis">{host}</span>}
       </div>
       <Flex align="center" gap="2" style={{ minWidth: 0 }}>
         {cur.mode === 'full-access' && <Badge size="1" variant="soft" color="red">完全访问权限</Badge>}
@@ -80,7 +79,7 @@ export function ChatStage({ railOpen, onExpandRail }) {
       <PendingActions />
       <WorkspaceBar />
       <CommandDialogs />
-      <Card className={'composer' + (dragging ? ' drag-over' : '')} size="2"
+      <Box className={'composer' + (dragging ? ' drag-over' : '')} p="4"
         onDragOver={e => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDragging(true); } }}
         onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setDragging(false); }}
         onDrop={e => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files.length) w.addFiles(e.dataTransfer.files); }}>
@@ -107,12 +106,11 @@ export function ChatStage({ railOpen, onExpandRail }) {
             placeholder={providers.length ? '选择模型' : '选择渠道'}
             options={providers.map(p => ({ group: p.name, items: (p.models || []).map(m => { const id = typeof m === 'string' ? m : m.id; return { value: p.id + '|' + id, label: (m && m.name) || id }; }) }))}
             onChange={v => { const i = v.indexOf('|'); if (i > 0) pickModel(v.slice(0, i), v.slice(i + 1)); }} /></div>
-          {(cur.agentRunning || cur.subagents?.some(a => a.status === 'running')) && <ActionIcon icon="stop" variant="soft" color="gray" onClick={() => inv('agent-interrupt')} title="停止响应" />}
-          <ActionIcon icon="send" className="send-button" variant="solid" onClick={() => send(false)}
-            disabled={w.sending || w.uploading || (!input.trim() && !atts.length)}
-            title={cur.agentRunning ? '加入下一轮队列（Enter）' : '发送（Enter）'} />
+          <ActionIcon icon={responding ? 'stop' : 'send'} className="send-button" variant="solid" onClick={() => responding ? inv('agent-interrupt') : send(false)}
+            disabled={!responding && (w.sending || w.uploading || (!input.trim() && !atts.length))}
+            title={responding ? '停止响应' : '发送（Enter）'} />
         </div>
-      </Card>
+      </Box>
     </div>
   </div>;
 }

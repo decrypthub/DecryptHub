@@ -76,13 +76,14 @@ async function startServer() {
   // 自动化任务：每天定时把一句话交给 AI（新建会话 → 起浏览器 → 发送）
   const { TaskStore } = await import('./tasks.mjs');
   const tasks = new TaskStore({ userDataDir: settingsMod.userDataDir(), getSessions: () => sessions, log: m => fileLog(m), onChange: list => broadcast('tasks-status', list) });
+  sessions.onDeleting = id => tasks.pauseForSession(id);
   const extensions = new ExtensionStore({ directory: settingsMod.userDataDir(), getSettings: () => settings,
     saveSettings: () => settingsMod.save(settings), plugins, mcpHost, tasks,
     changed: () => { for (const s of sessions.sessions.values()) s.agent?.emitContext(); broadcast('extensions-changed', true); } });
   sessions.extensions = extensions;
   const projects = new ProjectService(sessions, (grant, sid) => consumeFolderGrant(wsToken, grant, sid, consumedGrants));
   tasks.start();
-  const S = a => sessions.get(a?.sessionId);
+  const S = a => { const session = sessions.get(a?.sessionId); if (session.closing) throw Error('会话正在关闭或删除'); return session; };
   const B = a => { const s = S(a); if (!s.browser.running) throw new Error('该会话的浏览器未启动'); return s.browser; };
 
   let downloading = null;
@@ -140,6 +141,7 @@ async function startServer() {
     },
     'session-create': a => sessions.create(a || {}).info(),
     'session-close': async a => { await sessions.close(a?.sessionId); return sessions.list(); },
+    'session-delete': async a => { await sessions.delete(a?.sessionId); return sessions.list(); },
     'session-rename': a => { S(a).rename(a.title); return true; },
     'session-pin': a => { const s = S(a); s.setPinned(!!a.pinned); return sessions.list(); },
     'session-focus': async a => { await sessions.focus(a?.sessionId); return true; },

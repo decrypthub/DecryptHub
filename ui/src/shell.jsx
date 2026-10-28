@@ -103,7 +103,7 @@ function Rail({ onSearch, onCollapse }) {
               <DropdownMenu.Item onSelect={() => setMoveSession(s.id)}><Icon n="folder" />移动到项目…</DropdownMenu.Item>
               <DropdownMenu.Item onSelect={() => pinSession(s.id, !s.pinned)}><Icon n="pin" />{s.pinned ? '取消置顶' : '置顶会话'}</DropdownMenu.Item>
               <DropdownMenu.Separator />
-              <DropdownMenu.Item color="red" onSelect={() => closeSession(s.id)}><Icon n="x" />关闭对话</DropdownMenu.Item>
+              <DropdownMenu.Item color="red" onSelect={() => closeSession(s.id)}><Icon n="trash" />删除对话</DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Root>
         </div>

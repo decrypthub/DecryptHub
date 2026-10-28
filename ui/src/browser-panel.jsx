@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Box, DropdownMenu, Text, TextField } from '@radix-ui/themes';
+import { Box, DropdownMenu, Text, TextField, Spinner } from '@radix-ui/themes';
 import { ActionIcon, Button, EmptyState, Icon } from './kit.jsx';
 import { useWorkbench } from './bus.jsx';
 import { hostOf } from './state.js';
 
 export function BrowserPanel() {
-  const { cur, inv, go, dispatch, sid, launching, conn, cleanRetry, refs, sendInput, embedOn, embedCovered, setView, toast } = useWorkbench();
+  const { cur, inv, go, dispatch, sid, launching, cleanRetry, refs, sendInput, embedOn, embedCovered, setView, toast } = useWorkbench();
   const [component, setComponent] = useState(null), [glowing, setGlowing] = useState(false);
   const running = cur.status.running, active = !!(running && cur.browserActivity?.active);
   useEffect(() => { let live = true; window.api.invoke('component-info').then(value => { if (live) setComponent(value); }).catch(() => {}); return () => { live = false; }; }, []);
@@ -24,9 +24,8 @@ export function BrowserPanel() {
         <TextField.Root ref={refs.urlRef} size="2" radius="full" value={cur.url} aria-label="目标网址"
           onChange={e => dispatch({ t: 'patch', sid, patch: { url: e.target.value } })}
           onKeyDown={e => e.key === 'Enter' && go()} onFocus={e => e.target.select()}
-          placeholder="输入目标网址（Ctrl+L）" spellCheck={false}><TextField.Slot><Icon n="globe" size={13} /></TextField.Slot></TextField.Root>
+          placeholder="输入网址，按回车前往（Ctrl+L）" spellCheck={false}><TextField.Slot><Icon n="globe" size={13} /></TextField.Slot>{(launching[sid] || cur.navigating) && <TextField.Slot side="right"><Spinner size="1" /></TextField.Slot>}</TextField.Root>
       </Box>
-      <Button size="2" className="browser-launch" onClick={() => go()} disabled={launching[sid] || cur.navigating || conn !== 'connected'} loading={launching[sid] || cur.navigating}><Icon n="go" />{running ? '前往' : '打开'}</Button>
       <DropdownMenu.Root><DropdownMenu.Trigger><ActionIcon icon="more" variant="soft" color="gray" title="浏览器菜单" /></DropdownMenu.Trigger>
         <DropdownMenu.Content align="end" data-overlay>
           <DropdownMenu.Label>浏览器操作</DropdownMenu.Label>
@@ -40,7 +39,7 @@ export function BrowserPanel() {
     {cur.status.pages.length > 1 && <div className="bar">{cur.status.pages.map(p => <Button key={p.index} size="2" variant={p.active ? 'soft' : 'ghost'} color="gray" onClick={() => inv('select-page', { index: p.index })} title={p.url}>{hostOf(p.url) || '空白页'}</Button>)}</div>}
     {cur.browserError && <div className="browser-error" role="alert"><Icon n="info" size={16} /><span style={{ flex: 1 }}>{cur.browserError}</span><Button size="1" variant="soft" color="red" onClick={() => setView('settings')}>设置</Button></div>}
     {running && cur.debuggerPaused && <div className="browser-control-status"><Icon n="target" size={14} /><Text size="1">已暂停于断点</Text><Box flexGrow="1" /><Button size="1" variant="soft" color="gray" onClick={() => inv('debug-resume').then(r => !r.ok && toast(r.error, 'err')).catch(e => toast(e.message, 'err'))}>恢复网页执行</Button></div>}
-    <div className={'screen' + (illuminated ? ' ai-controlled' : '')} aria-label={illuminated ? 'AI 正在操控的浏览器画面' : '浏览器画面'}>
+    <div className={'screen' + (illuminated ? ' ai-controlled' : '') + (embedOn ? ' native-browser' : '')} aria-label={illuminated ? 'AI 正在操控的浏览器画面' : '浏览器画面'}>
       <div className="browser-viewport" ref={refs.viewRef}>
         {embedOn ? <div className="screen-note"><Text size="1" color="gray">{embedCovered ? '画面已暂时隐藏（关闭浮层后恢复）' : '原生窗口已嵌入'}</Text></div> : running
           ? <canvas ref={refs.canvasRef} className="screen-canvas" tabIndex={0}
@@ -51,6 +50,7 @@ export function BrowserPanel() {
             onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && ['l', 't', ','].includes(e.key.toLowerCase())) return; e.preventDefault(); window.api.sendInput({ kind: 'key', type: 'keyDown', key: e.key, code: e.code, text: e.key.length === 1 ? e.key : undefined }); }} />
           : <div className="browser-welcome"><span className="browser-empty-icon"><Icon n="globe" size={28} /></span><h2>打开目标网站</h2><Button size="2" variant="soft" color="gray" onClick={() => { refs.urlRef.current?.focus(); refs.urlRef.current?.select(); }}>输入网址<Icon n="go" size={16} /></Button></div>}
       </div>
+      <div className="browser-halo" aria-hidden="true" />
     </div>
   </>;
 }
