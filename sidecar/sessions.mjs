@@ -21,8 +21,10 @@ import { atomicJson, resolveIn } from './paths.mjs';
 import { ResearchAgents } from './subagents.mjs';
 import { ComponentStore } from './components.mjs';
 import { promptTitle, cleanTitle, SessionTitleService } from './session-titles.mjs';
+import { restoreGoal, createGoal, updateGoal, finishGoalRound, GoalDriver } from './goals.mjs';
 
 const MAX_SESSIONS = 100;
+const GOAL_CONTINUATION = Symbol('internal-goal-continuation');
 
 class Session {
   constructor(mgr, { id, title, titleSource, primary, lastUrl, updatedAt, pinned }) {
@@ -65,7 +67,11 @@ class Session {
     // 「本会话始终允许」只在这次运行的内存里有效。磁盘上的旧 allows 不恢复。
     this.allows = new Set();
     this.todos = this.readTodos(st.todos);
-    this.goal = st.goal ? { ...st.goal, ...(st.goal.status === 'active' ? { status: 'paused', summary: '上次运行已中断，可手动继续目标。' } : {}) } : null;
+    this.goal = restoreGoal(st.goal);
+    this.goalDriver = new GoalDriver({ current: () => this.goal,
+      idle: () => !this.closing && !this.agent?.running && !this.activeRun && !this.queue.length && !this.pending.size && !this.askPending.size && this.goal?.workspaceId === this.workspace.id,
+      dispatch: () => this.send({ text: '', source: 'goal' }, GOAL_CONTINUATION),
+      failed: reason => { if (this.goal?.status === 'active') { this.goal = { ...this.goal, status: 'needs_attention', stopReason: 'dispatch-failed', resumeNote: reason }; this.saveState(); this.emit('goal', this.goal); this.mgr.emitList(); } } });
     this.subagents = new ResearchAgents({ directory: this.projectDir, context: () => this.toolCtx(), settings: () => this.mgr.getSettings(), onUsage: record => {
       if (record.goalKey && this.goal && record.goalKey === this.goal.id + ':' + this.goal.batchId) {
         this.goal.usedTokens = (this.goal.usedTokens || 0) + (record.usage?.prompt || 0) + (record.usage?.completion || 0);
@@ -101,7 +107,7 @@ class Session {
     this.mgr.emitList();
     return this.info();
   }
-  publicState() { return { mode: this.mode, review: this.review, todos: this.todos, workspace: this.workspace, run: this.runs.latest(), queue: this.queue.length, debuggerPaused: !!this.debuggerPaused, goal: this.goal, subagents: this.subagents?.list(this.workspace.id) || [], approvals: [...this.pending.values()].map(p => p.request), questions: [...this.askPending.values()].map(p => p.request) }; }
+  publicState() { return { mode: this.mode, review: this.review, todos: this.todos, workspace: this.workspace, run: this.runs.latest(), queue: this.queue.length, modelRetry: this.agent?.retry || null, debuggerPaused: !!this.debuggerPaused, goal: this.goal, subagents: this.subagents?.list(this.workspace.id) || [], approvals: [...this.pending.values()].map(p => p.request), questions: [...this.askPending.values()].map(p => p.request) }; }
   rename(title) {
     const next = Array.from(String(title || '').trim()).slice(0, 40).join('');
     if (!next) throw new Error('会话名称不能为空');
@@ -269,7 +275,7 @@ class Session {
       this.agent = new Agent({ mcp: this.mcp, mcpHost: this.mgr.mcpHost, browser: this.browser, projectDir: this.projectDir,
         getSettings: this.mgr.getSettings, tools: DEFAULT_TOOLS.filter(tool => !tool.component || (this.mgr.components.info().installed && this.mgr.components.info().enabled)),
         emit: (ev, p) => { if (ev === 'debugger-state') this.debuggerPaused = !!p.paused; this.emit('agent-' + ev, p); if (ev === 'done' || ev === 'user') this.mgr.emitList(); },
-        getToolContext: () => this.toolCtx(), getWorkspace: () => this.workspace,
+        getToolContext: () => this.toolCtx(), getWorkspace: () => this.workspace, getGoal: () => this.goal,
         record: (type, value) => { if (this.activeRun) this.runs.event(this.activeRun.id, type, value); },
         relaunch: o => this.relaunch(o), getMode: () => this.mode, approve: (req, signal) => this.approve(req, signal),
         ask: (req, signal) => this.ask(req, signal), getTodos: () => this.todos, setTodos: list => this.setTodos(list),
@@ -287,7 +293,9 @@ class Session {
     if (url && /^https?:/.test(url)) { await this.browser.navigate(url); await new Promise(r => setTimeout(r, 6000)); }
     return { profileDir: this.browser.profileDir, requests: this.browser.requests.length, toolCount: r.toolCount };
   }
-  send({ text = '', auto, maxSteps, tokenBudget, attachments, source = 'user', enqueue = false }) {
+  send({ text = '', auto, maxSteps, tokenBudget, attachments, source = 'user', enqueue = false }, continuationKey) {
+    const continuation = continuationKey === GOAL_CONTINUATION && this.goal?.status === 'active';
+    if (continuationKey === GOAL_CONTINUATION && !continuation) return { ok: false, error: '目标已暂停或结束' };
     if (this.workspace.kind === 'unselected') return { ok: false, code: 'workspace-required', error: '请先选择工作文件夹，或明确选择“不在目录中工作”' };
     if (this.mgr.projectsBusy) return { ok: false, error: '正在更新项目目录，请稍候' };
     if (this.mgr.plugins?.applying) return { ok:false, error:'正在切换插件，请稍后发送任务' };
@@ -309,26 +317,29 @@ class Session {
     if (!key) return { ok: false, code: 'model-required', error: '尚未配置 API Key，请在「设置」页填写' };
     let release; try { release = this.mgr.workspaces.acquire(this.workspace, this.id, this.mode !== 'read-only'); }
     catch (e) { return { ok: false, error: e.message }; }
+    this.goalDriver.cancel(); clearTimeout(this.queueTimer);
     if (source === 'goal' && this.goal?.status === 'active') { this.goal.turns++; if (this.goal.tokenBudget > 0) tokenBudget = Math.min(tokenBudget || Infinity, Math.max(1, this.goal.tokenBudget - (this.goal.usedTokens || 0))); this.saveState(); this.emit('goal', this.goal); }
     const goalId = source === 'goal' ? this.goal?.id : null;
+    const goalRevision = this.goal?.revision || 0;
     this.permissionBlocked = false;
-    const run = this.runs.start({ workspace: this.workspace, mode: this.mode, text, source }); this.activeRun = run;
+    const run = this.runs.start({ workspace: this.workspace, mode: this.mode, text: continuation ? this.goal.objective : text, source }); this.activeRun = run;
     this.lastGoal = { text, auto };
-    this.suggestTitle(text);
+    if (!continuation) this.suggestTitle(text);
     this.updatedAt = Date.now(); this.mgr.emitList();
     const goalTimer = goalId && this.goal.deadline ? setTimeout(() => agent.finishSoon(), Math.max(1, this.goal.deadline - Date.now())) : null;
-    this.completion = agent.send(text, { auto, maxSteps, tokenBudget, attachments, runId: run.id }).then(result => {
-      if (goalId && this.goal?.id === goalId) { this.goal.usedTokens = (this.goal.usedTokens || 0) + (result?.usage?.prompt || 0) + (result?.usage?.completion || 0); if (this.goal.status === 'active' && ((this.goal.tokenBudget > 0 && this.goal.usedTokens >= this.goal.tokenBudget) || ['budget', 'time-limit', 'max-steps'].includes(result?.stop))) this.goal.status = 'paused'; }
+    this.completion = agent.send(text, { auto, maxSteps, tokenBudget, attachments, runId: run.id, continuation }).then(result => {
+      if (goalId && this.goal?.id === goalId) {
+        const hasWork = (this.goal.revision || 0) !== goalRevision || agent.hist.events.some(e => e.t === 'tool' && e.turnId === run.id && !e.isError && !['goal_update', 'goal_get', 'todo_write', 'agent_list'].includes(e.name));
+        this.goal = finishGoalRound(this.goal, result, { automatic: continuation, hasWork });
+      }
       const status = this.permissionBlocked || ['max-steps', 'budget', 'time-limit', 'stalled'].includes(result?.stop) ? 'needs_attention' : result?.stop === 'completed' ? 'completed' : result?.stop === 'interrupted' ? 'cancelled' : 'failed';
       this.runs.status(run, status, { stop: result?.stop, usage: result?.usage }); if (goalId && this.goal?.id === goalId && this.goal.status === 'active' && (status !== 'completed' && result?.stop !== 'max-steps')) { this.goal.status = status === 'cancelled' ? 'paused' : 'needs_attention'; } return { ...run };
     }).catch(e => { this.runs.status(run, 'failed', { error: e.message }); if (goalId && this.goal?.id === goalId) this.goal.status = 'needs_attention'; this.emit('agent-error', e.message); return { ...run }; })
       .finally(() => {
         clearTimeout(goalTimer); release(); this.activeRun = null; this.subagents.cancelRun(run.id);
-        if (goalId && this.goal?.id === goalId && this.goal.status === 'active' && this.goal.maxTurns > 0 && this.goal.turns >= this.goal.maxTurns) { this.goal.status = 'paused'; this.goal.summary ||= '已到本次自动继续上限，可检查进展后手动继续。'; }
         if (!this.closing) {
-          const next = this.queue.shift();
-          if (next) setTimeout(() => this.send({ ...next, ...(this.goal?.status === 'active' ? { source: 'goal' } : {}) }), 0);
-          else if (goalId && this.goal?.id === goalId && this.goal.status === 'active') setTimeout(() => { if (!this.closing && this.goal?.id === goalId && this.goal.status === 'active' && !this.agent?.running) this.send({ text: '继续完成当前目标。请先核对已有证据和进展，再执行下一项必要工作；确已完成并验证时调用 goal_update(complete)，需要用户输入或权限时调用 goal_update(blocked)。', source: 'goal' }); }, 300);
+          if (this.queue.length) this.queueTimer = setTimeout(() => { if (!this.closing && !this.agent?.running) this.resumeQueue(); }, 0);
+          else if (goalId && this.goal?.id === goalId) this.goalDriver.schedule();
         }
         this.saveState(); this.emit('goal', this.goal); this.mgr.emitList();
       });
@@ -338,9 +349,9 @@ class Session {
     if (this.agent?.running) return { ok: false, error: '请先停止当前任务，再启动目标' };
     objective = String(objective || '').trim(); if (!objective || objective.length > 12000) return { ok: false, error: '请在 /goal 后填写目标（最多12000字）' };
     const previous = this.goal;
-    this.goal = { id: crypto.randomUUID(), batchId: crypto.randomUUID(), objective, workspaceId: this.workspace.id, status: 'active', turns: 0, maxTurns: 0, limitsVersion: 1, tokenBudget: this.mgr.getSettings().tokenBudget || 0, usedTokens: 0, deadline: null, startedAt: Date.now(), summary: '' };
+    this.goalDriver.cancel(); this.goal = createGoal(objective, this.workspace.id, this.mgr.getSettings().tokenBudget || 0);
     const result = await this.send({ text: objective, source: 'goal', attachments });
-    if (!result.ok) this.goal = previous;
+    if (!result.ok) { this.goal = previous; this.goalDriver.schedule(); }
     this.saveState(); this.emit('goal', this.goal); return result;
   }
   async goalAction(action) {
@@ -351,23 +362,23 @@ class Session {
       if (this.goal.workspaceId !== this.workspace.id) return { ok: false, error: '目标绑定的工作区已变化，请切回原工作区或新建目标' };
       if (this.goal.status === 'complete') return { ok: false, error: '此目标已经完成，请新建目标' };
       if (!this.goal.limitsVersion) Object.assign(this.goal, { maxTurns: 0, tokenBudget: this.mgr.getSettings().tokenBudget || 0, limitsVersion: 1 });
-      this.goal.status = 'active'; this.goal.batchId = crypto.randomUUID(); this.goal.turns = 0; this.goal.usedTokens = 0; this.goal.deadline = null;
-      const r = await this.send({ text: '继续目标：' + this.goal.objective + '\n上次进展：' + this.goal.summary, source: 'goal' });
+      this.goalDriver.cancel(); this.goal.status = 'active'; this.goal.batchId = crypto.randomUUID(); this.goal.turns = 0; this.goal.usedTokens = 0; this.goal.deadline = null; this.goal.stopReason = null; this.goal.resumeNote = '';
+      const r = await this.send({ text: '', source: 'goal' }, GOAL_CONTINUATION);
       if (!r.ok) this.goal.status = 'paused'; this.saveState(); this.emit('goal', this.goal); return r;
     } else return { ok: false, error: '未知目标操作' };
     this.saveState(); this.emit('goal', this.goal); return { ok: true };
   }
-  updateGoal({ status, summary }) {
+  updateGoal(value) {
     if (!this.goal || this.goal.status !== 'active' || this.activeRun?.source !== 'goal') throw new Error('只有用户通过 /goal 启动的当前目标可以更新');
-    this.goal.summary = String(summary || '').slice(0, 12000);
-    this.goal.status = status === 'complete' ? 'complete' : status === 'blocked' ? 'needs_attention' : 'active';
-    if (status === 'complete') this.goal.endedAt = Date.now();
+    if (value.status === 'complete' && this.subagents.jobs.size) throw new Error('请先等待或取消研究子代理，并核验其结果，再完成目标');
+    this.goal = updateGoal(this.goal, value, { runId: this.activeRun.id });
+    if (this.goal.status !== 'active') this.goalDriver.cancel();
     this.saveState(); this.emit('goal', this.goal); return this.goal;
   }
-  interrupt() { this.queue = []; if (this.goal?.status === 'active') { this.goal.status = 'paused'; this.emit('goal', this.goal); } this.subagents.cancelAll(); this.saveState(); this.agent?.interrupt(); killAllJobs(this.projectDir); this.mgr.emitList(); }
-  resumeQueue() { if (this.agent?.running) throw new Error('任务正在运行'); const next = this.queue.shift(); this.saveState(); return next ? this.send(next) : { ok: false, error: '队列为空' }; }
+  interrupt() { this.goalDriver.cancel(); clearTimeout(this.queueTimer); this.queue = []; if (this.goal?.status === 'active') { this.goal.status = 'paused'; this.emit('goal', this.goal); } this.subagents.cancelAll(); this.saveState(); this.agent?.interrupt(); killAllJobs(this.projectDir); this.mgr.emitList(); }
+  resumeQueue() { if (this.agent?.running) throw new Error('任务正在运行'); const next = this.queue.shift(); const result = next ? this.send(next) : { ok: false, error: '队列为空' }; if (next && !result.ok) this.queue.unshift(next); this.saveState(); return result; }
   async closeBrowser() { this.agent?.interrupt(); await this.mcp.stop(); await this.browser.close(); this.mgr.emitList(); }
-  async dispose() { this.closing = true; this.titleRevision++; this.titleController?.abort(); this.subagents.cancelAll(); if (this.goal?.status === 'active') this.goal.status = 'paused'; this.agent?.interrupt(); killAllJobs(this.projectDir); this.saveState(); for (const p of this.pending.values()) p.finish(false); for (const p of this.askPending.values()) p.finish(''); if (this.completion) await Promise.race([this.completion.catch(() => {}), new Promise(r => setTimeout(r, 2500))]); await this.closeBrowser().catch(() => {}); }
+  async dispose() { this.closing = true; this.goalDriver.cancel(); clearTimeout(this.queueTimer); this.titleRevision++; this.titleController?.abort(); this.subagents.cancelAll(); if (this.goal?.status === 'active') this.goal.status = 'paused'; this.agent?.interrupt(); killAllJobs(this.projectDir); this.saveState(); for (const p of this.pending.values()) p.finish(false); for (const p of this.askPending.values()) p.finish(''); if (this.completion) await Promise.race([this.completion.catch(() => {}), new Promise(r => setTimeout(r, 2500))]); await this.closeBrowser().catch(() => {}); }
 }
 
 export class SessionManager {

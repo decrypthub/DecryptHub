@@ -4,7 +4,7 @@ export const blankSession = () => ({
   status: { running: false, pages: [] },
   requests: [], scripts: [], events: [], logs: [],
   usage: null, ctx: null,
-  agentRunning: false, thinking: false, toolCount: 0,
+  agentRunning: false, thinking: false, retry: null, toolCount: 0,
   url: 'https://', mode: 'standard', review: 'manual', approvals: [], question: null, run: null,
   todos: null,
 });
@@ -46,16 +46,16 @@ export function sessionReducer(state, action) {
     case 'log': return set({ logs: [...cur.logs.slice(-300), action.v] });
     case 'ev': return set({ events: [...cur.events, action.v] });
     case 'assistant-start': return set({ thinking: false, events: cur.events.some(e => e.id === action.v.id) ? action.v.retry ? cur.events.map(e => e.id === action.v.id ? { ...e, ...action.v, content: '', reasoning: '', phase: 'streaming', finished: false } : e) : cur.events : [...cur.events, { type: 'assistant', content: '', phase: 'streaming', ...action.v }] });
-    case 'assistant-end': return set({ thinking: false, events: cur.events.map(e => e.type === 'assistant' && e.id === action.v.id ? { ...e, ...action.v, finished: true } : e) });
+    case 'assistant-end': return set({ thinking: false, retry: null, events: cur.events.map(e => e.type === 'assistant' && e.id === action.v.id ? { ...e, ...action.v, finished: true } : e) });
     case 'delta': {
       const events = cur.events.slice();
       for (let i = events.length - 1; i >= 0; i--) if (events[i].type === 'assistant' && (typeof action.v === 'string' || events[i].id === action.v.id)) { events[i] = { ...events[i], content: events[i].content + (typeof action.v === 'string' ? action.v : action.v.text) }; break; }
-      return set({ events, thinking: false });
+      return set({ events, thinking: false, retry: null });
     }
     case 'reasoning': {
       const events = cur.events.slice();
       for (let i = events.length - 1; i >= 0; i--) if (events[i].type === 'assistant' && events[i].id === action.v?.id) { events[i] = { ...events[i], reasoning: (events[i].reasoning || '') + (typeof action.v.text === 'string' ? action.v.text : '') }; break; }
-      return set({ events, thinking: true });
+      return set({ events, thinking: true, retry: null });
     }
     // 模型返回的 tool_call id 可能跨步骤重复（如 call_0），只更新最近一个尚未结束的同 id 工具
     case 'tool-end': {

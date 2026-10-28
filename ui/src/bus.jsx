@@ -197,6 +197,7 @@ export function Workbench({ children }) {
       on('agent-assistant-start', (v, s) => dispatch({ t: 'assistant-start', sid: s, v })),
       on('agent-delta', (d, s) => dispatch({ t: 'delta', sid: s, v: d })),
       on('agent-reasoning', (v, s) => dispatch({ t: 'reasoning', sid: s, v })),
+      on('agent-retry', (v, s) => dispatch({ t: 'patch', sid: s, patch: { retry: v } })),
       on('agent-assistant-end', (v, s) => dispatch({ t: 'assistant-end', sid: s, v })),
       on('agent-usage', (u, s) => dispatch({ t: 'patch', sid: s, patch: { usage: u } })),
       on('agent-tool-start', (t, s) => dispatch({ t: 'ev', sid: s, v: { type: 'tool', ...t } })),
@@ -204,7 +205,7 @@ export function Workbench({ children }) {
       on('agent-error', (e, s) => dispatch({ t: 'ev', sid: s, v: { type: 'error', content: e } })),
       on('agent-done', (d, s) => {
         dispatch({ t: 'ev', sid: s, v: { type: 'turn-end', ...d } });
-        dispatch({ t: 'patch', sid: s, patch: { agentRunning: false, thinking: false, browserActivity: null } });
+        dispatch({ t: 'patch', sid: s, patch: { agentRunning: false, thinking: false, retry: null, browserActivity: null } });
         if (d?.stop === 'max-steps') dispatch({ t: 'ev', sid: s, v: { type: 'note', content: '已达到你设置的工具轮数预算，进展已保存。运行设置中填 0 可取消此预算。' } });
         if (d?.stop === 'stalled') dispatch({ t: 'ev', sid: s, v: { type: 'note', content: '相同调用连续六轮返回相同错误，Agent 已保存进展并暂停。请查看错误，或补充信息后继续。' } });
       }),
@@ -244,7 +245,7 @@ export function Workbench({ children }) {
       dispatch({ t: 'patch', sid: s.id, patch });
       api.invoke('session-snapshot', { sessionId: s.id }).then(v => {
         const events = historyEvents(v.events, v.partial, v.partialItem, v.partialReasoning);
-        dispatch({ t: 'patch', sid: s.id, patch: { events, ctx: v.context, mode: v.state.mode, review: v.state.review || 'manual', todos: v.state.todos, approvals: v.state.approvals || [], question: v.state.questions?.[0] || null, run: v.state.run, debuggerPaused: !!v.state.debuggerPaused, goal: v.state.goal, subagents: v.state.subagents || [] } });
+        dispatch({ t: 'patch', sid: s.id, patch: { events, ctx: v.context, mode: v.state.mode, review: v.state.review || 'manual', todos: v.state.todos, approvals: v.state.approvals || [], question: v.state.questions?.[0] || null, run: v.state.run, retry: v.state.modelRetry || null, debuggerPaused: !!v.state.debuggerPaused, goal: v.state.goal, subagents: v.state.subagents || [] } });
       }).catch(() => seen.current.delete(s.id));
       api.invoke('get-requests', { sessionId: s.id }).then(r => r?.list?.length && dispatch({ t: 'requests', sid: s.id, v: r.list })).catch(() => {});
     }
