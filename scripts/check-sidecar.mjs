@@ -42,9 +42,17 @@ try {
   if ((await invoke('component-info')).installed) throw new Error('Expected a clean core-only install');
   const opened = await invoke('browser-launch', { sessionId, url: 'https://example.com' });
   if (opened.ok || !opened.error.includes('WDH')) throw new Error('Missing component must produce an actionable error');
+  await invoke('session-set-mode', { sessionId, mode: 'full-access' });
+  const terminalId = crypto.randomUUID();
+  await invoke('terminal-open', { sessionId, id: terminalId, cols: 90, rows: 25 });
+  await invoke('terminal-input', { sessionId, id: terminalId, data: process.platform === 'win32' ? "Write-Output ('PACKAGED_' + 'TERMINAL_OK')\r" : "printf 'PACKAGED_%s\\n' 'TERMINAL_OK'\r" });
+  let terminalOutput = '';
+  const terminalDeadline = Date.now() + 15000;
+  while (!terminalOutput.includes('PACKAGED_TERMINAL_OK')) { if (Date.now() > terminalDeadline) throw Error('Packaged PTY input/output failed'); terminalOutput = (await invoke('terminal-snapshot', { sessionId, id: terminalId })).output; await new Promise(r => setTimeout(r, 50)); }
+  await invoke('terminal-close', { sessionId, id: terminalId });
   if (fs.existsSync(marker)) throw new Error('Executable loaded untrusted bunfig preload');
   await invoke('browser-close', { sessionId }); await invoke('prepare-exit');
-  console.log('Packaged bundle passed: WS, managed workspace, core-only tools, optional component diagnostic, shutdown, no working-directory preload. Runtime: ' + binary);
+  console.log('Packaged bundle passed: WS, managed workspace, core-only tools, optional component diagnostic, real PTY input/output/close, shutdown, no working-directory preload. Runtime: ' + binary);
 } finally {
   socket?.terminate();
   if (child.exitCode === null) await Promise.race([new Promise(r => child.once('exit', r)), new Promise(r => setTimeout(r, 12000))]);

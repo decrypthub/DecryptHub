@@ -63,10 +63,12 @@ export function EmptyState({ icon = 'folder', title, description, children, comp
   </div>;
 }
 
-export function Markdown({ text }) {
+export const DocumentLinks = React.createContext(null);
+export function Markdown({ text, basePath, root }) {
   const ref = useRef();
+  const open = React.useContext(DocumentLinks);
   useEffect(() => { if (ref.current) highlightHtml(ref.current); }, [text]);
-  return <div className="md" ref={ref} dangerouslySetInnerHTML={{ __html: renderMd(text) }} />;
+  return <div className="md" ref={ref} onClick={e => { const link = e.target.closest('a[href]'); if (!link) return; e.preventDefault(); const href = link.getAttribute('href'); if (href?.startsWith('#')) { ref.current?.querySelector('[id="' + CSS.escape(href.slice(1)) + '"]')?.scrollIntoView(); return; } open?.(href, { basePath, root }); }} dangerouslySetInnerHTML={{ __html: renderMd(text) }} />;
 }
 
 export function Dropdown({ value, options = [], onChange, placeholder = '选择', title, label, width }) {

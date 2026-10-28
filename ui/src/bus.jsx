@@ -3,7 +3,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useReducer, useRef, useState } from 'react';
 import { toast as notify } from 'sonner';
 import { blankSession, sessionReducer, mod, isApi } from './state.js';
-import { askConfirm, askQuestion } from './kit.jsx';
+import { askConfirm, askQuestion, DocumentLinks } from './kit.jsx';
 import { onConnState, native } from './transport.js';
 import { normalizeTargetUrl } from '../../sidecar/url.mjs';
 import { scheduleStartupCheck } from './updater.js';
@@ -12,6 +12,7 @@ import { rememberPreview } from './attachments.jsx';
 import { parseCommand, extensionRequest } from './commands.js';
 import { BrowserSurface } from './browser-surface.js';
 import { useSessionView } from './use-session-view.jsx';
+import { useWorkspaceTabs } from './use-workspace-tabs.jsx';
 
 const api = window.api;
 const Ctx = createContext(null);
@@ -47,6 +48,8 @@ export function Workbench({ children }) {
   const input = drafts[sid] || '';
   const setInput = useCallback(value => setDrafts(d => ({ ...d, [sidRef.current]: value })), []);
   const viewRef = useRef();       // 浏览器画面容器
+  const [viewElement, setViewElement] = useState(null);
+  const bindViewport = useCallback(element => { viewRef.current = element; setViewElement(element); }, []);
   const canvasRef = useRef();     // 画面
   const urlRef = useRef();        // 地址栏
   const inputRef = useRef();      // 输入框
@@ -73,6 +76,11 @@ export function Workbench({ children }) {
     if (k === side && sideOpen) { setSideOpen(false); return; }
     setSide(k); setSideOpen(true);
   }, [side, sideOpen]);
+  const tabs = useWorkspaceTabs({ presentation, sid, cur, session, api, toast, setWorkspacePrompt, setView });
+  function openContentLink(href, options) {
+    if (/^https?:\/\//i.test(href || '')) tabs.openWebLink(href);
+    else tabs.openDocument(href, { ...options, link: true });
+  }
 
   const addAtt = useCallback((list) => {
     const s = sidRef.current;
@@ -271,13 +279,13 @@ export function Workbench({ children }) {
     };
     const ro = new ResizeObserver(push); ro.observe(el); push();
     return () => { ro.disconnect(); clearTimeout(t); };
-  }, [sid, runningNow, view, side, sideOpen]);
+  }, [sid, runningNow, view, side, sideOpen, tabs.activeTab?.id, tabs.browserReady, viewElement]);
 
   // 原生嵌入：把面板矩形报告给 Rust，Chrome 子窗口跟随
   const embedOn = !!(cur.status.running && cur.status.embed && cur.status.chromePid);
   const [embedCovered, setEmbedCovered] = useState(false);
   useEffect(() => {
-    if (!embedOn || view !== 'chat' || side !== 'browser' || !sideOpen) { surface.current.hide().catch(() => {}); return; }
+    if (!embedOn || !tabs.browserReady || view !== 'chat' || side !== 'browser' || !sideOpen) { surface.current.hide().catch(() => {}); return; }
     const el = viewRef.current; if (!el) return;
     const mySid = sid, pid = cur.status.chromePid;
     let dead = false, t = null, inset = null, insetAt = 0, lastKey = '', force = true;
@@ -316,7 +324,7 @@ export function Workbench({ children }) {
     const iv = setInterval(() => { force = true; kick(); }, 1500);
     kick();
     return () => { dead = true; if (activityKick.current === kick) activityKick.current = null; clearTimeout(t); clearInterval(iv); cancelAnimationFrame(raf); ro.disconnect(); mo.disconnect(); window.removeEventListener('resize', kick); document.removeEventListener('visibilitychange', kick); surface.current.hide().catch(() => {}); };
-  }, [embedOn, sid, cur.status.chromePid, toast, view, side, sideOpen]);
+  }, [embedOn, sid, cur.status.chromePid, toast, view, side, sideOpen, tabs.activeTab?.id, tabs.browserReady, viewElement]);
 
   // 会话浏览器关闭 → 释放宿主窗口
   useEffect(() => {
@@ -528,6 +536,7 @@ export function Workbench({ children }) {
   // ---- 快捷键 ----
   useEffect(() => {
     const h = e => {
+      if (e.target.closest?.('.terminal-screen') && !e.altKey) return;
       if (mod(e) && e.key === 'Enter') { e.preventDefault(); send(false); }
       else if (mod(e) && e.key.toLowerCase() === 'l') { e.preventDefault(); setView('chat'); setSide('browser'); setSideOpen(true); setTimeout(() => { urlRef.current?.focus(); urlRef.current?.select(); }, 60); }
       else if (mod(e) && e.key.toLowerCase() === 't') { e.preventDefault(); newSession(); }
@@ -551,17 +560,17 @@ export function Workbench({ children }) {
     commandFeedback: commandFeedback[sid], clearCommandFeedback: () => setCommandFeedback(m => ({ ...m, [sid]: null })),
     settings, saveSettings, setSettings, firstRun, setFirstRun,
     sessions, sid, session, cur, dispatch, focusSession,
-    view, setView, side, setSide, sideOpen, setSideOpen, openSide, panelLayout: presentation.layout, setPanelLayout: presentation.setPanelLayout,
+    view, setView, side, setSide, sideOpen, setSideOpen, openSide, panelLayout: presentation.layout, setPanelLayout: presentation.setPanelLayout, tabs,
     launching, launch, go, newSession, closeSession, pinSession, cleanRetry,
     input, setInput, atts: atts[sid] || [], addAtt, rmAtt, addFiles, uploading: !!uploads[sid], sending: !!sending[sid], enableImages,
     send, sendInput, compactNow, pickModel, inv,
     setTheme,
-    refs: { viewRef, canvasRef, urlRef, inputRef, chatRef },
+    refs: { viewRef: bindViewport, canvasRef, urlRef, inputRef, chatRef },
     embedOn, embedCovered,
     isApi, fmt: { hostOf: undefined },
   };
 
   return <Ctx.Provider value={value}>
-    {children}
+    <DocumentLinks.Provider value={openContentLink}>{children}</DocumentLinks.Provider>
   </Ctx.Provider>;
 }

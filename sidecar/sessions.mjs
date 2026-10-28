@@ -23,6 +23,8 @@ import { ComponentStore } from './components.mjs';
 import { promptTitle, cleanTitle, SessionTitleService } from './session-titles.mjs';
 import { restoreGoal, createGoal, updateGoal, finishGoalRound, GoalDriver } from './goals.mjs';
 import { deleteSessionData, waitForSessionWriters, sessionDataPaths } from './session-data.mjs';
+import { SessionTerminals } from './terminals.mjs';
+import { BrowserTabs } from './browser-tabs.mjs';
 
 const MAX_SESSIONS = 100;
 const GOAL_CONTINUATION = Symbol('internal-goal-continuation');
@@ -30,6 +32,8 @@ const GOAL_CONTINUATION = Symbol('internal-goal-continuation');
 class Session {
   constructor(mgr, { id, title, titleSource, primary, lastUrl, updatedAt, pinned }) {
     this.mgr = mgr; this.id = id; this.title = title; this.primary = primary; this.lastUrl = lastUrl || '';
+    this.terminals = new SessionTerminals(this);
+    this.browserTabs = new BrowserTabs(this);
     this.titleSource = titleSource || (/^(?:会话\s*\d+|新对话|新会话)$/.test(title) ? 'placeholder' : 'manual');
     this.titleRevision = 0; this.titleController = null; this.titleJob = null; this.titleAttempted = false;
     this.pinned = !!pinned;
@@ -92,6 +96,7 @@ class Session {
   }
   setTodos(list) { this.todos = list; this.saveState(); this.emit('agent-todos', this.todos); }
   setMode(mode, review) {
+    this.terminals.cancelAll();
     if (this.agent?.running) throw new Error('请先停止当前任务，再切换权限');
     for (const p of this.pending.values()) p.finish(false);
     killAllJobs(this.projectDir);
@@ -129,6 +134,7 @@ class Session {
     return this.titleJob;
   }
   setWorkspace(binding) {
+    this.terminals.cancelAll();
     if (this.closing || this.mgr.sessions.get(this.id) !== this) throw new Error('会话已关闭，不能更换目录');
     if (this.browser.client || this.browser.starting) throw new Error('请先关闭浏览器，再更换文件夹');
     if (this.agent?.running) throw new Error('请先停止当前任务，再更换文件夹');
@@ -170,27 +176,28 @@ class Session {
     if (this.activeRun) { const run = this.activeRun; job.done.then(r => this.runs.event(run.id, 'process-completed', { invocationId, code: r.code, reason: r.reason || null })); }
     return job;
   }
-  async approve(req, signal) {
+  async approve(req, signal, { detached = false } = {}) {
+    const run = detached ? null : this.activeRun;
     if (signal?.aborted) return false;
     if (this.mode === 'full-access') return true;
     if (req.canRemember && this.allows.has(req.scopeKey)) return true;
     if (this.review === 'auto') {
       const review = autoReview(req);
-      if (this.activeRun) this.runs.event(this.activeRun.id, 'approval-reviewed', { name: req.name, scopeKey: req.scopeKey, review });
+      if (run && this.activeRun === run) this.runs.event(run.id, 'approval-reviewed', { name: req.name, scopeKey: req.scopeKey, review });
       if (review.allow) return true;
     }
-    if (this.activeRun?.source === 'automation') { this.permissionBlocked = true; this.runs.event(this.activeRun.id, 'permission-needed', { request: req }); return false; }
+    if (run?.source === 'automation') { this.permissionBlocked = true; this.runs.event(run.id, 'permission-needed', { request: req }); return false; }
     const id = crypto.randomUUID();
     return await new Promise(resolve => {
       let settled = false;
-      const finish = (allow) => { if (settled) return; settled = true; clearTimeout(timer); signal?.removeEventListener?.('abort', onAbort); this.pending.delete(id); this.emit('approval-resolved', { id, allow: !!allow }); if (this.activeRun) this.runs.status(this.activeRun, 'running'); resolve(!!allow); };
+      const finish = (allow) => { if (settled) return; settled = true; clearTimeout(timer); signal?.removeEventListener?.('abort', onAbort); this.pending.delete(id); this.emit('approval-resolved', { id, allow: !!allow }); if (run && this.activeRun === run) this.runs.status(run, 'running'); resolve(!!allow); };
       const timer = setTimeout(() => finish(false), 5 * 60 * 1000);
       const onAbort = () => finish(false);
       signal?.addEventListener?.('abort', onAbort, { once: true });
       timer.unref?.();
       const request = { ...req, id, expiresAt: Date.now() + 5 * 60 * 1000, workspace: this.workspace.root };
       this.pending.set(id, { finish, request });
-      if (this.activeRun) this.runs.status(this.activeRun, 'waiting_approval');
+      if (run && this.activeRun === run) this.runs.status(run, 'waiting_approval');
       this.emit('agent-approval', request);
     });
   }
@@ -382,7 +389,7 @@ class Session {
   interrupt() { this.goalDriver.cancel(); clearTimeout(this.queueTimer); this.queue = []; if (this.goal?.status === 'active') { this.goal.status = 'paused'; this.emit('goal', this.goal); } this.subagents.cancelAll(); this.saveState(); this.agent?.interrupt(); killAllJobs(this.projectDir); this.mgr.emitList(); }
   resumeQueue() { if (this.agent?.running) throw new Error('任务正在运行'); const next = this.queue.shift(); const result = next ? this.send(next) : { ok: false, error: '队列为空' }; if (next && !result.ok) this.queue.unshift(next); this.saveState(); return result; }
   async closeBrowser() { this.agent?.interrupt(); await this.mcp.stop(); await this.browser.close(); this.mgr.emitList(); }
-  async dispose() { this.closing = true; this.goalDriver.cancel(); clearTimeout(this.queueTimer); this.titleRevision++; this.titleController?.abort(); this.subagents.cancelAll(); if (this.goal?.status === 'active') this.goal.status = 'paused'; this.agent?.interrupt(); killAllJobs(this.projectDir); this.saveState(); for (const p of this.pending.values()) p.finish(false); for (const p of this.askPending.values()) p.finish(''); if (this.completion) await Promise.race([this.completion.catch(() => {}), new Promise(r => setTimeout(r, 2500))]); await this.closeBrowser().catch(() => {}); }
+  async dispose() { this.closing = true; this.goalDriver.cancel(); clearTimeout(this.queueTimer); this.titleRevision++; this.titleController?.abort(); this.subagents.cancelAll(); if (this.goal?.status === 'active') this.goal.status = 'paused'; this.agent?.interrupt(); killAllJobs(this.projectDir); this.saveState(); for (const p of this.pending.values()) p.finish(false); for (const p of this.askPending.values()) p.finish(''); if (this.completion) await Promise.race([this.completion.catch(() => {}), new Promise(r => setTimeout(r, 2500))]); await this.terminals.closeAll(); await this.closeBrowser().catch(() => {}); }
 }
 
 export class SessionManager {

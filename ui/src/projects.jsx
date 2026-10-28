@@ -39,7 +39,6 @@ export function ProjectPicker() {
         <button className="project-choice" onClick={() => { setOpen(false); w.setProjectEditor({}); }}><Icon n="plus" />新建项目</button>
         <button className="project-choice" onClick={async () => { try { await chooseFolder(w); setOpen(false); } catch (e) { w.toast(e.message, 'err'); } }}><Icon n="folder" />仅选择工作文件夹…</button>
         <button className="project-choice" onClick={managed}><Icon n="x" />不在目录中工作</button>
-        {ws?.kind !== 'unselected' && <button className="project-choice" onClick={() => navigator.clipboard.writeText(ws.root).then(() => w.toast('工作目录已复制', 'ok'))}><Icon n="copy" />复制当前目录路径</button>}
         {project && <button className="project-choice" onClick={() => { setOpen(false); w.setProjectEditor(project); }}><Icon n="settings" />编辑当前项目</button>}
       </div>
     </Popover.Content>

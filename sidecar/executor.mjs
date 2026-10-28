@@ -58,7 +58,19 @@ function launch(spec, { signal, env, timeoutMs = 60000 } = {}) {
 }
 
 export class Executor {
-  constructor() { this.jobs = new Map(); this.capability = null; }
+  constructor() { this.jobs = new Map(); this.capability = null; this.terminals = new Set(); }
+  async startTerminal(spec, { signal, verify } = {}) {
+    const { spawnTerminal } = await import('./terminal-process.mjs');
+    signal?.throwIfAborted(); verify?.();
+    if (this.terminals.size >= 24) throw Error('当前最多同时运行24个终端');
+    const pty = spawnTerminal(spec);
+    this.terminals.add(pty);
+    pty.done.finally(() => this.terminals.delete(pty));
+    const abort = () => pty.kill(); signal?.addEventListener('abort', abort, { once: true });
+    try { await pty.ready; signal?.throwIfAborted(); verify?.(); return pty; }
+    catch (error) { pty.kill(); await pty.done; throw error; }
+    finally { signal?.removeEventListener('abort', abort); }
+  }
   async probe(force = false) {
     if (process.env.JSRA_TEST_FIXTURES === '1' && process.env.JSRA_TEST_NO_SANDBOX === '1') return { backend: 'test', available: false, errors: ['Test fixture'], warnings: [], platform: process.platform };
     if (this.capability && !force) return this.capability;

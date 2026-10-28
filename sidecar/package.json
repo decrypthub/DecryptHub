@@ -8,8 +8,9 @@
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.81",
     "@modelcontextprotocol/sdk": "1.32.2",
+    "node-pty": "^1.1.0",
     "ws": "^8.18.0",
-    "zod": "^4.4.3",
-    "yauzl": "3.4.0"
+    "yauzl": "3.4.0",
+    "zod": "^4.4.3"
   }
 }

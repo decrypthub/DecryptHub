@@ -37,6 +37,7 @@ async function startServer() {
   const { publicSettings, decryptSecrets, mirrorProvider } = await import('./secrets.mjs');
   const { registerAttachment, attachmentPreview } = await import('./attachments.mjs');
   const { conversationMarkdown } = await import('./transcript.mjs');
+  const { readDocument } = await import('./documents.mjs');
   const consumedGrants = new Map();
   const usedNativeNonces = new Set();
 
@@ -142,6 +143,12 @@ async function startServer() {
     'session-create': a => sessions.create(a || {}).info(),
     'session-close': async a => { await sessions.close(a?.sessionId); return sessions.list(); },
     'session-delete': async a => { await sessions.delete(a?.sessionId); return sessions.list(); },
+    'terminal-open': a => S(a).terminals.open(a),
+    'terminal-snapshot': a => S(a).terminals.snapshot(a.id),
+    'terminal-input': a => S(a).terminals.input(a.id, a.data),
+    'terminal-resize': a => S(a).terminals.resize(a.id, a.cols, a.rows),
+    'terminal-close': a => S(a).terminals.close(a.id),
+    'document-read': a => readDocument(S(a), a),
     'session-rename': a => { S(a).rename(a.title); return true; },
     'session-pin': a => { const s = S(a); s.setPinned(!!a.pinned); return sessions.list(); },
     'session-focus': async a => { await sessions.focus(a?.sessionId); return true; },
@@ -166,6 +173,9 @@ async function startServer() {
     'navigate': a => B(a).navigate(a.url),
     'new-page': a => B(a).newPage(a.url),
     'select-page': a => B(a).selectPage(a.index),
+    'browser-tab-select': a => S(a).browserTabs.select(String(a.pageId || '')),
+    'browser-tab-close': a => S(a).browserTabs.close(String(a.pageId || '')),
+    'browser-tab-navigate': a => S(a).browserTabs.navigate(a.pageId, a.url),
     'go-back': a => B(a).goBack(),
     'reload': a => B(a).reload(),
     'clear-requests': a => S(a).browser.clearRequests(),
@@ -206,7 +216,7 @@ async function startServer() {
       const { events } = a; if (!Array.isArray(events) || events.length > 1000) throw new Error('invalid fixture');
       ag.hist.events = events; ag.persist(); return true;
     },
-    'session-set-mode': a => S(a).setMode(a?.mode, a?.review),
+    'session-set-mode': async a => { const s = S(a); if (s.agent?.running) throw Error('请先停止当前任务，再切换权限'); await s.terminals.closeAll(); return s.setMode(a?.mode, a?.review); },
     'agent-approval-reply': a => ({ ok: S(a).replyApproval(a?.id, { allow: !!a?.allow, always: !!a?.always }) }),
     'agent-answer': a => ({ ok: S(a).answerAsk(a?.id, a?.answer) }),
     'debug-paused': async a => {

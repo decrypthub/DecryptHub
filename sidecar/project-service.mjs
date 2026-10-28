@@ -29,7 +29,7 @@ export class ProjectService {
       if (input.primaryKey && !keys.has(input.primaryKey)) throw Error('主目录不属于当前项目');
       const primaryId = keys.get(input.primaryKey) || folders[0]?.id;
       validateProject({ name: input.name, folders, primaryId });
-      for (const s of affected) await s.closeBrowser();
+      for (const s of affected) { await s.terminals.closeAll(); await s.closeBrowser(); }
       const project = this.sessions.projects.save({ id: input.id, name: input.name, folders, primaryId });
       for (const s of affected) s.setWorkspace(this.sessions.projects.workspace(project.id));
       this.sessions.broadcast('projects', this.sessions.projects.list());
@@ -45,7 +45,7 @@ export class ProjectService {
     if (projectId) next = this.sessions.projects.workspace(projectId);
     else { next = { ...s.workspace }; delete next.projectId; delete next.projectRevision; delete next.roots; }
     if (next.kind !== 'unselected') this.sessions.workspaces.verify(next);
-    await s.closeBrowser();
+    await s.terminals.closeAll(); await s.closeBrowser();
     if (next.kind === 'unselected') { s.projectId = null; s.workspace = next; s.saveState(); this.sessions.emitList(); }
     else s.setWorkspace(next);
     return s.info();
@@ -64,7 +64,7 @@ export class ProjectService {
     return this.transaction(async () => {
       const s = this.sessions.get(sessionId); this.assertIdle(s);
       const next = input.managed ? null : this.sessions.workspaces.folder(this.authorizeFolder(input.grant, s.id));
-      await s.closeBrowser(); return s.setWorkspace(next);
+      await s.terminals.closeAll(); await s.closeBrowser(); return s.setWorkspace(next);
     });
   }
 }

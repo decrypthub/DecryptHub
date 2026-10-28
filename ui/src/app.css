@@ -198,7 +198,7 @@ kbd { font-family: var(--default-font-family); font-size: 10px; font-weight: 400
 .dock { width: 100%; height: 100%; min-width: 0; display: flex; flex-direction: column; background: var(--surface); container-type: inline-size; container-name: tools; }
 .dock-layout { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .dock-head { display: flex; align-items: center; flex: 0 0 56px; padding: 0 var(--window-controls-space) 0 12px; border-bottom: 1px solid var(--line); user-select: none; }
-.dock-tabs { flex: 1; min-width: 0; box-shadow: none; overflow: hidden; }
+.dock-tabs { flex: 1; min-width: 0; box-shadow: none; overflow-x: auto; overflow-y: hidden; }
 
 .dock-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .bar { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 11px 12px; border-bottom: 1px solid var(--line); }
@@ -660,3 +660,36 @@ kbd { font-family: var(--default-font-family); font-size: 10px; font-weight: 400
 .extension-list { margin:18px 0; max-height:240px; overflow:auto; }
 .extension-preview { max-height:380px; overflow:auto; padding:16px; background:var(--inset); border-radius: var(--corner-card); }
 .project-file-root { padding:8px 12px; }
+
+
+/* Session workspace tabs; close actions are siblings of the tab buttons. */
+.dock-head { gap: 6px; }
+.dock-tab-wrap { position: relative; display: flex; align-items: center; flex: 0 0 auto; max-width: 210px; }
+.dock-tab-wrap .dock-tab { gap: 8px; min-width: 90px; max-width: 210px; padding-right: 32px; }
+.dock-tab-wrap > .action-icon { position: absolute; right: 3px; opacity: 0; }
+.dock-tab-wrap:hover > .action-icon, .dock-tab-wrap:focus-within > .action-icon { opacity: 1; }
+.dock-tab-wrap:has([data-state="active"]) > .action-icon { opacity: 1; }
+.turn-files { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.dock-pane[hidden] { display: none; }
+.dock-launcher { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 12px; padding: 28px; }
+.dock-launcher-item { display: flex; align-items: center; gap: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); color: var(--ink); padding: 20px; font: inherit; text-align: left; cursor: pointer; }
+.dock-launcher-item:hover, .dock-launcher-item:focus-visible { background: var(--inset); }
+.dock-launcher-item > span { flex: 1; }
+.dock-launcher-item strong, .dock-launcher-item small { display: block; }
+.dock-launcher-item small { color: var(--muted); margin-top: 5px; font-size: 12px; }
+.browser-workspace, .document-panel, .terminal-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+.browser-workspace[hidden] { display: none; }
+.browser-views { flex: 0 0 auto; padding: 0 12px; }
+.browser-views [role=tab] { gap: 7px; }
+.document-toolbar { flex-wrap: wrap; }
+.document-content { flex: 1; min-height: 0; overflow: auto; padding: 24px; margin: 0; }
+.document-content .md { max-width: 820px; margin: 0 auto; }
+.document-panel > pre.document-content { max-height: none; border: 0; border-radius: 0; background: transparent; }
+.terminal-screen { flex: 1; min-height: 0; overflow: hidden; padding: 10px; background: var(--bg); }
+.terminal-screen .xterm { height: 100%; }
+.terminal-error { margin: 8px 14px; }
+.permission-menu-item { height: auto; min-height: 58px; gap: 10px; white-space: normal; padding-top: 9px; padding-bottom: 9px; }
+.permission-menu-item > span { flex: 1; min-width: 0; }
+.permission-menu-item strong, .permission-menu-item small { display: block; }
+.permission-menu-item strong { font-size: 13px; font-weight: 500; }
+.permission-menu-item small { margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.45; }

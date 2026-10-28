@@ -126,10 +126,18 @@ function MessageStream({ events }) {
       {turn.user && <Event e={turn.user} />}
       <TurnProcess turn={turn} />
       {turn.answers.map((e, i) => <Event key={e.id || i} e={e} />)}
+      <TurnFiles turn={turn} />
       {turn.alerts.map((e, i) => <Event key={e.id || i} e={e} />)}
 
     </section>;
   });
+}
+
+function TurnFiles({ turn }) {
+  const w = useWorkbench(), run = w.cur.run, ws = w.session?.workspace;
+  if (run?.workspaceId !== ws?.id || run?.workspaceRevision !== ws?.revision) return null;
+  const files = turn.tools.filter(e => e.runId === run.id && e.result !== undefined && !e.isError && !e.cancelled && ['workspace_write', 'workspace_edit', 'workspace_append'].includes(e.name)).map(e => e.args?.path || e.args?.file).filter(Boolean);
+  return files.length ? <div className="turn-files">{[...new Set(files)].map(path => <Button key={path} size="2" variant="soft" color="gray" onClick={() => w.tabs.openDocument(path)}><Icon n="file" />{path.split(/[\\/]/).pop()}<Icon n="external" size={12} /></Button>)}</div> : null;
 }
 
 function TurnProcess({ turn }) {
