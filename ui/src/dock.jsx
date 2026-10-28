@@ -14,11 +14,11 @@ const TABS = [['browser', '浏览器', 'globe'], ['evidence', '网络请求', 'n
 
 export function Dock() {
   const { side, setSide, cur } = useWorkbench();
-  const apiCount = cur.requests.filter(isApi).length;
+  const requestCount = cur.requests.length;
   return <Tabs.Root className="dock-layout" value={side} onValueChange={setSide}>
     <div className="dock-head" data-window-drag-region onMouseDown={e => handleWindowDrag(e, native)}>
       <Tabs.List className="dock-tabs" size="2" aria-label="分析工具">
-        {TABS.map(([k, l, icon]) => <Tabs.Trigger key={k} value={k} className="dock-tab" aria-label={l} title={l}><Flex as="span" align="center" gap="2"><Icon n={icon} /><span className="dock-tab-label">{l}</span>{k === 'evidence' && apiCount > 0 && <Badge size="1" color="gray">{apiCount}</Badge>}</Flex></Tabs.Trigger>)}
+        {TABS.map(([k, l, icon]) => <Tabs.Trigger key={k} value={k} className="dock-tab" aria-label={l} title={l}><Flex as="span" align="center" gap="2"><Icon n={icon} /><span className="dock-tab-label">{l}</span>{k === 'evidence' && requestCount > 0 && <Badge size="1" color="gray">{requestCount}</Badge>}</Flex></Tabs.Trigger>)}
       </Tabs.List>
     </div>
     <Tabs.Content className="dock-body" value={side}>
@@ -40,6 +40,7 @@ function RequestPanel() {
   const [q, setQ] = useState('');
   const [type, setType] = useState('api');
   const [sel, setSel] = useState(null);
+  const [capturing, setCapturing] = useState(false);
   const paused = cur.status.capturePaused !== false;
   const all = cur.requests;
   const list = useMemo(() => {
@@ -68,24 +69,21 @@ function RequestPanel() {
 
   return <>
     <div className="bar">
-      <Text size="2" weight="medium">网络请求 {all.length}</Text>
       <Box flexGrow="1" style={{ minWidth: 80 }}>
         <TextField.Root size="1" value={q} onChange={e => setQ(e.target.value)} placeholder={mode === 'req' ? '过滤 URL / 参数名' : '过滤脚本 URL'}>
           <TextField.Slot><Icon n="search" size={12} /></TextField.Slot>
         </TextField.Root>
       </Box>
       {mode === 'req' && <>
-        <ActionIcon icon="stop" aria-pressed={paused} color={paused ? 'amber' : 'gray'} onClick={() => inv('net-pause', { paused: !paused }).catch(e => toast(e.message, 'err'))} title={paused ? '开始记录网络' : '暂停记录网络'} />
+        <ActionIcon icon={paused ? 'play' : 'pause'} aria-pressed={!paused} disabled={capturing || !cur.status.running} color={paused ? 'gray' : 'tomato'} onClick={async () => { setCapturing(true); try { await inv('net-pause', { paused: !paused }); } catch (e) { toast(e.message, 'err'); } finally { setCapturing(false); } }} title={paused ? (all.length ? '继续抓取网络请求' : '开始抓取网络请求') : '暂停抓取网络请求'} />
         <ActionIcon icon="trash" variant="soft" color="gray" onClick={() => { inv('clear-requests'); setSel(null); }} title="清空列表" />
         <ActionIcon icon="download" variant="soft" color="gray" onClick={() => exportHar('filtered')} title="导出当前筛选为 HAR" />
       </>}
     </div>
 
     <>
-        <div className="bar wrap">
-          {TYPE_FILTERS.map(([k, l]) => <Button key={k} size="2" variant={type === k ? 'soft' : 'ghost'} color={type === k ? undefined : 'gray'} onClick={() => setType(k)}>{l} <Text size="1" color="gray">{counts[k]}</Text></Button>)}
-          <Box flexGrow="1" />
-          <Text size="1" color="gray">{list.length} / {all.length}</Text>
+        <div className="bar request-filters" role="group" aria-label="请求类型筛选">
+          {TYPE_FILTERS.map(([k, l]) => <Button key={k} size="1" variant="soft" aria-pressed={type === k} color={type === k ? undefined : 'gray'} onClick={() => setType(k)}>{l}<Text size="1" color="gray">{counts[k]}</Text></Button>)}
         </div>
         <div className="req-head">
           <span>方法</span><span>状态</span><span>名称</span><span>类型</span><span className="num">大小</span><span className="num">耗时</span>

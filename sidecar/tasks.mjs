@@ -27,6 +27,11 @@ export class TaskStore {
   save(notify = true) { atomicJson(this.file, this.tasks); if (notify) this.onChange(this.list().map(t => ({ ...t, nextAt: this.nextAt(t) }))); }
 
   list() { return this.tasks.map(t => ({ ...t })).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)); }
+  pauseForSession(sessionId) {
+    let changed = false;
+    for (const task of this.tasks) if (task.sessionId === sessionId) { task.enabled = false; task.lastStatus = 'needs_attention'; task.lastError = '绑定的对话已删除，请重新选择会话后再启用'; changed = true; }
+    if (changed) this.save();
+  }
 
   upsert(input) {
     const now = Date.now();

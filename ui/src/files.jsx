@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Text, Code } from '@radix-ui/themes';
+import { Box, Text, Code, Tabs } from '@radix-ui/themes';
 import { useWorkbench } from './bus.jsx';
 import { Button, ActionIcon, Icon, EmptyState, Dropdown } from './kit.jsx';
 import { fmtSize } from './state.js';
@@ -7,6 +7,7 @@ import { fmtSize } from './state.js';
 export function WorkspaceFiles() {
   const w = useWorkbench(), { api, sid, session, cur, toast, addAtt } = w;
   const [rootId, setRootId] = useState('primary');
+  const [fileView, setFileView] = useState('local');
   const [branches, setBranches] = useState({}), [expanded, setExpanded] = useState(new Set()), [git, setGit] = useState(null);
   const [selected, setSelected] = useState(null), [content, setContent] = useState(''), [focus, setFocus] = useState('');
   const epoch = useRef(0), reading = useRef(0), tree = useRef(null), inFlight = useRef(new Set());
@@ -31,7 +32,7 @@ export function WorkspaceFiles() {
     if (ws?.kind === 'unselected') return;
     load('.', generation);
     if (!reset) for (const path of expanded) load(path, generation);
-    if (rootId === 'primary') api.invoke('git-status', { sessionId: sid }).then(value => { if (generation === epoch.current) setGit(value); }).catch(() => {});
+    if (rootId === 'primary') api.invoke('git-status', { sessionId: sid }).then(value => { if (generation === epoch.current) setGit(value); }).catch(e => { if (generation === epoch.current) setGit({ available: false, error: e.message }); });
   }
   useEffect(() => { refresh(true); return () => { epoch.current++; reading.current++; }; }, [identity]);
   useEffect(() => { if (!cur.agentRunning) refresh(); }, [cur.agentRunning, cur.changesVersion]);
@@ -65,11 +66,11 @@ export function WorkspaceFiles() {
   }
   const root = branches['.'];
   if (ws?.kind === 'unselected') return <EmptyState icon="folder" title="尚未选择工作目录" description="选择项目或文件夹后即可浏览代码。"><Button size="2" onClick={() => w.setWorkspacePrompt(true)}>选择工作目录</Button></EmptyState>;
-  return <>
-    <div className="bar"><Text size="2" weight="medium">工作区文件</Text><Box flexGrow="1" /><ActionIcon icon="reload" variant="soft" color="gray" onClick={() => refresh()} title="刷新文件目录" /></div>
+  return <Tabs.Root value={fileView} onValueChange={value => { reading.current++; setSelected(null); setFileView(value); if (value === 'git') setRootId('primary'); }} className="workspace-files">
+    <div className="bar"><Tabs.List size="1" aria-label="工作区文件视图" className="file-tabs"><Tabs.Trigger value="local">本地文件</Tabs.Trigger><Tabs.Trigger value="git">Git 改动</Tabs.Trigger></Tabs.List><ActionIcon icon="reload" variant="soft" color="gray" onClick={() => refresh()} title="刷新文件目录" /></div>
+    <Tabs.Content value="local" className="files-content">
     <div className="workspace-tree-root" title={ws?.root}><Icon n="folder" size={14} /><Text size="1" className="ellipsis">{ws?.label || '会话工作区'}</Text></div>
     {ws?.roots?.length > 1 && <div className="project-file-root"><Dropdown label="文件目录" value={rootId} options={ws.roots.map(r => ({ value: r.primary ? 'primary' : r.id, label: r.label + (r.primary ? ' · 主目录' : ' · 只读') }))} onChange={setRootId} /></div>}
-    {git?.available && <details className="git-changes"><summary>Git 改动 <Text size="1" color="gray">{git.files.length}</Text></summary>{git.files.map(file => <button className="file-row" key={file.name} onClick={() => open(file.name, true)}><Code>{file.status}</Code><span className="mono ellipsis">{file.name}</span></button>)}</details>}
     <div className="file-list workspace-tree" role="tree" aria-label="工作区目录" ref={tree}>
       {root?.loading && !root.entries && <Text as="p" size="1" color="gray">正在读取目录…</Text>}
       {root?.error && <div role="alert"><Text size="1" color="red">{root.error}</Text><Button size="1" variant="ghost" onClick={() => load()}>重试</Button></div>}
@@ -86,6 +87,10 @@ export function WorkspaceFiles() {
       </React.Fragment>)}
       {Object.values(branches).some(branch => branch.truncated) && <Text as="p" size="1" color="gray">单个目录仅展示前 2000 项，可使用 Agent 搜索定位文件。</Text>}
     </div>
+    </Tabs.Content>
+    <Tabs.Content value="git" className="files-content">
+      {!git ? <Text size="1" color="gray" m="3">正在读取Git状态…</Text> : !git.available ? <EmptyState icon="code" title="当前目录没有可用的Git仓库" description="本地文件仍可正常浏览。" /> : !git.files.length ? <EmptyState icon="check" title="没有未提交的改动" /> : <div className="file-list" aria-label="Git改动列表">{git.files.map(file => <button className="file-row" key={file.name} onClick={() => open(file.name, true)}><Code>{file.status}</Code><span className="mono ellipsis">{file.name}</span></button>)}</div>}
+    </Tabs.Content>
     {selected && <div className="detail"><div className="detail-head"><Text size="1" className="mono ellipsis" style={{ flex: 1 }} title={selected.path}>{selected.path}</Text><Button size="2" variant="soft" color="gray" onClick={() => rootId === 'primary' ? addAtt({ key: 'f:' + selected.path, kind: 'file', file: 'workspace/' + selected.path, label: selected.path.split('/').pop() }) : w.setInput(w.input + '\n请使用 workspace_read 读取项目目录 root=' + rootId + ' 中的 ' + selected.path)}><Icon n="sparkles" size={16} />发给 AI</Button><ActionIcon icon="copy" variant="soft" color="gray" onClick={() => navigator.clipboard.writeText(content).then(() => toast('已复制', 'ok')).catch(e => toast(e.message, 'err'))} title="复制内容" /><ActionIcon icon="x" variant="soft" color="gray" onClick={() => { reading.current++; setSelected(null); }} title="关闭文件" /></div><pre className="raw" style={{ flex: 1, maxHeight: 'none' }}>{content}</pre></div>}
-  </>;
+  </Tabs.Root>;
 }

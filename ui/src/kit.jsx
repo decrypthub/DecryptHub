@@ -5,10 +5,11 @@ import { Theme, Box, Flex, Text, Button as RadixButton, IconButton as RadixIconB
 import { PlayIcon, StopIcon, ArrowLeftIcon, ReloadIcon, ArrowRightIcon, GearIcon, SunIcon, MoonIcon, TrashIcon, ClockIcon, MagicWandIcon, GlobeIcon, CodeIcon, ActivityLogIcon, FileIcon, MixerHorizontalIcon, ArrowUpIcon, Cross2Icon, CheckIcon, DownloadIcon, FileTextIcon, InfoCircledIcon, ResetIcon, MinusIcon, SquareIcon, CopyIcon, PlusIcon, DotsHorizontalIcon, ChatBubbleIcon, ReaderIcon, DrawingPinIcon, LockClosedIcon, MagnifyingGlassIcon, StackIcon, ChevronUpIcon, ChevronDownIcon, ChevronRightIcon, DotFilledIcon, ViewVerticalIcon, DashboardIcon, TargetIcon, DesktopIcon, ExternalLinkIcon, LightningBoltIcon, Pencil1Icon, MobileIcon } from '@radix-ui/react-icons';
 import { renderMd, highlightHtml } from './md.js';
 import { themeConfig } from './theme.js';
+import { PauseIcon } from '@radix-ui/react-icons';
 
 function FolderGlyph(props) { return <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" {...props}><path d="M1.75 5.25V3.5c0-.7.55-1.25 1.25-1.25h3l1.5 1.5H13c.7 0 1.25.55 1.25 1.25v7.5c0 .7-.55 1.25-1.25 1.25H3c-.7 0-1.25-.55-1.25-1.25V5.25h12.5" /></svg>; }
 const ICONS = {
-  play: PlayIcon, stop: StopIcon, back: ArrowLeftIcon, reload: ReloadIcon,
+  play: PlayIcon, pause: PauseIcon, stop: StopIcon, back: ArrowLeftIcon, reload: ReloadIcon,
   go: ArrowRightIcon, settings: GearIcon, sun: SunIcon, moon: MoonIcon,
   trash: TrashIcon, clock: ClockIcon, sparkles: MagicWandIcon, globe: GlobeIcon,
   code: CodeIcon, network: ActivityLogIcon, file: FileIcon, terminal: CodeIcon,

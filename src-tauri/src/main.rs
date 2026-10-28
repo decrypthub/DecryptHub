@@ -4,6 +4,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
 mod embed;
+mod activity_overlay;
 mod shutdown;
 
 const KEYRING_SERVICE: &str = "com.webdecrypthub.app";
@@ -270,9 +271,9 @@ fn restart_sidecar(state: State<AppState>) -> Result<(), String> {
 // ---- 原生嵌入 Chrome（Windows Win32 / Linux X11）----
 // 同步命令在主线程执行，原生窗口操作都在主线程完成
 #[tauri::command]
-fn embed_show(app: tauri::AppHandle, session_id: String, pid: u32, rect: embed::CssRect, dpr: f64, inset: Option<embed::CssInset>) -> Result<serde_json::Value, String> {
+fn embed_show(app: tauri::AppHandle, session_id: String, pid: u32, rect: embed::CssRect, dpr: f64, inset: Option<embed::CssInset>, active: Option<bool>) -> Result<serde_json::Value, String> {
     let win = app.get_webview_window("main").ok_or("no main window")?;
-    embed::show(&win, &session_id, pid, rect, dpr, inset.unwrap_or_default())
+    embed::show(&win, &session_id, pid, rect, dpr, inset.unwrap_or_default(), active.unwrap_or(false))
 }
 #[tauri::command]
 fn embed_hide() { embed::hide_all(); }

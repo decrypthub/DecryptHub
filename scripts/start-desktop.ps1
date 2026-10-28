@@ -3,7 +3,7 @@
 param([string]$BinaryPath)
 $ErrorActionPreference = 'Stop'
 $desktopRoot = Split-Path -Parent $PSScriptRoot
-$desktopCandidates = @((Join-Path $desktopRoot 'src-tauri\target\debug\jsra-tauri.exe'), (Join-Path $desktopRoot '.tmp\projects-harness-target\debug\jsra-tauri.exe'))
+$desktopCandidates = @((Join-Path $desktopRoot 'src-tauri\target\debug\jsra-tauri.exe'), (Join-Path $desktopRoot '.tmp\projects-harness-target\debug\jsra-tauri.exe'), (Join-Path $desktopRoot '.tmp\refine-desktop-target\debug\jsra-tauri.exe'))
 $desktopBinary = if ($BinaryPath) { [IO.Path]::GetFullPath($BinaryPath) } else { ($desktopCandidates | Where-Object { Test-Path -LiteralPath $_ } | Get-Item | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName }
 $desktopEntry = Join-Path $desktopRoot 'sidecar\index.mjs'
 if (-not $desktopBinary -or -not (Test-Path -LiteralPath $desktopBinary)) {

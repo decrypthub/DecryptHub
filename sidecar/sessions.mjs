@@ -22,6 +22,7 @@ import { ResearchAgents } from './subagents.mjs';
 import { ComponentStore } from './components.mjs';
 import { promptTitle, cleanTitle, SessionTitleService } from './session-titles.mjs';
 import { restoreGoal, createGoal, updateGoal, finishGoalRound, GoalDriver } from './goals.mjs';
+import { deleteSessionData, waitForSessionWriters, sessionDataPaths } from './session-data.mjs';
 
 const MAX_SESSIONS = 100;
 const GOAL_CONTINUATION = Symbol('internal-goal-continuation');
@@ -255,6 +256,7 @@ class Session {
   }
 
   async launch({ isolated, url } = {}) {
+    if (this.closing) return { ok: false, error: '会话正在关闭或删除' };
     if (this.workspace.kind === 'unselected') return { ok: false, code: 'workspace-required', error: '请先选择工作目录，或选择“不在目录中工作”' };
     if (this.mgr.projectsBusy) return { ok: false, error: '正在更新项目目录，请稍候' };
     if (!this.browser.running && [...this.mgr.sessions.values()].filter(s => s.browser.running).length >= 6) return { ok: false, error: '最多同时打开 6 个浏览器' };
@@ -262,6 +264,7 @@ class Session {
     this.launching = (async () => { try {
       const settings = this.mgr.getSettings();
       const result = await this.browser.launch({ ...settings, profileDir: this.profileDir(), isolated: isolated ?? (this.primary ? settings.isolated : true), embed: wantEmbed(settings), url });
+      if (this.closing) return { ok: false, error: '会话正在关闭或删除' };
       if (!result.ok) return result;
       this.ensureAgent().localTools = DEFAULT_TOOLS; this.agent.emitContext();
       if (this.mgr.focusedId === this.id) await this.browser.startScreencast().catch(() => {});
@@ -294,6 +297,7 @@ class Session {
     return { profileDir: this.browser.profileDir, requests: this.browser.requests.length, toolCount: r.toolCount };
   }
   send({ text = '', auto, maxSteps, tokenBudget, attachments, source = 'user', enqueue = false }, continuationKey) {
+    if (this.closing) return { ok: false, error: '会话正在关闭或删除' };
     const continuation = continuationKey === GOAL_CONTINUATION && this.goal?.status === 'active';
     if (continuationKey === GOAL_CONTINUATION && !continuation) return { ok: false, error: '目标已暂停或结束' };
     if (this.workspace.kind === 'unselected') return { ok: false, code: 'workspace-required', error: '请先选择工作文件夹，或明确选择“不在目录中工作”' };
@@ -446,6 +450,23 @@ export class SessionManager {
     await s.dispose();
     if (!this.sessions.size) this.create({});
     this.emitList();
+  }
+  async delete(id) {
+    if (!id || !this.sessions.has(id)) throw Error('请指定要删除的会话');
+    if (this.projectsBusy) throw Error('正在更新项目目录，请稍后删除对话');
+    const s = this.get(id);
+    if (s.deleting) throw Error('正在删除此对话');
+    sessionDataPaths(this.userDataDir, s);
+    s.deleting = true;
+    try {
+      this.onDeleting?.(id);
+      s.interrupt(); await s.dispose(); await waitForSessionWriters(s);
+      await deleteSessionData(this.userDataDir, s);
+      this.sessions.delete(id);
+      if (this.focusedId === id) { this.focusedId = null; const next = this.sessions.values().next().value; if (next) await this.focus(next.id).catch(() => {}); }
+      if (!this.sessions.size) this.create({});
+      this.emitList();
+    } finally { s.deleting = false; }
   }
   async closeAll() { await Promise.all([...this.sessions.values()].map(s => s.dispose())); }
 }
