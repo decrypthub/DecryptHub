@@ -710,6 +710,10 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   ok(await page.locator('.official-plugin').count() === 3, '[' + scheme + '] 官方插件应包含 WDH/IDH/ADH');
   await checkWindowDragging(page, ['.screen-head'], scheme + ' 插件顶部拖动');
   await page.locator('[data-plugin-id="wdh"]').getByRole('button', { name: '配置', exact: true }).click();
+  // 缺少组件/内核时直接失败：静默跳过会让“绿”的回归其实没覆盖插件页。
+  const kernelState = await rpc('kernel-info').catch(error => { throw new Error('[' + scheme + '] 无法读取内核状态：' + error.message); });
+  if (!kernelState?.component?.installed) throw new Error('[' + scheme + '] WDH 组件未安装，无法验证插件页；请先安装组件再运行 check:ui');
+  if (!kernelState?.cloak) throw new Error('[' + scheme + '] CloakBrowser 内核未安装，无法验证插件页；请先安装内核再运行 check:ui');
   await page.getByRole('button', { name: '测试 CloakBrowser', exact: true }).click();
   await page.getByText('浏览器启动与画面检查通过', { exact: true }).waitFor({ timeout: 90000 });
   await page.screenshot({ path: path.join(SHOTS, scheme + '-plugins.png') });
