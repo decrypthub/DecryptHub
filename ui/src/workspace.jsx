@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Box, Flex, Text, Badge, Card, Dialog, TextArea, Tabs, DropdownMenu } from '@radix-ui/themes';
+import { Box, Flex, Text, Badge, Card, TextArea, Tabs, DropdownMenu } from '@radix-ui/themes';
 import { useWorkbench } from './bus.jsx';
 import { Button, Icon, askConfirm, EmptyState } from './kit.jsx';
-import { ProjectPicker } from './projects.jsx';
 
 const PERMISSIONS = [
   { id: 'manual', label: '请求批准', icon: 'key', description: '工作区内读写；额外执行和联网权限由你确认' },
@@ -10,33 +9,21 @@ const PERMISSIONS = [
   { id: 'full-access', label: '完全访问权限', icon: 'info', description: '文件、命令、浏览器及已启用工具直接执行' },
   { id: 'read-only', label: '只读查看', icon: 'file', description: '仅查看文件和页面，不运行代码或修改内容' },
 ];
-export function PermissionPicker({ runtime = false }) {
-  const w = useWorkbench(), [open, setOpen] = useState(false), [cap, setCap] = useState(null), [busy, setBusy] = useState(false);
+export function PermissionPicker() {
+  const w = useWorkbench(), [open, setOpen] = useState(false), [busy, setBusy] = useState(false);
   const selected = w.cur.mode === 'standard' ? w.cur.review || 'manual' : w.cur.mode;
   useEffect(() => setOpen(false), [w.sid]);
-  useEffect(() => { if (!open || !runtime) return; let live = true; w.inv('executor-status').then(v => live && setCap(v)).catch(() => {}); return () => { live = false; }; }, [open, runtime, w.sid]);
   async function change(id) {
     const sid = w.sid; if (id === selected) return;
-    if (id === 'full-access' && !await askConfirm('Agent 将使用当前系统用户权限执行命令、访问文件和网络、操控浏览器及调用已启用的外部工具，不再逐次请求批准。此选择仅对当前会话、本次应用运行有效。', { ok: '启用完全访问权限', danger: true })) return;
+    if (id === 'full-access' && !await askConfirm('Agent 将使用当前系统用户权限执行命令、访问文件和网络、操控浏览器及调用已启用的外部工具，不再逐次请求批准。任务运行中切换会立即生效，正在等待的批准会直接放行；此选择仅对当前会话、本次应用运行有效。', { ok: '启用完全访问权限', danger: true })) return;
     if (!w.isCurrentSession(sid)) return;
     setBusy(true);
     try { await w.api.invoke('session-set-mode', { sessionId: sid, mode: ['manual', 'auto'].includes(id) ? 'standard' : id, review: id === 'auto' ? 'auto' : 'manual' }); }
     catch (e) { w.toast(e.message, 'err'); } finally { setBusy(false); }
   }
-  if (runtime) return <Dialog.Root open={open} onOpenChange={setOpen}><Dialog.Trigger><Button size="1" variant="ghost" color="gray" title="查看执行环境" aria-label="查看执行环境"><Icon n="terminal" />此计算机</Button></Dialog.Trigger>
-    <Dialog.Content maxWidth="440px" data-overlay><Dialog.Title>执行环境</Dialog.Title><Dialog.Description size="2" color="gray">当前会话在此计算机执行。</Dialog.Description>
-      <Text as="p" size="2" mt="4">{cap ? cap.available ? '命令隔离可用' : '当前没有可用的命令隔离后端' : '正在检查执行环境…'}</Text><Text as="p" size="1" color="gray">{w.cur.mode === 'full-access' ? '完全访问下，命令以当前系统用户权限执行。' : '未隔离的 Agent 命令仍需明确批准。'}</Text>
-      <Flex justify="between" mt="4"><Button size="1" variant="ghost" color="gray" onClick={() => w.inv('executor-status', { refresh: true }).then(setCap).catch(e => w.toast(e.message, 'err'))}>重新检测</Button><Dialog.Close><Button size="2" variant="soft" color="gray">关闭</Button></Dialog.Close></Flex>
-    </Dialog.Content></Dialog.Root>;
-  return <DropdownMenu.Root open={open} onOpenChange={setOpen}><DropdownMenu.Trigger><Button size="2" variant="soft" color={w.cur.mode === 'full-access' ? 'red' : 'gray'} disabled={w.cur.agentRunning || busy} aria-label="选择权限"><Icon n={PERMISSIONS.find(p => p.id === selected)?.icon || 'key'} />{PERMISSIONS.find(p => p.id === selected)?.label || '请求批准'}<Icon n="chevdown" /></Button></DropdownMenu.Trigger>
+  return <DropdownMenu.Root open={open} onOpenChange={setOpen}><DropdownMenu.Trigger><Button size="2" variant="soft" color={w.cur.mode === 'full-access' ? 'red' : 'gray'} disabled={busy} aria-label="选择权限" title={w.cur.agentRunning ? '任务运行中也可切换权限，下一次工具调用即生效' : '选择权限'}><Icon n={PERMISSIONS.find(p => p.id === selected)?.icon || 'key'} /><span className="perm-label">{PERMISSIONS.find(p => p.id === selected)?.label || '请求批准'}</span><Icon n="chevdown" /></Button></DropdownMenu.Trigger>
     <DropdownMenu.Content align="start" side="top" data-overlay className="permission-menu"><DropdownMenu.Label>如何批准 Agent 操作</DropdownMenu.Label><DropdownMenu.RadioGroup value={selected} onValueChange={change}>{PERMISSIONS.map(p => <DropdownMenu.RadioItem key={p.id} value={p.id} aria-label={p.label} disabled={busy} className="permission-menu-item"><Icon n={p.icon} /><span><strong>{p.label}</strong><small>{p.description}</small></span></DropdownMenu.RadioItem>)}</DropdownMenu.RadioGroup></DropdownMenu.Content>
   </DropdownMenu.Root>;
-}
-export function WorkspaceBar() {
-  const w = useWorkbench();
-  return <div className="workspace-area"><Flex className="workspace-bar" align="center" justify="between" gap="2"><ProjectPicker /><PermissionPicker runtime /></Flex>
-    {w.session?.workspace?.missing && <Text as="div" size="1" color="red">原工作文件夹不存在，请重新选择。</Text>}
-  </div>;
 }
 export function PendingActions() {
   const w = useWorkbench(), approvals = w.cur.approvals || [];

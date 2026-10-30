@@ -4,14 +4,19 @@ import crypto from 'node:crypto';
 import { atomicJson, containsPath, pathKey, resolveIn, isSensitivePath } from './paths.mjs';
 
 const leases = new Map();
+export function directoryAvailability(ws) {
+  try {
+    const st = fs.statSync(ws.root);
+    if (!st.isDirectory() || pathKey(fs.realpathSync.native(ws.root)) !== pathKey(ws.root) || (ws.identity && `${st.dev}:${st.ino}:${st.birthtimeMs}` !== ws.identity)) return { availability: 'changed', missing: false };
+    return { availability: 'ready', missing: false };
+  } catch (error) { return { availability: error.code === 'ENOENT' || error.code === 'ENOTDIR' ? 'missing' : 'unavailable', missing: true }; }
+}
 export class WorkspaceStore {
   constructor(userDataDir) {
     this.userDataDir = path.resolve(userDataDir); this.file = path.join(userDataDir, 'workspaces.json'); this.entries = [];
     try { this.entries = JSON.parse(fs.readFileSync(this.file, 'utf8')).entries || []; } catch {}
   }
   save() { atomicJson(this.file, { v: 1, entries: this.entries }); }
-  managed(id, dataDir) { return { id: 'managed-' + id, kind: 'managed', root: path.join(dataDir, 'workspace'), revision: 1, label: '会话工作区' }; }
-  pending(id, dataDir) { return { ...this.managed(id, dataDir), kind: 'unselected', label: '选择工作目录' }; }
   folder(root) {
     const canonical = fs.realpathSync.native(path.resolve(String(root)));
     if (!fs.statSync(canonical).isDirectory()) throw new Error('请选择文件夹');
@@ -23,17 +28,14 @@ export class WorkspaceStore {
     if (entry.identity && entry.identity !== identity) entry.revision++;
     Object.assign(entry, { identity, label: path.basename(canonical), lastUsed: Date.now() }); this.save(); return { ...entry };
   }
-  restore(binding, id, dataDir) {
-    if (binding?.kind === 'folder') return { ...binding, missing: !fs.existsSync(binding.root) };
-    return binding?.kind === 'managed' ? this.managed(id, dataDir) : this.pending(id, dataDir);
+  availability(ws) {
+    return directoryAvailability(ws);
   }
   recent() { return [...this.entries].sort((a, b) => b.lastUsed - a.lastUsed).slice(0, 12); }
   verify(ws) {
-    if (ws.kind === 'unselected') throw Object.assign(new Error('请先选择工作文件夹，或明确选择“不在目录中工作”'), { code: 'workspace-required' });
-    if (ws.kind === 'managed') fs.mkdirSync(ws.root, { recursive: true });
-    if (!fs.existsSync(ws.root)) throw new Error('工作文件夹不存在，请重新选择文件夹');
+    if (!fs.existsSync(ws.root)) throw Object.assign(new Error('工作文件夹不存在，请重新选择文件夹'), { code: 'project-directory-unavailable' });
     const st = fs.statSync(ws.root);
-    if (!st.isDirectory() || (ws.identity && `${st.dev}:${st.ino}:${st.birthtimeMs}` !== ws.identity)) throw new Error('工作文件夹身份已变化，请重新选择文件夹');
+    if (!st.isDirectory() || (ws.identity && `${st.dev}:${st.ino}:${st.birthtimeMs}` !== ws.identity)) throw Object.assign(new Error('工作文件夹身份已变化，请重新选择文件夹'), { code: 'project-directory-unavailable' });
     resolveIn(ws.root, '.'); return ws.root;
   }
   acquire(ws, owner, write = true) {

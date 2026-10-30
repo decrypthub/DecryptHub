@@ -2,12 +2,16 @@
 import React, { forwardRef, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Theme, Box, Flex, Text, Button as RadixButton, IconButton as RadixIconButton, TextArea, Select, Dialog, Tooltip } from '@radix-ui/themes';
-import { PlayIcon, StopIcon, ArrowLeftIcon, ReloadIcon, ArrowRightIcon, GearIcon, SunIcon, MoonIcon, TrashIcon, ClockIcon, MagicWandIcon, GlobeIcon, CodeIcon, ActivityLogIcon, FileIcon, MixerHorizontalIcon, ArrowUpIcon, Cross2Icon, CheckIcon, DownloadIcon, FileTextIcon, InfoCircledIcon, ResetIcon, MinusIcon, SquareIcon, CopyIcon, PlusIcon, DotsHorizontalIcon, ChatBubbleIcon, ReaderIcon, DrawingPinIcon, LockClosedIcon, MagnifyingGlassIcon, StackIcon, ChevronUpIcon, ChevronDownIcon, ChevronRightIcon, DotFilledIcon, ViewVerticalIcon, DashboardIcon, TargetIcon, DesktopIcon, ExternalLinkIcon, LightningBoltIcon, Pencil1Icon, MobileIcon } from '@radix-ui/react-icons';
+import { PlayIcon, StopIcon, ArrowLeftIcon, ReloadIcon, ArrowRightIcon, GearIcon, SunIcon, MoonIcon, TrashIcon, ClockIcon, MagicWandIcon, GlobeIcon, CodeIcon, ActivityLogIcon, FileIcon, MixerHorizontalIcon, ArrowUpIcon, Cross2Icon, CheckIcon, DownloadIcon, FileTextIcon, InfoCircledIcon, ResetIcon, MinusIcon, SquareIcon, CopyIcon, PlusIcon, DotsHorizontalIcon, ChatBubbleIcon, ReaderIcon, DrawingPinIcon, LockClosedIcon, MagnifyingGlassIcon, StackIcon, ChevronUpIcon, ChevronDownIcon, ChevronRightIcon, DotFilledIcon, ViewVerticalIcon, DashboardIcon, TargetIcon, DesktopIcon, ExternalLinkIcon, LightningBoltIcon, Pencil1Icon, MobileIcon, PersonIcon } from '@radix-ui/react-icons';
 import { renderMd, highlightHtml } from './md.js';
 import { themeConfig } from './theme.js';
-import { PauseIcon } from '@radix-ui/react-icons';
+import { PauseIcon, PaperPlaneIcon, ExitIcon } from '@radix-ui/react-icons';
 
 function FolderGlyph(props) { return <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" {...props}><path d="M1.75 5.25V3.5c0-.7.55-1.25 1.25-1.25h3l1.5 1.5H13c.7 0 1.25.55 1.25 1.25v7.5c0 .7-.55 1.25-1.25 1.25H3c-.7 0-1.25-.55-1.25-1.25V5.25h12.5" /></svg>; }
+function SidebarLeftGlyph(props) { return <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" {...props}><rect x="2" y="3" width="16" height="14" rx="2" /><path d="M7 3v14" /></svg>; }
+function SidebarRightGlyph(props) { return <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" {...props}><rect x="2" y="3" width="16" height="14" rx="2" /><path d="M13 3v14" /></svg>; }
+function ThumbUpGlyph(props) { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" /></svg>; }
+function ThumbDownGlyph(props) { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" /></svg>; }
 const ICONS = {
   play: PlayIcon, pause: PauseIcon, stop: StopIcon, back: ArrowLeftIcon, reload: ReloadIcon,
   go: ArrowRightIcon, settings: GearIcon, sun: SunIcon, moon: MoonIcon,
@@ -19,9 +23,11 @@ const ICONS = {
   more: DotsHorizontalIcon, chat: ChatBubbleIcon, copy: CopyIcon, folder: FolderGlyph,
   flag: DrawingPinIcon, key: LockClosedIcon, search: MagnifyingGlassIcon, layers: StackIcon,
   chevup: ChevronUpIcon, chevdown: ChevronDownIcon, chevright: ChevronRightIcon,
-  dot: DotFilledIcon, sidebar: ViewVerticalIcon, dashboard: DashboardIcon,
+  dot: DotFilledIcon, sidebar: SidebarLeftGlyph, sidebarRight: SidebarRightGlyph, dashboard: DashboardIcon,
   target: TargetIcon, desktop: DesktopIcon, external: ExternalLinkIcon, bolt: LightningBoltIcon, edit: Pencil1Icon,
   pin: DrawingPinIcon, mobile: MobileIcon,
+  user: PersonIcon, feedback: PaperPlaneIcon, logout: ExitIcon,
+  thumbup: ThumbUpGlyph, thumbdown: ThumbDownGlyph,
 };
 
 export function Icon({ n, size = 16, className }) {

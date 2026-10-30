@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { SessionManager } from '../sessions.mjs';
+import { TestSessionManager as SessionManager, bindTestProject } from './project-fixture.mjs';
 import { readDocument, documentWorkspaceKey } from '../documents.mjs';
 import { BrowserTabs } from '../browser-tabs.mjs';
 import { addDockTab, closeDockTab, emptyDock, syncBrowserPages } from '../../ui/src/dock-tabs.js';
@@ -12,7 +12,7 @@ import { readSessionViews, SESSION_VIEW_KEY } from '../../ui/src/session-view.js
 function fixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dh-tabs-'));
   const manager = new SessionManager({ userDataDir: directory, getSettings: () => ({}), broadcast() {}, chromeMod: {}, titleGenerator: async () => '' });
-  const s = manager.create({ managed: true });
+  const s = manager.create({});
   t.after(async () => { await manager.closeAll(); assert.equal(path.dirname(directory), os.tmpdir()); assert.ok(path.basename(directory).startsWith('dh-tabs-')); fs.rmSync(directory, { recursive: true, force: true }); });
   return { s, manager, directory };
 }
@@ -29,7 +29,7 @@ test('browser resources follow stable page IDs, not shifting indexes or titles',
   dock = syncBrowserPages(dock, [{ id: 'a', url: 'https://a.test', active: true }, { id: 'b', url: 'https://b.test' }]);
   assert.equal(dock.activeId, selected); const b = dock.tabs.find(t => t.pageId === 'b').id;
   dock = syncBrowserPages(dock, [{ id: 'b', url: 'https://b.test/new', active: true }], true);
-  assert.equal(dock.activeId, b); assert.equal(dock.tabs.find(t => t.id === b).title, 'b.test/new');
+  assert.equal(dock.activeId, b); assert.equal(dock.tabs.find(t => t.id === b).title, 'b.test');
 });
 test('document reads reject old workspaces, outside paths and links while allowing Markdown', t => {
   const { s, directory } = fixture(t); fs.mkdirSync(s.workspace.root, { recursive: true }); fs.writeFileSync(path.join(s.workspace.root, 'report.md'), '# Report');

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { atomicJson, pathKey } from './paths.mjs';
+import { directoryAvailability } from './workspaces.mjs';
 
 export function validateProject({ name, folders, primaryId }) {
   name = String(name || '').trim();
@@ -19,7 +20,7 @@ export class ProjectStore {
     try { this.entries = JSON.parse(fs.readFileSync(this.file, 'utf8')).projects || []; }
     catch (error) { if (error.code !== 'ENOENT') throw Error('项目配置损坏，请先恢复 code-projects.json'); }
   }
-  list() { return this.entries.map(p => structuredClone(p)); }
+  list() { return this.entries.map(p => ({ ...structuredClone(p), ...directoryAvailability(p.folders.find(f => f.id === p.primaryId)) })); }
   get(id) { const p = this.entries.find(p => p.id === id); if (!p) throw Error('项目不存在'); return p; }
   save({ id, name, folders, primaryId }) {
     const previous = id ? this.get(id) : null;
@@ -38,5 +39,16 @@ export class ProjectStore {
   remove(id) {
     this.get(id); const entries = this.entries.filter(p => p.id !== id);
     atomicJson(this.file, { version: 1, projects: entries }); this.entries = entries;
+  }
+  move(id, beforeId) {
+    const project = this.get(id);
+    if (beforeId != null) this.get(beforeId);
+    if (id === beforeId) return this.list();
+    const entries = this.entries.filter(p => p.id !== id);
+    const index = beforeId == null ? entries.length : entries.findIndex(p => p.id === beforeId);
+    entries.splice(index, 0, project);
+    if (entries.every((p, i) => p.id === this.entries[i].id)) return this.list();
+    atomicJson(this.file, { version: 1, projects: entries }); this.entries = entries;
+    return this.list();
   }
 }

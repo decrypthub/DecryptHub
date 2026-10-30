@@ -416,7 +416,7 @@ class Agent {
     } finally {
       const endedAt = Date.now();
       if (this.currentItem && (this.partial || this.partialReasoning)) this.hist.append({ t: 'assistant', ...this.currentItem, phase: 'partial_answer', content: this.partial || '', ...(this.partialReasoning ? { reasoning: this.partialReasoning } : {}), interrupted: true });
-      this.hist.append({ t: 'turn-end', turnId: this.turnId, stop, startedAt, endedAt });
+      this.hist.append({ t: 'turn-end', turnId: this.turnId, stop, startedAt, endedAt, usage: { ...usage } });
       this.running = false; this.abort = null; this.wrapUp = false; this._emergency = null;
       this.persist();
       this.emitContext();

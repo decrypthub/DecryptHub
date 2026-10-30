@@ -16,17 +16,18 @@ const TOOL_KINDS = [['files', '工作区文件', 'folder'], ['browser', '浏览�
 export function Dock() {
   const { tabs: manager, cur } = useWorkbench(), { dock, activeTab } = manager;
   const tabBar = useRef(null);
+  const openingTerminal = useRef(false);
   useEffect(() => { const frame = requestAnimationFrame(() => tabBar.current?.querySelector('[data-tab-id="' + dock.activeId + '"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })); return () => cancelAnimationFrame(frame); }, [dock.activeId, activeTab?.title]);
   return <Tabs.Root className="dock-layout" value={dock.activeId || ''} onValueChange={manager.selectTab}>
     <div className="dock-head" data-window-drag-region onMouseDown={e => handleWindowDrag(e, native)}>
       <Tabs.List ref={tabBar} className="dock-tabs" size="2" aria-label="工作标签页">
         {dock.tabs.map(tab => <div className="dock-tab-wrap" key={tab.id} data-tab-id={tab.id} data-tab-kind={tab.kind}><Tabs.Trigger value={tab.id} className="dock-tab" aria-label={tab.kind === 'document' ? tab.title : TOOL_KINDS.find(k => k[0] === tab.kind)?.[1]} title={tab.title}><Icon n={tab.kind === 'browser' ? 'globe' : tab.kind === 'files' ? 'folder' : tab.kind === 'terminal' ? 'terminal' : 'file'} /><span className="ellipsis">{tab.title}</span></Tabs.Trigger><ActionIcon icon="x" size="1" title={'关闭标签页 ' + tab.title} onClick={() => manager.closeTab(tab)} /></div>)}
       </Tabs.List>
-      <DropdownMenu.Root><DropdownMenu.Trigger><ActionIcon icon="plus" title="新建标签页" /></DropdownMenu.Trigger><DropdownMenu.Content align="end" data-overlay>{TOOL_KINDS.map(([kind, label, icon]) => <DropdownMenu.Item key={kind} onSelect={() => manager.newTab(kind)}><Icon n={icon} />{label}标签页</DropdownMenu.Item>)}</DropdownMenu.Content></DropdownMenu.Root>
+      <DropdownMenu.Root onOpenChange={open => { if (open) openingTerminal.current = false; }}><DropdownMenu.Trigger><ActionIcon icon="plus" title="新建标签页" /></DropdownMenu.Trigger><DropdownMenu.Content align="end" data-overlay onCloseAutoFocus={event => { if (openingTerminal.current) event.preventDefault(); openingTerminal.current = false; }}>{TOOL_KINDS.map(([kind, label, icon]) => <DropdownMenu.Item key={kind} onSelect={() => { openingTerminal.current = kind === 'terminal' && dock.tabs.length < 32; manager.newTab(kind); }}><Icon n={icon} />{label}标签页</DropdownMenu.Item>)}</DropdownMenu.Content></DropdownMenu.Root>
     </div>
     {!dock.tabs.length && <div className="dock-launcher">{TOOL_KINDS.map(([kind, label, icon]) => <button key={kind} className="dock-launcher-item" onClick={() => manager.newTab(kind)}><Icon n={icon} size={22} /><span><strong>{label}</strong><small>{kind === 'files' ? '浏览当前工作区的文件' : kind === 'browser' ? '浏览网页、抓取请求和调试网站' : '在会话工作目录中运行命令'}</small></span><Icon n="plus" /></button>)}</div>}
     {dock.tabs.map(tab => tab.kind !== 'browser' && <Tabs.Content forceMount className="dock-body dock-pane" hidden={tab.id !== dock.activeId} key={tab.id} value={tab.id}>{tab.kind === 'files' ? <WorkspaceFiles /> : tab.kind === 'document' ? <DocumentPanel tab={tab} /> : <TerminalPanel tab={tab} active={tab.id === dock.activeId} />}</Tabs.Content>)}
-    {activeTab?.kind === 'browser' && <Tabs.Content className="dock-body browser-workspace" value={activeTab.id}><Tabs.Root className="browser-workspace" value={activeTab.mode} onValueChange={mode => manager.updateTab(activeTab.id, { mode })}><Tabs.List className="browser-views" size="1" aria-label="浏览器视图"><Tabs.Trigger value="page">网页</Tabs.Trigger><Tabs.Trigger value="network">网络请求{cur.requests.length > 0 && <Badge size="1" color="gray">{cur.requests.length}</Badge>}</Tabs.Trigger></Tabs.List><Tabs.Content value="page" className="browser-workspace"><BrowserPanel key={activeTab.id} /></Tabs.Content><Tabs.Content value="network" className="browser-workspace"><RequestPanel key={activeTab.id} /></Tabs.Content></Tabs.Root></Tabs.Content>}
+    {activeTab?.kind === 'browser' && <Tabs.Content className="dock-body browser-workspace" value={activeTab.id}><BrowserPanel key={activeTab.id}>{activeTab.mode === 'network' && <RequestPanel key={activeTab.id} />}</BrowserPanel></Tabs.Content>}
   </Tabs.Root>;
 }
 

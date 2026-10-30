@@ -27,13 +27,23 @@ export function selectDockKind(view, side) {
   if (kind === 'browser') next.tabs = next.tabs.map(t => t.id === next.activeId ? { ...t, mode: side === 'evidence' ? 'network' : 'page' } : t);
   return { dock: next, side };
 }
+// 标签只显示可读标题；没有标题时退回域名，绝不把整条 URL 铺到标签上。
+export function pageLabel(page = {}) {
+  const raw = String(page.title || '').replace(/\s+/g, ' ').trim();
+  const url = String(page.url || '');
+  let host = '';
+  try { host = new URL(url).host.replace(/^www\./, ''); } catch {}
+  const usable = raw && raw !== 'about:blank' && !/^https?:\/\//i.test(raw) ? raw : '';
+  const label = usable || host || (raw && raw !== 'about:blank' ? raw : '') || '新标签页';
+  return label.slice(0, 60);
+}
 export function syncBrowserPages(dock, pages, follow = false) {
   if (!pages.length) return dock;
   let tabs = dock.tabs.map(t => t.kind === 'browser' && t.pageId && !pages.some(p => p.id === t.pageId) ? { ...t, pageId: null, title: '浏览器' } : t);
   for (const page of pages) {
     let tab = tabs.find(t => t.kind === 'browser' && t.pageId === page.id);
     if (!tab) tab = tabs.find(t => t.id === dock.activeId && t.kind === 'browser' && !t.pageId) || tabs.find(t => t.kind === 'browser' && !t.pageId);
-    const title = page.title && page.title !== 'about:blank' ? page.title : page.url && page.url !== 'about:blank' ? page.url.replace(/^https?:\/\//, '') : '新标签页';
+    const title = pageLabel(page);
     if (tab) tabs = tabs.map(t => t.id === tab.id ? { ...t, pageId: page.id, title } : t);
     else if (tabs.length < 32) tabs.push({ id: crypto.randomUUID(), kind: 'browser', pageId: page.id, title, mode: 'page' });
   }

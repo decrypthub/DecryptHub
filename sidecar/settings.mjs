@@ -3,6 +3,10 @@ import path from 'node:path';
 import os from 'node:os';
 import { atomicJson } from './paths.mjs';
 
+// 桌面版只使用 WDH 自带的 CloakBrowser 内核。系统 Chrome / 自定义路径 / GitHub Release /
+// Chrome for Testing 不再作为选项：load 与 save 都归一到这里，旧的 settings.json 会被静默迁移。
+export const KERNEL = 'cloak';
+
 const DEFAULTS = {
   provider: 'openai',
   openai: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o' },
@@ -11,7 +15,7 @@ const DEFAULTS = {
   antiDebug: false, headless: false, chromePath: '', isolated: false, proxy: '',
   // 浏览器显示方式：auto = Windows 有头时嵌入真实 Chrome 窗口，其它平台/无头用 screencast；embedded / screencast 强制
   embedMode: 'auto',
-  kernel: 'system', // system = 系统 Chrome/Edge；bundled = 按需下载到应用数据目录的 Chromium (Chrome for Testing)
+  kernel: KERNEL, // 固定 CloakBrowser；下载由 WDH 组件写入 kernels/cloak.json
   compactAt: 0.85, // 自动压缩阈值（占上下文窗口比例）；窗口本身随模型保存在 openai/anthropic.contextWindow，未设置则按模型名推断
   // 用户接入的 MCP 服务（Claude Desktop 的 mcpServers 格式 + enabled/transport 扩展）
   mcpServers: {},
@@ -55,9 +59,11 @@ export function load() {
   if (s.provider !== 'openai' && s.provider !== 'anthropic') s.provider = 'openai'; // 旧版 mock 设置迁移
   if (s.openai.model === 'mock') s.openai.model = '';
   if (process.env.JSRA_HEADLESS) s.headless = process.env.JSRA_HEADLESS === '1';
-  if (!['auto', 'embedded', 'screencast'].includes(s.embedMode)) s.embedMode = 'auto';
-  if (!['system', 'bundled', 'cloak', 'github', 'custom'].includes(s.kernel)) s.kernel = 'system';
-  if (process.env.JSRA_KERNEL) s.kernel = process.env.JSRA_KERNEL;
+  if (!['auto', 'embedded', 'screencast', 'docked'].includes(s.embedMode)) s.embedMode = 'auto';
+  // 内核不再可配：旧配置里的 system / bundled / github / custom 一律迁移为 CloakBrowser，
+  // 自定义路径与 Chrome for Testing 记录同时清掉，避免旧路径继续被引用。
+  s.kernel = KERNEL;
+  s.chromePath = '';
   if (process.env.JSRA_EMBED_MODE) s.embedMode = process.env.JSRA_EMBED_MODE;
   if (!s.mcpServers || typeof s.mcpServers !== 'object' || Array.isArray(s.mcpServers)) s.mcpServers = {};
   return s;
@@ -70,8 +76,16 @@ export function wantEmbed(s, platform = process.platform, env = process.env) {
   if (platform === 'linux') return !!env.DISPLAY && !env.JSRA_NO_EMBED;
   return false; // macOS 等：清晰 screencast
 }
+export function browserPresentation(settings, platform = process.platform, env = process.env) {
+  const embed = wantEmbed(settings, platform, env);
+  // macOS 没有原生子窗口：用有头窗口停靠到面板矩形（伪嵌入），不串流、不覆盖 viewport。
+  const dock = !embed && !settings.headless && platform === 'darwin' && settings.embedMode === 'docked';
+  return { embed, headless: !!settings.headless || (!embed && !dock), dock };
+}
 export function save(s) {
   const c = JSON.parse(JSON.stringify(s));
+  // 持久化边界再归一一次：界面或旧版本即使传了别的内核，也不会写回磁盘。
+  c.kernel = KERNEL; c.chromePath = '';
   // 密钥不落盘，由 OS keyring/DPAPI 管理（前端注入到内存）
   c.openai.apiKey = ''; c.anthropic.apiKey = '';
   // 渠道密钥同样只在密钥库里：providers[].apiKey 以前会被原样写盘，启动时再用 keyring 回填

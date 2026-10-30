@@ -7,7 +7,7 @@ import { FALLBACK_TODOS } from './state.js';
 const STATUS_LABELS = { pending: '待执行', in_progress: '进行中', completed: '已完成', cancelled: '已取消' };
 
 // Mounted per session so an open plan cannot carry over to a different chat.
-export function TodoStrip() {
+export function PlanButton() {
   const { cur, toast } = useWorkbench(), [open, setOpen] = useState(false), titleId = useId();
   const list = cur.todos || [];
   const untouched = list.length === FALLBACK_TODOS.length && list.every((t, i) => t.id === FALLBACK_TODOS[i].id && t.content === FALLBACK_TODOS[i].content && t.status === 'pending');
@@ -21,12 +21,11 @@ export function TodoStrip() {
     catch { toast('无法复制计划，请重试', 'err'); }
   };
   return <Popover.Root open={open} onOpenChange={setOpen}>
-    <Popover.Trigger><button type="button" className="todo-strip" aria-label="查看完整计划" aria-describedby={`${titleId}-summary ${titleId}-count`} title="查看完整计划">
-      <Icon n="check" size={14} /><Text size="1" weight="medium" className="todo-summary" id={`${titleId}-summary`}>{summary}</Text>
-      <span className="todo-bar" aria-hidden="true"><i style={{ width: (done / list.length * 100) + '%' }} /></span>
-      <Text size="1" className="todo-count" id={`${titleId}-count`}>{done}/{list.length}</Text><Icon n={open ? 'chevup' : 'chevdown'} size={14} />
-    </button></Popover.Trigger>
-    <Popover.Content width="560px" minWidth="0" maxWidth="calc(100vw - 32px)" align="start" side="bottom" sideOffset={8} collisionPadding={16} className="todo-plan" data-overlay aria-labelledby={titleId}>
+    <Popover.Trigger><Button size="2" variant="soft" color="gray" className="plan-trigger" aria-label="查看完整计划" aria-describedby={`${titleId}-count`} title={summary + ` · 已完成 ${done}/${list.length}`}>
+      <Icon n="check" size={14} /><span className="progress-name">计划</span>
+      <span className="todo-count" id={`${titleId}-count`}>{done}/{list.length}</span><Icon n={open ? 'chevup' : 'chevdown'} size={12} className="progress-chevron" />
+    </Button></Popover.Trigger>
+    <Popover.Content width="480px" minWidth="0" maxWidth="calc(100vw - 32px)" align="end" side="bottom" sideOffset={8} collisionPadding={16} className="todo-plan" data-overlay aria-labelledby={titleId}>
       <Flex align="center" gap="3" className="todo-plan-head">
         <div><Text as="div" size="2" weight="medium" id={titleId}>任务计划</Text><Text as="div" size="1" color="gray">已完成 {done} / {list.length} 项</Text></div>
         <Button size="2" variant="soft" color="gray" onClick={copy}><Icon n="copy" size={14} />复制计划</Button>

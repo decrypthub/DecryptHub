@@ -12,7 +12,7 @@ export function WorkspaceFiles() {
   const [selected, setSelected] = useState(null), [content, setContent] = useState(''), [focus, setFocus] = useState('');
   const epoch = useRef(0), reading = useRef(0), tree = useRef(null), inFlight = useRef(new Set());
   const ws = session?.workspace;
-  const identity = `${sid}:${ws?.id}:${ws?.revision}:${ws?.projectRevision}:${ws?.root}:${rootId}`;
+  const identity = `${sid}:${ws?.id}:${ws?.revision}:${ws?.projectRevision}:${ws?.root}:${ws?.availability}:${rootId}`;
   useEffect(() => setRootId('primary'), [sid, ws?.id, ws?.projectRevision]);
   async function load(path = '.', generation = epoch.current) {
     const key = generation + ':' + path;
@@ -29,7 +29,7 @@ export function WorkspaceFiles() {
     const generation = ++epoch.current;
     setBranches({}); setGit(null);
     if (reset) { reading.current++; setExpanded(new Set()); setSelected(null); setContent(''); setFocus(''); }
-    if (ws?.kind === 'unselected') return;
+    if (!ws || ws.availability !== 'ready') return;
     load('.', generation);
     if (!reset) for (const path of expanded) load(path, generation);
     if (rootId === 'primary') api.invoke('git-status', { sessionId: sid }).then(value => { if (generation === epoch.current) setGit(value); }).catch(e => { if (generation === epoch.current) setGit({ available: false, error: e.message }); });
@@ -66,7 +66,7 @@ export function WorkspaceFiles() {
     e.preventDefault();
   }
   const root = branches['.'];
-  if (ws?.kind === 'unselected') return <EmptyState icon="folder" title="尚未选择工作目录" description="选择项目或文件夹后即可浏览代码。"><Button size="2" onClick={() => w.setWorkspacePrompt(true)}>选择工作目录</Button></EmptyState>;
+  if (!ws || ws.availability !== 'ready') return <EmptyState icon="folder" title="项目目录不可用" description="重新连接项目目录后可继续浏览文件。"><Button size="2" onClick={() => w.setProjectEditor({ ...w.projects.find(p => p.id === w.session?.projectId), relink: true })}>重新选择目录</Button></EmptyState>;
   return <Tabs.Root value={fileView} onValueChange={value => { reading.current++; setSelected(null); setFileView(value); if (value === 'git') setRootId('primary'); }} className="workspace-files">
     <div className="bar"><Tabs.List size="1" aria-label="工作区文件视图" className="file-tabs"><Tabs.Trigger value="local">本地文件</Tabs.Trigger><Tabs.Trigger value="git">Git 改动</Tabs.Trigger></Tabs.List><ActionIcon icon="reload" variant="soft" color="gray" onClick={() => refresh()} title="刷新文件目录" /></div>
     <Tabs.Content value="local" className="files-content">

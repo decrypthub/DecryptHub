@@ -15,16 +15,17 @@ export function useWorkspaceTabs({ presentation, sid, cur, session, api, toast, 
     presentation.update(sid, view => ({ dock: { ...view.dock, activeId: id } }));
   }
   useEffect(() => {
-    if (activeTab?.kind !== 'browser' || !activeTab.pageId || cur.browserActivity?.active || cur.status.pages.some(p => p.id === activeTab.pageId && p.active)) return;
+    if (!cur.status.running || activeTab?.kind !== 'browser' || !activeTab.pageId || cur.browserActivity?.active || cur.status.pages.some(p => p.id === activeTab.pageId && p.active)) return;
     const id = activeTab.id, intent = ++sequence.current;
     switching.current = { sid, intent }; setPending({ sid, id });
     api.invoke('browser-tab-select', { sessionId: sid, pageId: activeTab.pageId }).catch(e => { if (current.current.sid === sid && intent === sequence.current) toast(e.message, 'err'); }).finally(() => { if (switching.current?.intent === intent) { switching.current = null; setPending(null); } });
-  }, [sid, activeTab?.id, activeTab?.pageId, activeTab?.mode]);
+  }, [sid, cur.status.running, activeTab?.id, activeTab?.pageId, activeTab?.mode]);
   function newTab(kind) {
+    if (!session) { setWorkspacePrompt('create'); return; }
     ++sequence.current; setView('chat');
     if (dock.tabs.length >= 32) { toast('每个会话最多打开32个工作标签页', 'warn'); return; }
     const next = addDockTab(dock, kind);
-    if (kind === 'terminal') { if (session?.workspace?.kind === 'unselected') setWorkspacePrompt(true); else terminalStarts.current.add(next.activeId); }
+    if (kind === 'terminal') terminalStarts.current.add(next.activeId);
     presentation.update(sid, { dock: next, sideOpen: true, manuallyClosed: false });
   }
   async function closeTab(tab) {
@@ -49,7 +50,8 @@ export function useWorkspaceTabs({ presentation, sid, cur, session, api, toast, 
     url = normalizeTargetUrl(url); if (!url) return;
     const intent = ++sequence.current, tab = requestedTab || activeTab;
     if (!tab || tab.kind !== 'browser') return;
-    if (session?.workspace?.kind === 'unselected') { setWorkspacePrompt(true); return; }
+    if (!session) { setWorkspacePrompt('create'); return; }
+    updateTab(tab.id, { mode: 'page' });
     setPending({ sid, id: tab.id }); switching.current = { sid, intent };
     try {
       let status;
@@ -62,7 +64,7 @@ export function useWorkspaceTabs({ presentation, sid, cur, session, api, toast, 
   }
   function openWebLink(url) {
     if (dock.tabs.length >= 32) { toast('请先关闭一些工作标签页', 'warn'); return; }
-    if (session?.workspace?.kind === 'unselected') { setWorkspacePrompt(true); return; }
+    if (!session) { setWorkspacePrompt('create'); return; }
     const next = addDockTab(dock, 'browser'); setView('chat');
     presentation.update(sid, { dock: next, sideOpen: true, manuallyClosed: false });
     navigate(url, next.tabs.find(t => t.id === next.activeId));

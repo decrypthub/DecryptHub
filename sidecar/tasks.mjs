@@ -51,6 +51,7 @@ export class TaskStore {
     if (input.days && (!Array.isArray(input.days) || !input.days.length || input.days.some(d => !Number.isInteger(d) || d < 0 || d > 6))) throw new Error('请至少选择一天，星期必须有效');
     base.days = input.days ? [...new Set(input.days)].sort() : (base.days || [0, 1, 2, 3, 4, 5, 6]);
     base.enabled = input.enabled !== undefined ? !!input.enabled : (base.enabled !== false);
+    if (!base.sessionId) throw new Error('请选择项目内的执行会话');
     if (!t) this.tasks.push(base); else this.tasks = this.tasks.map(x => x.id === t.id ? base : x);
     this.save();
     return this.list();
@@ -102,17 +103,12 @@ export class TaskStore {
       // 复用同一个会话（= 同一个浏览器 profile）：定时任务往往是「运营某个账号」，
       // 每次新建会话会换 profile，登录态就丢了。所以固定用一个，第二次起直接续上。
       let session = t.sessionId ? mgr.sessions.get(t.sessionId) : null;
-      if (t.sessionId && !session) throw new Error('绑定会话已关闭，请重新选择执行会话');
-      if (!session) {
-        session = mgr.create({ title: t.title, quiet: false, managed: true });
-        t.sessionId = session.id;
-        this.save();
-      }
+      if (!session) throw Object.assign(new Error('绑定会话已关闭，请重新选择项目内的执行会话'), { needsAttention: true });
       mgr.emitList();
-      if (session.workspace?.kind === 'unselected') throw Object.assign(new Error('绑定会话尚未选择目录，请先打开会话选择工作目录'), { needsAttention: true });
+      if (session.mgr.workspaces.availability(session.workspace).availability !== 'ready') throw Object.assign(new Error('项目目录不可用，请打开会话重新选择目录'), { needsAttention: true });
       if (session.mode === 'full-access') throw Object.assign(new Error('自动化不能继承宿主机权限，请先将绑定会话切换为标准或只读权限'), { needsAttention: true });
       const sent = session.send({ text: t.prompt, source: 'automation' });
-      if (!sent?.ok) throw Object.assign(new Error(sent?.error || '发送失败'), { needsAttention: ['workspace-required', 'model-required', 'busy'].includes(sent?.code) });
+      if (!sent?.ok) throw Object.assign(new Error(sent?.error || '发送失败'), { needsAttention: ['project-directory-unavailable', 'model-required', 'busy'].includes(sent?.code) });
       const finished = await session.completion;
       t.lastStatus = finished?.status === 'completed' ? 'ok' : finished?.status === 'needs_attention' ? 'needs_attention' : 'error';
       t.lastError = t.lastStatus === 'ok' ? '' : finished?.error || (t.lastStatus === 'needs_attention' ? '需要你批准权限或补充信息，请打开绑定会话后继续' : '任务没有正常完成');

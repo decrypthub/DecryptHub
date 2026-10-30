@@ -102,7 +102,7 @@ export DECRYPTHUB_WDH_DIR="$(cd ../WebDecryptHub-Runtime && pwd)"
 export DECRYPTHUB_DATA_DIR="$(pwd)/.tmp/macos-dev/WebDecryptHub"
 export JSRA_SIDECAR_NODE="$(pwd)/sidecar/index.mjs"
 export JSRA_EMBED_MODE=screencast
-export JSRA_KERNEL=system
+export JSRA_KERNEL=system  # 已失效：桌面版内核固定 CloakBrowser，不再读取该变量
 cargo run --manifest-path src-tauri/Cargo.toml
 ```
 

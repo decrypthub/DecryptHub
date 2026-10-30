@@ -6,7 +6,7 @@
 
 | 插件 | 下载来源 | 安装内容与运行要求 |
 |---|---|---|
-| WDH | decrypthub/WebDecryptHub | 独立浏览器 MCP；预览包支持 Windows/Linux x64，复用宿主 Node；内核单独选择系统 Chrome / Edge 或下载 Cloak |
+| WDH | decrypthub/WebDecryptHub | 独立浏览器 MCP；预览包支持 Windows/Linux x64，复用宿主 Node；桌面版内核固定为 WDH 自带的 CloakBrowser，不再提供系统 Chrome / 自定义路径 / GitHub Release 选项 |
 | IDH | decrypthub/idh-cli | iOS 的电脑端 MCP 网关；Python 3.10+，设备插件自行部署 |
 | ADH | decrypthub/adh-cli | Android 的电脑端 MCP 网关；Python 3.10+，设备插件与 Host ADH Daemon 自行部署 |
 

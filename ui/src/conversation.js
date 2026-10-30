@@ -19,16 +19,16 @@ export function historyEvents(history, partial = '', partialItem = null, partial
   return events;
 }
 
-export function conversationTurns(events, run = null, running = false) {
+export function conversationTurns(events, run = null, running = false, subagents = []) {
   const turns = [], byId = new Map(); let current;
   for (let i = 0; i < events.length; i++) {
     const e = events[i];
-    const id = e.turnId || (e.type === 'user' ? 'legacy-' + i : current?.id || 'legacy-system');
+    const id = e.turnId || (e.type === 'user' ? 'legacy-' + (e.id || i) : current?.id || 'legacy-system');
     let turn = byId.get(id);
     if (!turn) { turn = { id, items: [], user: null, startedAt: e.at || 0 }; byId.set(id, turn); turns.push(turn); }
     current = turn;
     if (e.type === 'user') turn.user = e;
-    else if (e.type === 'turn-end') { turn.end = e; turn.endedAt = e.endedAt; }
+    else if (e.type === 'turn-end') { turn.end = e; turn.endedAt = e.endedAt; turn.usage = e.usage || null; }
     else turn.items.push(e);
   }
   for (const turn of turns) {
@@ -38,6 +38,7 @@ export function conversationTurns(events, run = null, running = false) {
       if (e.type === 'assistant') {
         if (e.reasoning) turn.process.push({ type: 'reasoning', id: 'reasoning-' + e.id, content: e.reasoning, finished: e.finished, at: e.at, turnId: e.turnId });
         const phase = e.phase || (i === lastAssistant && !turn.items.slice(i + 1).some(t => t.type === 'tool') ? 'final_answer' : 'commentary');
+        // 最终回复放正文区；工具之间的进度说明留在执行过程里，按真实顺序与工具交错。
         if (e.content) (phase === 'commentary' ? turn.process : turn.answers).push({ ...e, phase });
       } else if (e.type === 'error') turn.alerts.push(e);
       else turn.process.push(e);
@@ -49,6 +50,8 @@ export function conversationTurns(events, run = null, running = false) {
     if (!turn.active) turn.process = turn.process.map(e => e.type === 'reasoning' ? { ...e, finished: true } : e.type === 'tool' && e.result === undefined ? { ...e, cancelled: true, result: '未收到完成结果；未自动重放此操作。' } : e);
     turn.tools = turn.process.filter(e => e.type === 'tool');
     turn.failures = turn.tools.filter(e => e.isError).length;
+    // A missing parent stays in the session menu; never guess from a title/time.
+    turn.subagents = subagents.filter(agent => agent.parentRunId === turn.id);
   }
   return turns;
 }

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { cleanTitle, promptTitle, generateSessionTitle, SessionTitleService } from '../session-titles.mjs';
-import { SessionManager } from '../sessions.mjs';
+import { TestSessionManager as SessionManager } from './project-fixture.mjs';
 import { sessionLabel } from '../../ui/src/state.js';
 const settings = { provider: 'openai', openai: { baseUrl: 'https://model.invalid/v1', model: 'fixture', apiKey: 'fixture-key' } };
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };

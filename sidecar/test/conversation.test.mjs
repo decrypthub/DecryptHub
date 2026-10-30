@@ -4,7 +4,7 @@ import { historyEvents, conversationTurns, toolPresentation } from '../../ui/src
 import { sessionReducer, blankSession } from '../../ui/src/state.js';
 import { autoReview } from '../policy.mjs';
 
-test('turn presentation folds commentary and interleaved tools while preserving the final answer', () => {
+test('turn presentation keeps progress text interleaved with tools inside the folded process', () => {
   const history = [{ t: 'user', id: 'u', turnId: 'r', content: 'wire text', displayContent: '修改代码', at: 1000 },
     { t: 'assistant', turnId: 'r', phase: 'commentary', content: '读取文件', calls: [{ id: 'call0', itemId: 'i1', name: 'workspace_read', args: { path: 'a.js' } }] },
     { t: 'tool', turnId: 'r', id: 'call0', itemId: 'i1', content: 'first' },
@@ -14,7 +14,9 @@ test('turn presentation folds commentary and interleaved tools while preserving 
   const turns = conversationTurns(historyEvents(history));
   assert.equal(turns.length, 1); assert.equal(turns[0].user.content, '修改代码');
   assert.deepEqual(turns[0].tools.map(t => t.result), ['first', 'second']);
-  assert.equal(turns[0].process.length, 4); assert.equal(turns[0].failures, 1); assert.equal(turns[0].answers[0].content, '最终回复');
+  assert.equal(turns[0].process.length, 4); assert.equal(turns[0].failures, 1);
+  assert.deepEqual(turns[0].process.map(e => e.type), ['assistant', 'tool', 'assistant', 'tool']);
+  assert.deepEqual(turns[0].answers.map(a => a.content), ['最终回复']);
   assert.equal(toolPresentation(turns[0].tools[0]).detail, 'a.js');
 });
 test('stream updates address a specific message instead of the latest assistant', () => {

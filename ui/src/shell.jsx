@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Flex, Text, TextField, Spinner, Dialog, DropdownMenu } from '@radix-ui/themes';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { useWorkbench } from './bus.jsx';
@@ -10,6 +10,10 @@ import { Dock } from './dock.jsx';
 import { Screens } from './screens.jsx';
 import { handleWindowDrag } from './window-drag.js';
 import { ProjectDialogs } from './projects.jsx';
+import { readSidebarOpen, saveSidebarOpen } from './sidebar-state.js';
+import { SidebarBrowser } from './sidebar-browser.jsx';
+import { SidebarResize, useSidebarWidth } from './sidebar-width.jsx';
+import { AccountProvider, SidebarAccount } from './account.jsx';
 
 let win = null;
 async function getWin() {
@@ -19,10 +23,11 @@ async function getWin() {
 }
 
 // 无独立标题栏：窗口按钮浮在内容右上角，拖动交给各栏顶部的 drag region
-function WindowControls() {
-  const { view, sideOpen, setSideOpen } = useWorkbench();
+function WindowControls({ nativeTitlebar }) {
+  const { view, sid, sideOpen, setSideOpen } = useWorkbench();
   const [max, setMax] = useState(false);
   useEffect(() => {
+    if (nativeTitlebar) return;
     let off, disposed = false;
     getWin().then(async w => {
       if (!w || disposed) return;
@@ -31,28 +36,30 @@ function WindowControls() {
       if (disposed) cleanup?.(); else off = cleanup;
     });
     return () => { disposed = true; off?.(); };
-  }, []);
+  }, [nativeTitlebar]);
   const act = async a => {
     const w = await getWin(); if (!w) return;
     if (a === 'min') w.minimize();
     if (a === 'max') w.toggleMaximize();
     if (a === 'close') w.close();
   };
+  if (nativeTitlebar && view !== 'chat') return null;
   return <div className="win-controls">
-    {view === 'chat' && <ActionIcon icon="sidebar" className="tool-panel-toggle" variant="soft" color="gray" onClick={() => setSideOpen(value => !value)} title={sideOpen ? '收起工具面板' : '展开工具面板'} aria-pressed={sideOpen} />}
-    <ActionIcon icon="minus" onClick={() => act('min')} title="最小化" />
-    <ActionIcon icon={max ? 'restore' : 'square'} onClick={() => act('max')} title={max ? '还原' : '最大化'} />
-    <ActionIcon icon="x" color="red" onClick={() => act('close')} title="关闭" />
+    {view === 'chat' && <ActionIcon icon="sidebarRight" className="tool-panel-toggle" variant="soft" color="gray" disabled={!sid} onClick={() => setSideOpen(value => !value)} title={sideOpen ? '收起工具面板' : '展开工具面板'} aria-pressed={sideOpen} />}
+    {!nativeTitlebar && <>
+      <ActionIcon icon="minus" onClick={() => act('min')} title="最小化" />
+      <ActionIcon icon={max ? 'restore' : 'square'} onClick={() => act('max')} title={max ? '还原' : '最大化'} />
+      <ActionIcon icon="x" color="red" onClick={() => act('close')} title="关闭" />
+    </>}
   </div>;
 }
 
-function Rail({ onSearch, onCollapse }) {
+function Rail({ searchRequest, onSearchHandled, onCollapse }) {
   const w = useWorkbench();
   const { sessions, sid, focusSession, newSession, closeSession, pinSession, view, setView, api, toast, projects, projectFilter, setProjectFilter, setProjectEditor, setMoveSession } = w;
   const [rename, setRename] = useState(null);
   const [renaming, setRenaming] = useState(false);
   const [menuSession, setMenuSession] = useState(null);
-  const list = (sessions.sessions || []).filter(s => !projectFilter || s.projectId === projectFilter);
   async function copySession(session, markdown = false) {
     try {
       const text = markdown ? (await api.invoke('session-export-markdown', { sessionId: session.id })).markdown : session.id;
@@ -69,27 +76,24 @@ function Rail({ onSearch, onCollapse }) {
     finally { setRenaming(false); }
   };
   return <aside className="rail" aria-label="工作区导航">
-    <div className="rail-brand" data-window-drag-region onMouseDown={e => handleWindowDrag(e, native)}>
-      <LogoMark size={24} />
-      <strong className="rail-name">Decrypt<span className="brand-accent">Hub</span></strong>
+    <div className="rail-chrome" data-window-drag-region onMouseDown={e => handleWindowDrag(e, native)}>
       <ActionIcon icon="sidebar" className="rail-collapse" onClick={onCollapse} title="收起会话列表" />
     </div>
-    <Button className="new-session" size="2" onClick={newSession} title="新建对话（Ctrl+T）"><Icon n="plus" size={16} /><span>新对话</span><kbd>Ctrl T</kbd></Button>
+    <div className="rail-brand" data-window-drag-region onMouseDown={e => handleWindowDrag(e, native)}>
+      <LogoMark size={30} />
+      <strong className="rail-name">DecryptHub</strong>
+      <span className="rail-badge">AGENT</span>
+    </div>
+    <Button className="new-session" size="3" variant="surface" color="gray" onClick={newSession} title="新建对话（Ctrl+T）"><Icon n="plus" size={18} /><span>新对话</span><kbd>Ctrl T</kbd></Button>
     <nav className="rail-nav" aria-label="主要导航">
       <NavButton active={view === 'plugins'} onClick={() => setView('plugins')}><Icon n="tool" /><span>插件</span></NavButton>
       <NavButton active={view === 'automations'} onClick={() => setView('automations')}><Icon n="clock" /><span>自动化任务</span></NavButton>
     </nav>
-    <div className="rail-sec"><span>项目</span><ActionIcon icon="plus" variant="soft" color="gray" onClick={() => setProjectEditor({})} title="新建项目" /></div>
-    <div className="rail-projects">{projects.map(p => <div className={'rail-project' + (projectFilter === p.id ? ' selected' : '')} key={p.id}>
-      <button onClick={() => setProjectFilter(projectFilter === p.id ? null : p.id)} title={p.folders.map(f => f.root).join('\n')}><Icon n="folder" size={16} /><span className="ellipsis">{p.name}</span><small>{sessions.sessions.filter(s => s.projectId === p.id).length}</small></button>
-      <ActionIcon icon="more" variant="soft" color="gray" onClick={() => setProjectEditor(p)} title={'编辑项目 ' + p.name} />
-    </div>)}</div>
-    <div className="rail-sec"><span>{projects.find(p => p.id === projectFilter)?.name || '会话列表'}</span><span className="rail-count">{list.length}</span>{projectFilter && <ActionIcon icon="x" variant="soft" color="gray" onClick={() => setProjectFilter(null)} title="显示全部会话" />}<ActionIcon icon="search" variant="soft" color="gray" onClick={onSearch} title="查找会话" /></div>
-    <div className="rail-list" aria-label="会话列表">
-      {list.map(s => <div key={s.id} data-session-id={s.id} className={'session-item' + (s.id === sid && view === 'chat' ? ' on' : '') + (menuSession === s.id ? ' menu-open' : '')}>
+    <SidebarBrowser searchRequest={searchRequest} onSearchHandled={onSearchHandled} renderSession={(s, showProject) => <div key={s.id} data-session-id={s.id} className={'session-item' + (showProject ? ' has-project' : '') + (s.id === sid && view === 'chat' ? ' on' : '') + (menuSession === s.id ? ' menu-open' : '')}
+      onContextMenu={event => { event.preventDefault(); setMenuSession(s.id); }} onKeyDown={event => { if (event.shiftKey && event.key === 'F10') { event.preventDefault(); setMenuSession(s.id); } }}>
         <button className="session-focus" onClick={() => focusSession(s.id)} onDoubleClick={() => setRename({ id: s.id, title: sessionLabel(s) })} title={s.title} aria-current={s.id === sid && view === 'chat' ? 'page' : undefined}>
           <span className={'session-glyph' + (s.agentRunning ? ' running' : '')} title={s.agentRunning ? '正在分析' : undefined}>{s.agentRunning ? <Spinner size="1" /> : <Icon n="chat" size={16} />}</span>
-          <span className="session-text"><strong>{sessionLabel(s)}</strong></span>
+          <span className="session-text"><strong>{sessionLabel(s)}</strong>{showProject && <small>{projects.find(p => p.id === s.projectId)?.name}</small>}</span>
           {s.pinned && <span className="session-pin" title="已置顶"><Icon n="pin" size={12} /></span>}
           <span className="session-time">{relTime(s.updatedAt)}</span>
         </button>
@@ -107,11 +111,9 @@ function Rail({ onSearch, onCollapse }) {
             </DropdownMenu.Content>
           </DropdownMenu.Root>
         </div>
-      </div>)}
-      {!list.length && <div className="rail-empty"><Icon n="chat" size={22} /><span>从一个新对话开始</span></div>}
-    </div>
+      </div>} />
     <div className="rail-bottom">
-      <NavButton className="rail-item" active={view === 'settings'} onClick={() => setView('settings')}><Icon n="settings" /><span className="t">设置</span><kbd>Ctrl ,</kbd></NavButton>
+      <SidebarAccount />
     </div>
     <Dialog.Root open={!!rename} onOpenChange={v => { if (!v && !renaming) setRename(null); }}>
       <Dialog.Content maxWidth="400px"><Dialog.Title>重命名会话</Dialog.Title><Dialog.Description size="2" color="gray">为这次分析起一个容易查找的名字。</Dialog.Description>
@@ -121,48 +123,27 @@ function Rail({ onSearch, onCollapse }) {
   </aside>;
 }
 
-// 收起时整栏隐藏，展开入口放到对话顶栏最左侧（由 ChatStage 渲染）
-function SessionSearch({ open, onOpenChange }) {
-  const { sessions, focusSession } = useWorkbench();
-  const [q, setQ] = useState('');
-  useEffect(() => { if (open) setQ(''); }, [open]);
-  const matches = sessions.sessions.filter(s => (sessionLabel(s) + ' ' + (s.url || '')).toLowerCase().includes(q.trim().toLowerCase()));
-  const choose = s => { onOpenChange(false); focusSession(s.id); };
-  const list = useRef(null);
-  return <Dialog.Root open={open} onOpenChange={onOpenChange}>
-    <Dialog.Content className="session-search-dialog" maxWidth="560px" onKeyDown={e => {
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault(); const buttons = [...(list.current?.querySelectorAll('button') || [])];
-        if (!buttons.length) return;
-        const current = buttons.indexOf(document.activeElement);
-        const next = current < 0 ? (e.key === 'ArrowDown' ? 0 : buttons.length - 1) : (current + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
-        buttons[next]?.focus();
-      }
-    }}>
-      <Dialog.Title className="sr-only">搜索会话</Dialog.Title><Dialog.Description className="sr-only">按会话名称或网址搜索，方向键选择，回车打开。</Dialog.Description>
-      <div className="session-search-input"><TextField.Root size="3" autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="搜索会话…" aria-label="搜索会话" onKeyDown={e => { if (e.key === 'Enter' && matches[0]) choose(matches[0]); }}>
-        <TextField.Slot><Icon n="search" size={18} /></TextField.Slot><TextField.Slot side="right"><kbd>ESC</kbd></TextField.Slot>
-      </TextField.Root></div>
-      <div className="session-search-results" ref={list}>{matches.map(s => <Button size="3" variant="ghost" color="gray" m="0" key={s.id} onClick={() => choose(s)}><Icon n="chat" size={18} /><span>{sessionLabel(s)}</span></Button>)}{!matches.length && <div className="blank-sm">{q.trim() ? '未找到会话' : '暂无会话'}</div>}</div>
-    </Dialog.Content>
-  </Dialog.Root>;
+export function Shell() {
+  return <AccountProvider><WorkbenchShell /></AccountProvider>;
 }
 
-export function Shell() {
+function WorkbenchShell() {
   const { settings, view, sideOpen, firstRun, sid, panelLayout, setPanelLayout } = useWorkbench();
-  // 默认聊天优先：侧栏收起，只留一条窄边；用户展开后记住选择
-  const [railOpen, setRailOpen] = useState(() => localStorage.getItem('wdh_rail') === 'open');
-  const [searchOpen, setSearchOpen] = useState(false);
-  const toggleRail = () => setRailOpen(v => { localStorage.setItem('wdh_rail', v ? 'closed' : 'open'); return !v; });
+  const nativeTitlebar = window.__JSRA_NATIVE_TITLEBAR === true;
+  // 项目侧栏默认展开；搜索快捷键在收起时展开它。
+  const [railOpen, setRailOpen] = useState(() => readSidebarOpen(localStorage));
+  const [searchRequest, setSearchRequest] = useState(0);
+  const [railWidth, setRailWidth] = useSidebarWidth();
+  const toggleRail = () => setRailOpen(value => { saveSidebarOpen(localStorage, !value); return !value; });
   useEffect(() => {
-    const key = e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setSearchOpen(v => !v); } };
+    const key = e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setRailOpen(true); saveSidebarOpen(localStorage, true); setSearchRequest(v => v + 1); } };
     window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
   }, []);
-  return <div className="app" data-view={view} data-tools-open={view === 'chat' && sideOpen}>
-    <WindowControls />
+  return <div className="app" style={{ '--rail-width': railWidth + 'px' }} data-view={view} data-tools-open={view === 'chat' && sideOpen} data-native-titlebar={nativeTitlebar} data-rail-open={railOpen}>
+    <WindowControls nativeTitlebar={nativeTitlebar} />
     {!settings ? <div className="app-loading"><LogoMark size={40} /><Spinner size="2" /><Text size="2" color="gray">正在准备研究工作区…</Text></div> : <>
       <div className="body">
-        {railOpen && <Rail onSearch={() => setSearchOpen(true)} onCollapse={toggleRail} />}
+        {railOpen && <><Rail searchRequest={searchRequest} onSearchHandled={() => setSearchRequest(0)} onCollapse={toggleRail} /><SidebarResize width={railWidth} onChange={setRailWidth} /></>}
         <div className="workspace">
           {view === 'chat' ? <PanelGroup key={sid} direction="horizontal" onLayout={sizes => setPanelLayout(sizes, sid)} className="workbench-panels">
             <Panel id="assistant" order={1} minSize={34} defaultSize={panelLayout[0]}><main className="stage"><ChatStage railOpen={railOpen} onExpandRail={toggleRail} /></main></Panel>
@@ -170,7 +151,6 @@ export function Shell() {
           </PanelGroup> : <Screens />}
         </div>
       </div>
-      <SessionSearch open={searchOpen} onOpenChange={setSearchOpen} />
       <ProjectDialogs />
     </>}
     {firstRun && <FirstRunDialog />}

@@ -17,6 +17,8 @@ node --test sidecar/test/*.test.mjs
 
 Windows 调试：先运行 `scripts/build-desktop.cmd`，然后 `npm run dev:desktop`。脚本使用 `.tmp/desktop-appdata/WebDecryptHub` 保存开发聊天，与日常数据分开。开发模式需要 Node 在 PATH 中。
 
+macOS 源码开发与串流验证见 [Mac 开发说明](docs/macos-development.md)。目前只验证 Apple Silicon 源码路径，不代表已有正式 Mac 安装包或原生浏览器嵌入支持。
+
 `scripts/start-desktop.ps1` 启动当前源码和最新本地构建；同时保留标准 target 与 `.tmp/projects-harness-target` 预览构建时按时间选新版。先关闭该项目的其他桌面实例，避免共享开发数据。可用 `-BinaryPath` 明确选择构建。
 
 输入 `/` 查看命令：`/goal`、`/compact`、`/agent`、`/skill`、`/skills`、`/memory`、`/memories`、`/automation`、`/mcp` 和 `/init`。技能/记忆会保存到会话、项目或用户范围；自动化与 MCP 管理由实际工具完成，遵循当前权限。详见 [项目与扩展](docs/projects-and-extensions.md)。
