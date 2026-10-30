@@ -8,7 +8,7 @@ export const OFFICIAL_PLUGINS = Object.freeze([
     icon: 'globe',
     runtime: 'node',
     description: '浏览网页、抓取请求、调试脚本与观测指纹。',
-    note: '使用系统 Chrome / Edge，或在插件中下载 CloakBrowser。',
+    note: '使用 WDH 自带的 CloakBrowser；首次使用可在下方下载。',
   },
   {
     id: 'idh',

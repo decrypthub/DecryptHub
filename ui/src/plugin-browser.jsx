@@ -127,7 +127,7 @@ export function BrowserSettings({ s, up }) {
             />
           </Flex>
           {dl ? (
-            <>
+            <Flex direction="column" gap="2" mt="3">
               <Progress value={pct ?? 8} size="1" />
               <Text as="p" size="1" color="gray">
                 {dl.phase === 'metadata'
@@ -138,12 +138,12 @@ export function BrowserSettings({ s, up }) {
                       ? '校验完成，正在解压…'
                       : `${pct ?? ''}% · ${((dl.got || 0) / 1e6).toFixed(0)} MB`}
               </Text>
-            </>
+            </Flex>
           ) : (
-            <Button size="2" variant="soft" onClick={download}>
+            <Box mt="3"><Button size="2" variant="soft" onClick={download}>
               <Icon n="download" size={16} />
               {info ? '下载更新' : '下载 CloakBrowser'}
-            </Button>
+            </Button></Box>
           )}
         </Box>
         {kernel?.hostIntegrity?.normal === false && (
