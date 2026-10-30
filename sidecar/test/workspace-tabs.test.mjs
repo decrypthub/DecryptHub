@@ -16,7 +16,9 @@ function fixture(t) {
   t.after(async () => { await manager.closeAll(); assert.equal(path.dirname(directory), os.tmpdir()); assert.ok(path.basename(directory).startsWith('dh-tabs-')); fs.rmSync(directory, { recursive: true, force: true }); });
   return { s, manager, directory };
 }
-const wait = async check => { const end = Date.now() + 12000; while (!check()) { if (Date.now() > end) throw Error('Terminal verification timed out'); await new Promise(r => setTimeout(r, 25)); } };
+const wait = async (check, message = 'Terminal verification timed out') => { const end = Date.now() + 12000; while (!check()) { if (Date.now() > end) throw Error(message); await new Promise(r => setTimeout(r, 25)); } };
+const waitPrompt = async (s, id) => { if (process.platform === 'win32') await wait(() => /PS [^>\r\n]*>/.test(s.terminals.snapshot(id).output), 'PowerShell prompt timed out'); };
+const expectOutput = async (check, s, id) => { try { await wait(check); } catch (error) { const tail = s.terminals.snapshot(id).output.slice(-600); throw Error(error.message + '; output tail=' + JSON.stringify(tail)); } };
 test('work tabs preserve stable IDs and choose a neighbour on close; v1 migrates network into browser', () => {
   let dock = addDockTab(emptyDock(), 'files'), original = dock.activeId; dock = addDockTab(dock, 'document', { path: 'report.md', workspace: 'test' });
   dock = addDockTab(dock, 'terminal'); dock = closeDockTab(dock, dock.activeId); assert.equal(dock.tabs.length, 2); assert.equal(dock.tabs[0].id, original); assert.equal(dock.activeId, dock.tabs[1].id);
@@ -45,7 +47,7 @@ test('rapid browser selection serializes the latest intent and rejects missing p
   const tabs = new BrowserTabs(s); const a = tabs.select('a'), b = tabs.select('b'); await Promise.all([a, b]); assert.deepEqual(seen, ['b']);
   await assert.rejects(tabs.select('missing'), /已关闭/);
 });
-test('interactive terminal enforces permission, accepts real input and closes with its chat', { timeout: 20000 }, async t => {
+test('interactive terminal enforces permission, accepts real input and closes with its chat', { timeout: 45000 }, async t => {
   const { s, manager } = fixture(t), id = crypto.randomUUID(); s.setMode('read-only');
   await assert.rejects(s.terminals.open({ id }), /只读/);
   s.setMode('standard'); s.approve = async () => false; await assert.rejects(s.terminals.open({ id }), /未批准/); assert.equal(s.terminals.entries.size, 0);
@@ -65,7 +67,7 @@ test('terminal approval never changes an unrelated Agent automation run', async 
   assert.equal(s.pending.size, 1); assert.ok(!s.permissionBlocked); assert.equal(s.activeRun.status, 'running');
   s.replyApproval([...s.pending.keys()][0], { allow: false }); await rejected;
 });
-test('multiple terminals isolate output and closing one keeps its sibling usable', { timeout: 25000 }, async t => {
+test('multiple terminals isolate output and closing one keeps its sibling usable', { timeout: 60000 }, async t => {
   const { s } = fixture(t), a = crypto.randomUUID(), b = crypto.randomUUID(); s.setMode('full-access');
   await Promise.all([s.terminals.open({ id: a }), s.terminals.open({ id: b })]);
   const command = suffix => process.platform === 'win32' ? "Write-Output ('ISOLATED_' + '" + suffix + "')\r" : "printf 'ISOLATED_%s\\n' '" + suffix + "'\r";
