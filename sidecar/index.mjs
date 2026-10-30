@@ -1,6 +1,7 @@
 // Sidecar host: Windows Node bundle / Linux executable. Legacy worker modes remain for compatibility.
 import path from 'node:path';
 import fs from 'node:fs';
+import { BrowserManager } from './browser.mjs';
 import { fileURLToPath } from 'node:url';
 
 const MODE = process.env.JSRA_MODE || 'server';
@@ -73,6 +74,9 @@ async function startServer() {
     onChange: status => { broadcast('mcp-status', status); plugins?.notify(); },
   });
   const sessions = new SessionManager({ userDataDir: settingsMod.userDataDir(), getSettings: () => settings, broadcast, chromeMod, mcpHost });
+  // 内核管理不依赖会话：全新安装（零项目/零会话）也必须能查询、下载和测试内核。
+  const kernelHost = new BrowserManager({ components: sessions.components, getRoot: () => settingsMod.userDataDir(), dataDir: path.join(settingsMod.userDataDir(), '.kernel-host'), kernelDir: settingsMod.userDataDir() });
+  kernelHost.on('download-progress', value => broadcast('download-progress', value));
   plugins = new PluginManager({ components:sessions.components, mcpHost, getSettings:()=>settings, saveSettings:()=>settingsMod.save(settings), getSessions:()=>[...sessions.sessions.values()], broadcast });
   sessions.plugins = plugins;
   mcpHost.apply().catch(e => fileLog('MCP 服务启动失败: ' + e.message));
@@ -131,12 +135,12 @@ async function startServer() {
     'kernel-info': async () => {
       const component=sessions.components.info();
       if(!component.installed||!component.enabled)return {component,hostIntegrity:await windowsRuntime.hostIntegrity(),kernel:settings.kernel};
-      const info=await S().browser.control('kernel-info');return {...info,component,hostIntegrity:await windowsRuntime.hostIntegrity(),kernel:settings.kernel,downloading:!!downloading};
+      const info=await kernelHost.control('kernel-info');return {...info,component,hostIntegrity:await windowsRuntime.hostIntegrity(),kernel:settings.kernel,downloading:!!downloading};
     },
-    'kernel-repair': async a => {if([...sessions.sessions.values()].some(s=>s.browser.running))return {ok:false,error:'请先关闭所有浏览器再修复内核'};return S().browser.control('kernel-repair',{kind:settingsMod.KERNEL});},
+    'kernel-repair': async a => {if([...sessions.sessions.values()].some(s=>s.browser.running))return {ok:false,error:'请先关闭所有浏览器再修复内核'};return kernelHost.control('kernel-repair',{kind:settingsMod.KERNEL});},
     // 内核固定 CloakBrowser：下载源与仓库不接受调用方覆盖，避免被当成通用内核下载器。
-    'download-kernel': async a => {if(downloading)return {ok:false,error:'已有下载正在运行'};const args={repository:'CloakHQ/cloakbrowser',tag:a?.tag||'',asset:a?.asset||''};downloading=S().browser.control('kernel-download',args);try{const result=await downloading;settings.kernel=settingsMod.KERNEL;settingsMod.save(settings);return {ok:true,...result};}catch(e){return {ok:false,error:e.message};}finally{downloading=null;}},
-    'probe-kernel': async a => S().browser.control('kernel-probe',{...a,kernel:settingsMod.KERNEL}),
+    'download-kernel': async a => {if(downloading)return {ok:false,error:'已有下载正在运行'};const args={repository:'CloakHQ/cloakbrowser',tag:a?.tag||'',asset:a?.asset||''};downloading=kernelHost.control('kernel-download',args);try{const result=await downloading;settings.kernel=settingsMod.KERNEL;settingsMod.save(settings);return {ok:true,...result};}catch(e){return {ok:false,error:e.message};}finally{downloading=null;}},
+    'probe-kernel': async a => kernelHost.control('kernel-probe',{...a,kernel:settingsMod.KERNEL}),
     // 会话（多目标站点并行分析，每个会话独立 Chrome/内核/Agent）
     'session-list': () => sessions.list(),
     'session-search': (a, context) => searchSessions({ sessions: sessions.sessions, projects: sessions.projects.list(), query: a?.query, signal: context?.signal }),
@@ -365,6 +369,7 @@ async function startServer() {
     try { await plugins.close(); } catch {}
     try { await mcpHost.close(); } catch {}
     try { await sessions.closeAll(); } catch {}
+    try { await kernelHost.close(); } catch {}
     fileLog('sidecar 退出');
     process.exit(0);
   }
