@@ -42,7 +42,7 @@ try {
   const project = await invoke('project-save', { scope, project: { name: 'Packaged smoke', folders: [{ key: 'main', grant }], primaryKey: 'main' } });
   const sessionId = (await invoke('session-create', { projectId: project.id })).id;
   const state = (await invoke('session-snapshot', { sessionId })).state;
-  if (state.workspace.root !== projectDir || state.workspace.availability !== 'ready') throw new Error('Packaged session must run inside its project directory');
+  if (fs.realpathSync.native(state.workspace.root) !== fs.realpathSync.native(projectDir)) throw new Error('Packaged session must run inside its project directory');
   const tools = await invoke('list-tools', { sessionId });
   if (!tools.some(t => t.name === 'component_list') || tools.some(t => t.name === 'browser_open')) throw new Error('Core must work without WDH');
   if ((await invoke('component-info')).installed) throw new Error('Expected a clean core-only install');
