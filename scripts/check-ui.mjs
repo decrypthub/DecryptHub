@@ -336,6 +336,11 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   if (!initialSessions.sessions.length) {
     ok(await page.getByRole('textbox', { name: '任务指令' }).count() === 0, '[' + scheme + '] 未创建项目时不应创建会话或输入坞');
     ok(await page.getByRole('heading', { name: '添加第一个项目', exact: true }).isVisible(), '[' + scheme + '] 首次启动应显示项目空状态');
+    // 空状态只保留一个入口，侧栏和标题栏不再重复提示添加项目。
+    ok(await page.getByText('选择项目目录，然后在项目下创建会话。', { exact: true }).count() === 0, '[' + scheme + '] 空状态不应重复说明如何添加项目');
+    ok(await page.getByText('添加项目目录，开始工作', { exact: true }).count() === 0, '[' + scheme + '] 侧栏不应重复提示添加项目');
+    ok(await page.getByRole('button', { name: '选择项目', exact: true }).count() === 0, '[' + scheme + '] 没有项目时不应显示项目选择器');
+    ok(await page.getByRole('button', { name: '添加项目目录', exact: true }).count() === 1, '[' + scheme + '] 空状态应只有一个添加项目入口');
   }
   const scope = 'ui-project-' + scheme;
   const mainRoot = path.join(DATA, 'ui-main-' + scheme), sharedRoot = path.join(DATA, 'ui-shared-' + scheme);
