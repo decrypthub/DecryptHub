@@ -48,7 +48,7 @@ test('rapid browser selection serializes the latest intent and rejects missing p
   const tabs = new BrowserTabs(s); const a = tabs.select('a'), b = tabs.select('b'); await Promise.all([a, b]); assert.deepEqual(seen, ['b']);
   await assert.rejects(tabs.select('missing'), /已关闭/);
 });
-test('interactive terminal enforces permission, accepts real input and closes with its chat', { timeout: 60000, skip: process.platform === 'win32' ? 'Windows ConPTY terminal input needs a real Windows follow-up (typed line is echoed but never executed)' : false }, async t => {
+test('interactive terminal enforces permission, accepts real input and closes with its chat', { timeout: 60000 }, async t => {
   const { s, manager } = fixture(t), id = crypto.randomUUID(); s.setMode('read-only');
   await assert.rejects(s.terminals.open({ id }), /只读/);
   s.setMode('standard'); s.approve = async () => false; await assert.rejects(s.terminals.open({ id }), /未批准/); assert.equal(s.terminals.entries.size, 0);
@@ -69,7 +69,7 @@ test('terminal approval never changes an unrelated Agent automation run', async 
   assert.equal(s.pending.size, 1); assert.ok(!s.permissionBlocked); assert.equal(s.activeRun.status, 'running');
   s.replyApproval([...s.pending.keys()][0], { allow: false }); await rejected;
 });
-test('multiple terminals isolate output and closing one keeps its sibling usable', { timeout: 75000, skip: process.platform === 'win32' ? 'Windows ConPTY terminal input needs a real Windows follow-up (typed line is echoed but never executed)' : false }, async t => {
+test('multiple terminals isolate output and closing one keeps its sibling usable', { timeout: 75000 }, async t => {
   const { s } = fixture(t), a = crypto.randomUUID(), b = crypto.randomUUID(); s.setMode('full-access');
   await Promise.all([s.terminals.open({ id: a }), s.terminals.open({ id: b })]);
   await Promise.all([waitPrompt(s, a), waitPrompt(s, b)]);
