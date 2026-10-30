@@ -5,7 +5,8 @@ import { useWorkbench } from './bus.jsx';
 import { Button, ActionIcon, Icon, Markdown, Dropdown } from './kit.jsx';
 import { fmtK, sessionLabel } from './state.js';
 import { native } from './transport.js';
-import { PermissionPicker, PendingActions } from './workspace.jsx';
+import { PermissionPicker, PendingActions, RuntimePicker } from './workspace.jsx';
+import { ProjectPicker } from './projects.jsx';
 import { AttachmentTiles } from './attachments.jsx';
 import { conversationTurns, toolPresentation, elapsedLabel } from './conversation.js';
 import { commandMatches } from './commands.js';
@@ -49,16 +50,18 @@ export function ChatStage({ railOpen, onExpandRail }) {
 
   if (!session) return <div className="chat is-empty">
     <header className="stage-head" data-window-drag-region onMouseDown={e => handleWindowDrag(e, native)}>
-      {!railOpen && <ActionIcon icon="sidebar" variant="soft" color="gray" onClick={onExpandRail} title="展开会话列表" />}<div className="stage-identity"><strong>项目</strong></div>
+      {!railOpen && <ActionIcon icon="sidebar" variant="soft" color="gray" onClick={onExpandRail} title="展开会话列表" />}<ProjectPicker />
     </header>
     <div className="welcome"><h1>{w.projects.length ? '从项目开始工作' : '添加第一个项目'}</h1><p className="welcome-hint">选择项目目录，然后在项目下创建会话。</p><Button variant="soft" color="gray" onClick={() => w.setProjectEditor({})}><Icon n="folder" />添加项目目录</Button></div>
   </div>;
   return <div className={'chat' + (!cur.events.length ? ' is-empty' : '')}>
     <header className="stage-head" data-window-drag-region onMouseDown={e => handleWindowDrag(e, native)}>
       {!railOpen && <ActionIcon icon="sidebar" variant="soft" color="gray" onClick={onExpandRail} title="展开会话列表" />}
+      <ProjectPicker />
       <div className="stage-identity">
         <strong className="ellipsis" title={sessionLabel(session || {})}>{sessionLabel(session || {})}</strong>
       </div>
+      <RuntimePicker />
       <Box flexGrow="1" />
       <div className="stage-progress" aria-label="目标、计划与子代理">
         {cur.goal && <GoalDetails key={'goal-' + w.sid} goal={cur.goal} />}
@@ -75,7 +78,7 @@ export function ChatStage({ railOpen, onExpandRail }) {
     </div>}
     {cur.run?.status === 'interrupted' && <div className="banner amber"><Icon n="info" /><Text size="1">上次任务已中断。已有改动已保留，可以检查后继续。</Text></div>}
     {cur.run?.status === 'needs_attention' && <div className="banner amber"><Icon n="info" /><Text size="1">自动化需要权限或补充信息，请在此对话中继续处理。</Text></div>}
-    {session?.workspace?.availability !== 'ready' && <div className="banner amber"><Icon n="info" size={13} /><Text size="1">项目目录不可用，执行已停止。聊天记录保留。</Text><Button size="1" variant="ghost" onClick={() => w.api.invoke('projects-check').catch(e => w.toast(e.message, 'err'))}>重新检查</Button></div>}
+    {session?.workspace?.availability !== 'ready' && <div className="banner amber"><Icon n="info" size={13} /><Text size="1">项目目录不可用，执行已停止。聊天记录保留。</Text><Button size="1" variant="ghost" onClick={() => w.api.invoke('projects-check').catch(e => w.toast(e.message, 'err'))}>重新检查</Button><Button size="1" onClick={() => w.setProjectEditor({ ...(w.projects.find(p => p.id === session?.projectId) || {}), relink: true })}>重新选择目录</Button></div>}
 
     <div className="transcript" key={'transcript-' + w.sid}>
     <div className="msgs" ref={refs.chatRef} role="region" aria-label="对话内容" tabIndex={0}>

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Box, Flex, Text, Badge, Card, TextArea, Tabs, DropdownMenu } from '@radix-ui/themes';
+import { Box, Flex, Text, Badge, Card, Dialog, TextArea, Tabs, DropdownMenu } from '@radix-ui/themes';
 import { useWorkbench } from './bus.jsx';
 import { Button, Icon, askConfirm, EmptyState } from './kit.jsx';
 
@@ -24,6 +24,35 @@ export function PermissionPicker() {
   return <DropdownMenu.Root open={open} onOpenChange={setOpen}><DropdownMenu.Trigger><Button size="2" variant="soft" color={w.cur.mode === 'full-access' ? 'red' : 'gray'} disabled={busy} aria-label="选择权限" title={w.cur.agentRunning ? '任务运行中也可切换权限，下一次工具调用即生效' : '选择权限'}><Icon n={PERMISSIONS.find(p => p.id === selected)?.icon || 'key'} /><span className="perm-label">{PERMISSIONS.find(p => p.id === selected)?.label || '请求批准'}</span><Icon n="chevdown" /></Button></DropdownMenu.Trigger>
     <DropdownMenu.Content align="start" side="top" data-overlay className="permission-menu"><DropdownMenu.Label>如何批准 Agent 操作</DropdownMenu.Label><DropdownMenu.RadioGroup value={selected} onValueChange={change}>{PERMISSIONS.map(p => <DropdownMenu.RadioItem key={p.id} value={p.id} aria-label={p.label} disabled={busy} className="permission-menu-item"><Icon n={p.icon} /><span><strong>{p.label}</strong><small>{p.description}</small></span></DropdownMenu.RadioItem>)}</DropdownMenu.RadioGroup></DropdownMenu.Content>
   </DropdownMenu.Root>;
+}
+export function RuntimePicker() {
+  const w = useWorkbench(), [open, setOpen] = useState(false), [cap, setCap] = useState(null);
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    w.inv('executor-status').then(v => { if (live) setCap(v); }).catch(() => {});
+    return () => { live = false; };
+  }, [open, w.sid]);
+  return <Dialog.Root open={open} onOpenChange={setOpen}>
+    <Dialog.Trigger>
+      <Button size="1" variant="ghost" color={w.cur.mode === 'full-access' ? 'red' : 'gray'} disabled={w.cur.agentRunning} title="查看执行环境" aria-label="查看执行环境">
+        {w.cur.mode === 'full-access' ? '宿主机执行' : '执行环境'}<Icon n="info" />
+      </Button>
+    </Dialog.Trigger>
+    <Dialog.Content maxWidth="510px" data-overlay className="permission-dialog">
+      <Dialog.Title>执行环境</Dialog.Title>
+      <Dialog.Description size="2" color="gray">项目目录范围与命令是否隔离分别检查。</Dialog.Description>
+      <div className="permission-environment">
+        <Text as="div" size="1" weight="medium">{cap ? cap.available ? '执行隔离可用' : '当前没有可用的命令隔离后端' : '正在检查执行环境…'}</Text>
+        <Text as="p" size="1" color="gray">{w.cur.mode === 'full-access' ? '命令以当前系统用户权限执行。文件工具只在选定目录范围内操作。' : '标准权限下，未隔离的命令仍需明确批准；自动批准只覆盖符合规则的隔离操作。'}</Text>
+        <Text as="p" size="1" className="mono">{w.session?.workspace?.kind === 'unselected' ? '尚未选择工作目录' : w.session?.workspace?.root}</Text>
+        <Flex justify="between" mt="3">
+          <Button size="1" variant="ghost" color="gray" onClick={() => w.inv('executor-status', { refresh: true }).then(setCap).catch(e => w.toast(e.message, 'err'))}>重新检测</Button>
+          <Dialog.Close><Button size="2" variant="soft" color="gray">关闭</Button></Dialog.Close>
+        </Flex>
+      </div>
+    </Dialog.Content>
+  </Dialog.Root>;
 }
 export function PendingActions() {
   const w = useWorkbench(), approvals = w.cur.approvals || [];
