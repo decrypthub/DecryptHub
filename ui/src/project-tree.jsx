@@ -95,7 +95,6 @@ export function ProjectTree({ children, view = { group: 'projects', sort: 'manua
         </div>}
       </section>;
     })}
-    {!w.projects.length && <div className="rail-empty"><Icon n="folder" size={22} /><span>添加项目目录，开始工作</span></div>}
     {!!w.projects.length && view.group === 'flat' && !ordered.length && <div className="rail-empty">在项目中创建第一个会话</div>}
   </div>;
 }

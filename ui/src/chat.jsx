@@ -50,9 +50,9 @@ export function ChatStage({ railOpen, onExpandRail }) {
 
   if (!session) return <div className="chat is-empty">
     <header className="stage-head" data-window-drag-region onMouseDown={e => handleWindowDrag(e, native)}>
-      {!railOpen && <ActionIcon icon="sidebar" variant="soft" color="gray" onClick={onExpandRail} title="展开会话列表" />}<ProjectPicker />
+      {!railOpen && <ActionIcon icon="sidebar" variant="soft" color="gray" onClick={onExpandRail} title="展开会话列表" />}{!!w.projects.length && <ProjectPicker />}
     </header>
-    <div className="welcome"><h1>{w.projects.length ? '从项目开始工作' : '添加第一个项目'}</h1><p className="welcome-hint">选择项目目录，然后在项目下创建会话。</p><Button variant="soft" color="gray" onClick={() => w.setProjectEditor({})}><Icon n="folder" />添加项目目录</Button></div>
+    <div className="welcome"><div className="welcome-inner"><h1>{w.projects.length ? '从项目开始工作' : '添加第一个项目'}</h1><Button mt="4" variant="soft" color="gray" onClick={() => w.setProjectEditor({})}><Icon n="folder" />添加项目目录</Button></div></div>
   </div>;
   return <div className={'chat' + (!cur.events.length ? ' is-empty' : '')}>
     <header className="stage-head" data-window-drag-region onMouseDown={e => handleWindowDrag(e, native)}>
