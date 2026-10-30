@@ -19,6 +19,7 @@ function fixture(t) {
 const wait = async (check, message = 'Terminal verification timed out') => { const end = Date.now() + 12000; while (!check()) { if (Date.now() > end) throw Error(message); await new Promise(r => setTimeout(r, 25)); } };
 const waitPrompt = async (s, id) => { if (process.platform === 'win32') await wait(() => /PS [^>\r\n]*>/.test(s.terminals.snapshot(id).output), 'PowerShell prompt timed out'); };
 const expectOutput = async (check, s, id) => { try { await wait(check); } catch (error) { const tail = s.terminals.snapshot(id).output.slice(-600); throw Error(error.message + '; output tail=' + JSON.stringify(tail)); } };
+const runCommand = async (s, id, command) => { s.terminals.input(id, command); await new Promise(r => setTimeout(r, 150)); s.terminals.input(id, process.platform === 'win32' ? '\r\n' : '\r'); };
 test('work tabs preserve stable IDs and choose a neighbour on close; v1 migrates network into browser', () => {
   let dock = addDockTab(emptyDock(), 'files'), original = dock.activeId; dock = addDockTab(dock, 'document', { path: 'report.md', workspace: 'test' });
   dock = addDockTab(dock, 'terminal'); dock = closeDockTab(dock, dock.activeId); assert.equal(dock.tabs.length, 2); assert.equal(dock.tabs[0].id, original); assert.equal(dock.activeId, dock.tabs[1].id);
@@ -53,7 +54,7 @@ test('interactive terminal enforces permission, accepts real input and closes wi
   s.setMode('standard'); s.approve = async () => false; await assert.rejects(s.terminals.open({ id }), /未批准/); assert.equal(s.terminals.entries.size, 0);
   s.setMode('full-access'); await s.terminals.open({ id, cols: 90, rows: 28 });
   await waitPrompt(s, id);
-  s.terminals.input(id, process.platform === 'win32' ? "Write-Output ('TERMINAL_' + 'VERIFIED')\r" : "printf 'TERMINAL_%s\\n' 'VERIFIED'\r");
+  await runCommand(s, id, process.platform === 'win32' ? "Write-Output ('TERMINAL_' + 'VERIFIED')" : "printf 'TERMINAL_%s\\n' 'VERIFIED'");
   await expectOutput(() => s.terminals.snapshot(id).output.includes('TERMINAL_VERIFIED'), s, id);
   const job = s.terminals.get(id).job; await manager.delete(s.id); await job.done; assert.equal(s.terminals.entries.size, 0);
 });
@@ -72,10 +73,10 @@ test('multiple terminals isolate output and closing one keeps its sibling usable
   const { s } = fixture(t), a = crypto.randomUUID(), b = crypto.randomUUID(); s.setMode('full-access');
   await Promise.all([s.terminals.open({ id: a }), s.terminals.open({ id: b })]);
   await Promise.all([waitPrompt(s, a), waitPrompt(s, b)]);
-  const command = suffix => process.platform === 'win32' ? "Write-Output ('ISOLATED_' + '" + suffix + "')\r" : "printf 'ISOLATED_%s\\n' '" + suffix + "'\r";
-  s.terminals.input(a, command('FIRST')); s.terminals.input(b, command('SECOND'));
+  const command = suffix => process.platform === 'win32' ? "Write-Output ('ISOLATED_' + '" + suffix + "')" : "printf 'ISOLATED_%s\\n' '" + suffix + "'";
+  await runCommand(s, a, command('FIRST')); await runCommand(s, b, command('SECOND'));
   await expectOutput(() => s.terminals.snapshot(a).output.includes('ISOLATED_FIRST') && s.terminals.snapshot(b).output.includes('ISOLATED_SECOND'), s, a);
   assert.ok(!s.terminals.snapshot(a).output.includes('ISOLATED_SECOND'));
-  await s.terminals.close(a); s.terminals.input(b, command('STILL_ALIVE'));
-  await wait(() => s.terminals.snapshot(b).output.includes('ISOLATED_STILL_ALIVE'));
+  await s.terminals.close(a); await runCommand(s, b, command('STILL_ALIVE'));
+  await expectOutput(() => s.terminals.snapshot(b).output.includes('ISOLATED_STILL_ALIVE'), s, b);
 });
