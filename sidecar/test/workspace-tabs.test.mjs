@@ -52,8 +52,9 @@ test('interactive terminal enforces permission, accepts real input and closes wi
   await assert.rejects(s.terminals.open({ id }), /只读/);
   s.setMode('standard'); s.approve = async () => false; await assert.rejects(s.terminals.open({ id }), /未批准/); assert.equal(s.terminals.entries.size, 0);
   s.setMode('full-access'); await s.terminals.open({ id, cols: 90, rows: 28 });
+  await waitPrompt(s, id);
   s.terminals.input(id, process.platform === 'win32' ? "Write-Output ('TERMINAL_' + 'VERIFIED')\r" : "printf 'TERMINAL_%s\\n' 'VERIFIED'\r");
-  await wait(() => s.terminals.snapshot(id).output.includes('TERMINAL_VERIFIED'));
+  await expectOutput(() => s.terminals.snapshot(id).output.includes('TERMINAL_VERIFIED'), s, id);
   const job = s.terminals.get(id).job; await manager.delete(s.id); await job.done; assert.equal(s.terminals.entries.size, 0);
 });
 test('closing while terminal approval is pending cancels startup without creating a process', async t => {
@@ -70,9 +71,10 @@ test('terminal approval never changes an unrelated Agent automation run', async 
 test('multiple terminals isolate output and closing one keeps its sibling usable', { timeout: 60000 }, async t => {
   const { s } = fixture(t), a = crypto.randomUUID(), b = crypto.randomUUID(); s.setMode('full-access');
   await Promise.all([s.terminals.open({ id: a }), s.terminals.open({ id: b })]);
+  await Promise.all([waitPrompt(s, a), waitPrompt(s, b)]);
   const command = suffix => process.platform === 'win32' ? "Write-Output ('ISOLATED_' + '" + suffix + "')\r" : "printf 'ISOLATED_%s\\n' '" + suffix + "'\r";
   s.terminals.input(a, command('FIRST')); s.terminals.input(b, command('SECOND'));
-  await wait(() => s.terminals.snapshot(a).output.includes('ISOLATED_FIRST') && s.terminals.snapshot(b).output.includes('ISOLATED_SECOND'));
+  await expectOutput(() => s.terminals.snapshot(a).output.includes('ISOLATED_FIRST') && s.terminals.snapshot(b).output.includes('ISOLATED_SECOND'), s, a);
   assert.ok(!s.terminals.snapshot(a).output.includes('ISOLATED_SECOND'));
   await s.terminals.close(a); s.terminals.input(b, command('STILL_ALIVE'));
   await wait(() => s.terminals.snapshot(b).output.includes('ISOLATED_STILL_ALIVE'));
