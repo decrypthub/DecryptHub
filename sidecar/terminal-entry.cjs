@@ -13,7 +13,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     if (message.action === 'open' && !terminal && !stopping) {
       const file = process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe') : '/bin/bash';
       const args = process.platform === 'win32' ? ['-NoLogo', '-NoProfile'] : ['--noprofile', '--norc'];
-      terminal = pty.spawn(file, args, { cwd: message.cwd, cols: message.cols, rows: message.rows, env: process.env, name: 'xterm-256color', useConpty: true, useConptyDll: true });
+      terminal = pty.spawn(file, args, { cwd: message.cwd, cols: message.cols, rows: message.rows, env: process.env, name: 'xterm-256color', useConpty: true });
       terminal.onData(data => send({ type: 'data', data })); terminal.onExit(event => exit(event.exitCode));
       send({ type: 'ready' });
     } else if (message.action === 'input' && terminal && !stopping) terminal.write(message.data);

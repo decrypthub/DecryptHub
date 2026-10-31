@@ -79,7 +79,8 @@ async function checkWindowDragging(page, selectors, label) {
   } finally { await page.addScriptTag({ url: bridge + '?restore=1' }); }
 }
 
-const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'ui-check-'));
+const DATA = process.env.JSRA_UI_DATA_DIR ? path.resolve(process.env.JSRA_UI_DATA_DIR) : fs.mkdtempSync(path.join(os.tmpdir(), 'ui-check-'));
+fs.mkdirSync(DATA, { recursive: true });
 const MODEL_BASE = 'http://127.0.0.1:' + PORT + '/__ui-model/v1', modelRequests = [];
 const pendingReasoning = new Map();
 const modelRetries = new Map();
@@ -99,8 +100,9 @@ fs.writeFileSync(path.join(DATA, 'WebDecryptHub', 'settings.json'), JSON.stringi
   ],
 }));
 const sidecar = spawn(process.execPath, [path.join(ROOT, 'sidecar', 'index.mjs')], {
-  cwd: ROOT, env: { ...process.env, DECRYPTHUB_DATA_DIR: path.join(DATA, 'WebDecryptHub'), JSRA_WS_PORT: String(WS_PORT), JSRA_WS_TOKEN: 'ui-check', JSRA_TEST_FIXTURES: '1', JSRA_DEV: '1' }, stdio: ['ignore', 'pipe', 'ignore'],
+  cwd: ROOT, env: { ...process.env, DECRYPTHUB_DATA_DIR: path.join(DATA, 'WebDecryptHub'), JSRA_WS_PORT: String(WS_PORT), JSRA_WS_TOKEN: 'ui-check', JSRA_TEST_FIXTURES: '1', JSRA_DEV: '1' }, stdio: ['ignore', 'pipe', 'pipe'],
 });
+sidecar.stderr?.on('data', d => process.stderr.write('[sidecar] ' + String(d)));
 await new Promise((res, rej) => { const t = setTimeout(() => rej(new Error('sidecar 未就绪')), 20000); sidecar.stdout.on('data', d => { if (/JSRA_PORT=/.test(String(d))) { clearTimeout(t); res(); } }); }).catch(e => { console.error(e.message); process.exit(2); });
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png' };
@@ -132,7 +134,9 @@ const srv = http.createServer((req, res) => {
       if (input.messages[0]?.content?.startsWith('你是会话标题生成器')) { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.end('data: ' + JSON.stringify({ choices: [{ delta: { content: '验证图片与工作区操作' }, finish_reason: 'stop' }] }) + '\n\ndata: [DONE]\n\n'); return; }
       modelRequests.push(input);
       if (input.messages[0]?.content?.startsWith('你是上下文检查点生成器')) { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.end('data: ' + JSON.stringify({ choices: [{ delta: { content: '已验证工作区文件、图片和工具操作。保留当前任务、代码路径与后续检查。' }, finish_reason: 'stop' }] }) + '\n\ndata: [DONE]\n\n'); return; }
-      const latest = input.messages.findLast(m => m.role === 'user'), text = typeof latest?.content === 'string' ? latest.content : latest?.content.find(p => p.type === 'text')?.text || '';
+      // 子代理完成通知/目标接续也会以 user 角色注入；取最后一条真正的用户输入，跳过应用注入的【…】事件。
+      const userText = m => typeof m.content === 'string' ? m.content : (m.content?.find?.(p => p.type === 'text')?.text || '');
+      const text = [...input.messages].reverse().filter(m => m.role === 'user').map(userText).find(t => t && !t.startsWith('【')) || '';
       const retryFixture = text.match(/UI_RETRY_CHECK_(dark|light)/)?.[1];
       if (retryFixture) {
         const count = (modelRetries.get(retryFixture) || 0) + 1; modelRetries.set(retryFixture, count);
@@ -869,9 +873,11 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.locator('.reasoning-body').filter({ hasText: 'UI_THINKING_LIVE' }).waitFor();
   await goalTrigger.click(); await page.getByRole('button', { name: '暂停目标', exact: true }).click();
   await goalTrigger.filter({ hasText: '已暂停' }).waitFor();
-  await page.getByRole('button', { name: '继续目标', exact: true }).waitFor({ state: 'visible' });
-  await page.getByRole('button', { name: '继续目标', exact: true }).click();
+  const resumeBanner = page.locator('.banner').getByRole('button', { name: '继续目标', exact: true });
+  await resumeBanner.waitFor({ state: 'visible' });
+  await resumeBanner.click();
   await goalTrigger.filter({ hasText: '进行中' }).waitFor();
+  await goalTrigger.click();
   await page.getByRole('button', { name: '结束并收起目标', exact: true }).click();
   await goalTrigger.waitFor({ state: 'detached' });
   await page.getByRole('button', { name: '发送（Enter）', exact: true }).waitFor();

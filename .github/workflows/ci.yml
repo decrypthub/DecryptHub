@@ -65,9 +65,20 @@ jobs:
       - run: npm --prefix sidecar ci --ignore-scripts
       - run: npm --prefix ../wdh ci --ignore-scripts
       - run: npm run check:wdh -- ../wdh
+      - name: Cache CloakBrowser kernel
+        uses: actions/cache@v4
+        with:
+          path: harness/.tmp/ui-data/WebDecryptHub/kernels
+          key: cloak-kernel-${{ runner.os }}-v145
+      - name: Install CloakBrowser kernel for UI checks
+        run: node ../wdh/src/cli.mjs kernel install cloak --kernel-dir .tmp/ui-data/WebDecryptHub
+        env:
+          JSRA_UI_DATA_DIR: ${{ github.workspace }}\harness\.tmp\ui-data
       - run: npm run build:ui
       - run: npm run audit:ui
       - run: npm run check:ui
+        env:
+          JSRA_UI_DATA_DIR: ${{ github.workspace }}\harness\.tmp\ui-data
       - run: npm run check:plugins
       - uses: actions/upload-artifact@v4
         if: failure()
