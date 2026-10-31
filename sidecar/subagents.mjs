@@ -52,7 +52,12 @@ export class ResearchAgents {
   message(id, task) {
     task = String(task || '').trim(); if (!task || task.length > 12000) throw new Error('追加内容需要 1–12000 个字符');
     const record = this.records.find(r => r.id === id); if (!record) throw new Error('子代理不存在');
-    if (this.jobs.has(id)) throw new Error('子代理仍在运行，请等它结束后再追加要求');
+    const running = this.jobs.get(id);
+    if (running) {
+      if (!running.agent.queueSteer(task)) throw new Error('子代理正在结束，请稍后再追加要求');
+      record.lastSteerAt = Date.now(); this.save();
+      return { id, status: 'running', steered: true, title: record.title };
+    }
     const ctx = this.context();
     const projectDir = path.join(this.directory, '.subagents', id);
     let agent = this.resumable.get(id);

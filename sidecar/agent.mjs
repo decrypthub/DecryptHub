@@ -70,6 +70,7 @@ class Agent {
     this.groups = new Set(['core']);
     this.callSignal = null;
     this.notices = [];
+    this.steers = [];
     this.hist = new History({ system: SYSTEM + profilePrompt(this.getSettings()) });
     this.hist.ctxDir = this.ctxDir();
     this.running = false; this.abort = null; this.wrapUp = false;
@@ -163,6 +164,14 @@ class Agent {
     const ext = this.groups.has('mcp') ? (this.mcpHost?.tools?.() || []).map(t => ({ name: t.name, description: t.description, schema: t.inputSchema })) : [];
     const local = this.localTools.filter(t => this.groups.has(t.group || 'core')).map(t => ({ name: t.name, description: t.description, schema: t.schema }));
     return [...mcpTools, ...ext, ...local, REF_TOOL, DISCOVER];
+  }
+
+  // 主代理可以在子代理运行中追加要求；模型会在下一次决策前作为用户消息看到它。
+  queueSteer(text) {
+    if (!this.running) return false;
+    this.steers.push(String(text || '').slice(0, 4000));
+    if (this.steers.length > 8) this.steers.shift();
+    return true;
   }
 
   queueNotice(text) {
@@ -422,6 +431,7 @@ class Agent {
         this.emit('assistant-start', this.currentItem);
         // ③ 调模型（含网络抖动重试）
         const t0 = Date.now();
+        if (this.steers.length) for (const steer of this.steers.splice(0, 8)) this.hist.append({ t: 'user', content: '【主代理在任务运行中追加的要求】' + steer });
         if (this.notices.length) for (const notice of this.notices.splice(0, 8)) this.hist.append({ t: 'continuation', content: '【应用通知】' + notice });
         const res = await this.askModel({ settings, tools: final ? [] : this.allTools(), step: steps });
         const ms = Date.now() - t0;
