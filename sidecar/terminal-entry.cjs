@@ -2,7 +2,7 @@
 const path = require('node:path');
 const readline = require('node:readline');
 const pty = require('node-pty');
-let terminal, stopping = false, win32Input = false;
+let terminal, stopping = false, win32Input = false, modeBuf = '';
 const send = message => process.stdout.write(JSON.stringify(message) + '\n');
 const exit = code => { send({ type: 'exit', exitCode: code }); process.stdout.write('', () => process.exit(code || 0)); };
 const stop = () => { if (stopping) return; stopping = true; if (terminal) { try { terminal.kill(); } catch {} } else exit(0); setTimeout(() => process.exit(0), 1500); };
@@ -12,13 +12,13 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     const message = JSON.parse(line);
     if (message.action === 'open' && !terminal && !stopping) {
       const file = process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe') : '/bin/bash';
-      // PSReadLine 在 Windows 上启用 win32-input-mode，裸 CR 会被当成插入换行，交互输入无法提交。
-      // 终端需要的是可执行命令的普通 PowerShell，因此这里不加载 PSReadLine（保留 -NoLogo/-NoProfile）。
-      const args = process.platform === 'win32' ? ['-NoLogo', '-NoProfile', '-NoExit', '-Command', 'Remove-Module PSReadLine -ErrorAction SilentlyContinue'] : ['--noprofile', '--norc'];
+      const args = process.platform === 'win32' ? ['-NoLogo', '-NoProfile'] : ['--noprofile', '--norc'];
       terminal = pty.spawn(file, args, { cwd: message.cwd, cols: message.cols, rows: message.rows, env: process.env, name: 'xterm-256color', useConpty: true });
       terminal.onData(data => {
-        if (data.includes('\x1b[?9001h')) win32Input = true;
-        if (data.includes('\x1b[?9001l')) win32Input = false;
+        // 模式序列可能被拆到多个 chunk，保留尾部再判断。
+        modeBuf = (modeBuf + data).slice(-128);
+        if (modeBuf.includes('\x1b[?9001h')) win32Input = true;
+        if (modeBuf.includes('\x1b[?9001l')) win32Input = false;
         send({ type: 'data', data });
       }); terminal.onExit(event => exit(event.exitCode));
       send({ type: 'ready' });
