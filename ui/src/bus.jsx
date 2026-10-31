@@ -199,6 +199,7 @@ export function Workbench({ children }) {
       on('sessions', v => setSessions(v)),
       on('goal', (v, s) => dispatch({ t: 'patch', sid: s, patch: { goal: v } })),
       on('subagents', (v, s) => dispatch({ t: 'patch', sid: s, patch: { subagents: v } })),
+      on('subagent-finished', (v, s) => { if (s === sidRef.current) toast(`子代理${v.status === 'completed' ? '已完成' : '已结束'}：${v.title}`, v.status === 'completed' ? 'ok' : 'warn', 5000); }),
       on('agent-debugger-state', (v, s) => dispatch({ t: 'patch', sid: s, patch: { debuggerPaused: !!v.paused } })),
       on('settings-changed', v => setSettings(v)),
       on('browser-status', (v, s) => dispatch({ t: 'status', sid: s, v })),

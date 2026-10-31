@@ -69,6 +69,7 @@ class Agent {
     this.getGoal = getGoal || (() => this.getToolContext().getGoal?.());
     this.groups = new Set(['core']);
     this.callSignal = null;
+    this.notices = [];
     this.hist = new History({ system: SYSTEM + profilePrompt(this.getSettings()) });
     this.hist.ctxDir = this.ctxDir();
     this.running = false; this.abort = null; this.wrapUp = false;
@@ -162,6 +163,12 @@ class Agent {
     const ext = this.groups.has('mcp') ? (this.mcpHost?.tools?.() || []).map(t => ({ name: t.name, description: t.description, schema: t.inputSchema })) : [];
     const local = this.localTools.filter(t => this.groups.has(t.group || 'core')).map(t => ({ name: t.name, description: t.description, schema: t.schema }));
     return [...mcpTools, ...ext, ...local, REF_TOOL, DISCOVER];
+  }
+
+  queueNotice(text) {
+    if (!text) return;
+    this.notices.push(String(text).slice(0, 2000));
+    if (this.notices.length > 8) this.notices.shift();
   }
 
   async runTool(name, args) {
@@ -415,6 +422,7 @@ class Agent {
         this.emit('assistant-start', this.currentItem);
         // ③ 调模型（含网络抖动重试）
         const t0 = Date.now();
+        if (this.notices.length) for (const notice of this.notices.splice(0, 8)) this.hist.append({ t: 'continuation', content: '【应用通知】' + notice });
         const res = await this.askModel({ settings, tools: final ? [] : this.allTools(), step: steps });
         const ms = Date.now() - t0;
         usage.calls++; usage.ms += ms;

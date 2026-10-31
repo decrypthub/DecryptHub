@@ -68,13 +68,14 @@ class Session {
     this.ratings = st.ratings && typeof st.ratings === 'object' && !Array.isArray(st.ratings) ? { ...st.ratings } : {};
     // 「本会话始终允许」只在这次运行的内存里有效。磁盘上的旧 allows 不恢复。
     this.allows = new Set();
+    this.subagentNotices = [];
     this.todos = this.readTodos(st.todos);
     this.goal = restoreGoal(st.goal);
     this.goalDriver = new GoalDriver({ current: () => this.goal,
       idle: () => !this.closing && !this.agent?.running && !this.activeRun && !this.queue.length && !this.pending.size && !this.askPending.size && this.goal?.workspaceId === this.workspace.id,
       dispatch: () => this.send({ text: '', source: 'goal' }, GOAL_CONTINUATION),
       failed: reason => { if (this.goal?.status === 'active') { this.goal = { ...this.goal, status: 'needs_attention', stopReason: 'dispatch-failed', resumeNote: reason }; this.saveState(); this.emit('goal', this.goal); this.mgr.emitList(); } } });
-    this.subagents = new ResearchAgents({ directory: this.projectDir, context: () => this.toolCtx(), settings: () => this.mgr.getSettings(), onUsage: record => {
+    this.subagents = new ResearchAgents({ directory: this.projectDir, context: () => this.toolCtx(), settings: () => this.mgr.getSettings(), onSettled: record => this.subagentSettled(record), onUsage: record => {
       if (record.goalKey && this.goal && record.goalKey === this.goal.id + ':' + this.goal.batchId) {
         this.goal.usedTokens = (this.goal.usedTokens || 0) + (record.usage?.prompt || 0) + (record.usage?.completion || 0);
         if (this.goal.status === 'active' && this.goal.tokenBudget > 0 && this.goal.usedTokens >= this.goal.tokenBudget) { this.goal.status = 'paused'; this.agent?.finishSoon(); }
@@ -240,6 +241,13 @@ class Session {
     const url = live || this.lastUrl;
     return { id: this.id, title: this.title, primary: this.primary, pinned: !!this.pinned, running: this.browser.running, embed: this.browser.embedActive, chromePid: this.browser.embedActive ? this.browser.chromePid : null, agentRunning: !!this.agent?.running, url, projectDir: this.projectDir, mode: this.mode, review: this.review, workspace: { ...this.workspace, ...this.mgr.workspaces.availability(this.workspace) }, projectId: this.projectId, run: this.runs.latest(), queued: this.queue.length, queuedItems: this.queue.map(q => ({ id: q.id, text: String(q.text || '').slice(0, 160), attachments: (q.attachments || []).length })), updatedAt: this.updatedAt };
   }
+  subagentSettled(record) {
+    const label = record.status === 'completed' ? '已完成' : record.status === 'limited' ? '达到上限' : record.status === 'cancelled' ? '已取消' : '已结束';
+    const notice = `子代理「${record.title}」${label}（id=${record.id}）。用 agent_wait("${record.id}") 读取完整结论，核验后再采纳；需要继续研究时用 agent_message 追加要求。`;
+    if (this.agent?.running) this.agent.queueNotice(notice);
+    else { this.subagentNotices.push(notice); if (this.subagentNotices.length > 10) this.subagentNotices.shift(); }
+    this.emit('subagent-finished', { id: record.id, status: record.status, title: record.title });
+  }
   contextForSubagent(limit = 6000) {
     const parts = [];
     if (this.goal) parts.push(`当前目标：${this.goal.objective}\n已记录进展：${this.goal.summary || '暂无'}\n下一步：${this.goal.nextAction || '未记录'}`);
@@ -350,6 +358,7 @@ class Session {
     if (!continuation) this.suggestTitle(text);
     this.updatedAt = Date.now(); this.mgr.emitList();
     const goalTimer = goalId && this.goal.deadline ? setTimeout(() => agent.finishSoon(), Math.max(1, this.goal.deadline - Date.now())) : null;
+    if (this.subagentNotices.length) for (const notice of this.subagentNotices.splice(0)) agent.queueNotice(notice);
     this.completion = agent.send(text, { auto, maxSteps, tokenBudget, attachments, runId: run.id, continuation }).then(result => {
       if (goalId && this.goal?.id === goalId) {
         const hasWork = (this.goal.revision || 0) !== goalRevision || agent.hist.events.some(e => e.t === 'tool' && e.turnId === run.id && !e.isError && !['goal_update', 'goal_get', 'todo_write', 'agent_list'].includes(e.name));
