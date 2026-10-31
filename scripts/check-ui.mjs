@@ -349,7 +349,7 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   const codeProject = await rpc('project-save', { scope, project: { name: 'UI Project ' + scheme, folders: [folder(mainRoot, 'main'), folder(sharedRoot, 'shared')], primaryKey: 'main' } });
   const freshId = (await rpc('session-create', { projectId: codeProject.id })).id;
   await rpc('session-focus', { sessionId: freshId });
-  await page.locator('.workspace-picker').filter({ hasText: codeProject.name }).waitFor();
+  await page.locator('.session-item.on').waitFor();
   ok((await rpc('session-list')).sessions.every(s => !!s.projectId), '[' + scheme + '] 每个真实会话都必须归属项目');
   ok(await page.locator('.project-tree > section:not([data-project-id])').count() === 0, '[' + scheme + '] 项目树只能包含真实项目');
   const expandTools = page.locator('.win-controls button[aria-label="展开工具面板"]');
@@ -422,7 +422,7 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
     await creatingProject.getByRole('button', { name: '添加目录', exact: true }).click();
     await creatingProject.getByText(path.join(DATA, 'ui-picker-' + scheme), { exact: true }).waitFor();
     await creatingProject.getByRole('button', { name: '保存项目', exact: true }).click();
-    await page.locator('.workspace-picker').filter({ hasText: 'UI picker ' + scheme }).waitFor();
+    await page.locator('.project-tree').getByText('UI picker ' + scheme, { exact: true }).first().waitFor();
     const createdProject = (await rpc('projects-list')).find(p => p.name === 'UI picker ' + scheme);
     const createdList = await rpc('session-list');
     ok(createdList.sessions.find(s => s.id === createdList.focused)?.projectId === createdProject.id, '[' + scheme + '] 保存新项目后应直接进入项目内新会话');
@@ -493,12 +493,6 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   ok(await page.locator('.stage-mode').count() === 0, '[' + scheme + '] 对话顶部不显示权限状态');
   await page.getByRole('button', { name: '选择权限', exact: true }).click();
   await page.getByRole('menuitemradio', { name: '请求批准', exact: true }).click();
-  const beforeEnvironment = await page.locator('.workspace-picker').boundingBox();
-  await page.getByRole('button', { name: '查看执行环境', exact: true }).click();
-  await page.getByRole('dialog', { name: '执行环境', exact: true }).waitFor();
-  const afterEnvironment = await page.locator('.workspace-picker').boundingBox();
-  ok(beforeEnvironment.y === afterEnvironment.y, '[' + scheme + '] 执行环境弹窗挤动了目录选择器');
-  await page.getByRole('dialog', { name: '执行环境', exact: true }).getByRole('button', { name: '关闭', exact: true }).click();
   await page.getByRole('combobox', { name: '选择模型' }).click();
   ok(await page.getByRole('option', { name: 'gpt-4o', exact: true }).count() === 1, '[' + scheme + '] 模型菜单无法打开');
   await page.keyboard.press('Escape');
@@ -1114,9 +1108,6 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.getByRole('button', { name: '刷新文件目录', exact: true }).click();
   await page.getByRole('button', { name: '复制工作目录路径', exact: true }).click();
   ok(await page.evaluate(() => navigator.clipboard.readText()) === workChat.workspace.root, '[' + scheme + '] 工作区文件应能复制目录路径');
-  await page.locator('.workspace-picker').click();
-  ok(await page.getByText('复制当前目录路径', { exact: true }).count() === 0, '[' + scheme + '] 项目菜单不应重复复制路径');
-  await page.keyboard.press('Escape');
   await page.locator('.workspace-tree [data-path="report.md"]').click();
   await page.locator('.document-panel').getByRole('heading', { name: '工作报告', exact: true }).waitFor();
   ok(await page.locator('.document-panel a[href^="javascript:"]').count() === 0, '[' + scheme + '] 文档不能渲染危险协议链接');

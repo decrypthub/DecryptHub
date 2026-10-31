@@ -5,8 +5,7 @@ import { useWorkbench } from './bus.jsx';
 import { Button, ActionIcon, Icon, Markdown, Dropdown } from './kit.jsx';
 import { fmtK, sessionLabel } from './state.js';
 import { native } from './transport.js';
-import { PermissionPicker, PendingActions, RuntimePicker } from './workspace.jsx';
-import { ProjectPicker } from './projects.jsx';
+import { PermissionPicker, PendingActions } from './workspace.jsx';
 import { AttachmentTiles } from './attachments.jsx';
 import { conversationTurns, toolPresentation, elapsedLabel } from './conversation.js';
 import { commandMatches } from './commands.js';
@@ -50,18 +49,16 @@ export function ChatStage({ railOpen, onExpandRail }) {
 
   if (!session) return <div className="chat is-empty">
     <header className="stage-head" data-window-drag-region onMouseDown={e => handleWindowDrag(e, native)}>
-      {!railOpen && <ActionIcon icon="sidebar" variant="soft" color="gray" onClick={onExpandRail} title="展开会话列表" />}{!!w.projects.length && <ProjectPicker />}
+      {!railOpen && <ActionIcon icon="sidebar" variant="soft" color="gray" onClick={onExpandRail} title="展开会话列表" />}
     </header>
     <div className="welcome"><div className="welcome-inner"><h1>{w.projects.length ? '从项目开始工作' : '添加第一个项目'}</h1><Button mt="4" variant="soft" color="gray" onClick={() => w.setProjectEditor({})}><Icon n="folder" />添加项目目录</Button></div></div>
   </div>;
   return <div className={'chat' + (!cur.events.length ? ' is-empty' : '')}>
     <header className="stage-head" data-window-drag-region onMouseDown={e => handleWindowDrag(e, native)}>
       {!railOpen && <ActionIcon icon="sidebar" variant="soft" color="gray" onClick={onExpandRail} title="展开会话列表" />}
-      <ProjectPicker />
       <div className="stage-identity">
         <strong className="ellipsis" title={sessionLabel(session || {})}>{sessionLabel(session || {})}</strong>
       </div>
-      <RuntimePicker />
       <Box flexGrow="1" />
       <div className="stage-progress" aria-label="目标、计划与子代理">
         {cur.goal && <GoalDetails key={'goal-' + w.sid} goal={cur.goal} />}
