@@ -251,7 +251,7 @@ class Session {
       goalBudget: this.activeRun?.source === 'goal' && this.goal ? { key: this.goal.id + ':' + this.goal.batchId, ...(this.goal.tokenBudget > 0 ? { remaining: Math.max(0, this.goal.tokenBudget - (this.goal.usedTokens || 0)) } : {}) } : null,
       workRoot: this.workspace.root, workspaceId: this.workspace.id, workspaceKind: this.workspace.kind, mode: this.mode, protectedRoot: this.mgr.userDataDir,
       changes: this.changes, readHashes: this.readHashes, runId: this.activeRun?.id,
-      exec: spec => this.execute(spec, this.agent?.abort?.signal),
+      exec: spec => this.execute(spec, this.agent?.callSignal || this.agent?.abort?.signal),
       getTodos: () => this.todos, setTodos: list => this.setTodos(list),
       emit: (ev, payload) => this.emit('agent-' + ev, payload),
       ask: req => this.ask(req), compact: opts => this.agent ? this.agent.compress(opts) : { ok: false, error: 'agent 未就绪' },

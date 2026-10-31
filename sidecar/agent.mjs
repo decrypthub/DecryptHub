@@ -18,7 +18,25 @@ import { workspacePath } from './workspaces.mjs';
 import { profilePrompt } from './profile.mjs';
 
 const REF_TOOL = { name: 'context_ref_read', description: '读取被截断的长工具输出（截断提示里的 ctx_ref）。offset/length 分页（默认 6000 字符）。', schema: { type: 'object', properties: { ref: { type: 'string' }, offset: { type: 'number' }, length: { type: 'number' } }, required: ['ref'] } };
-const MAX_AUTO_FAILURES = 2; // Stop repeated failed compactions, not a long-running task's successful compactions.
+const MAX_AUTO_FAILURES = 2;
+// 每次工具调用都要有上限：模型给 workspace_run/shell/npm 的 timeoutMs 优先，
+// 其余工具按类别给默认值；0 表示不设上限（等待用户输入的 ask_user）。
+export function toolTimeoutMs(name, args = {}, tool = null) {
+  if (name === 'ask_user') return 0;
+  if (name === 'compact_context') return 180000;
+  if (name === 'workspace_run') return Math.min(Number(args.timeoutMs) || 60000, 300000) + 15000;
+  if (name === 'workspace_npm') return Math.min(Number(args.timeoutMs) || 180000, 600000) + 15000;
+  if (name === 'workspace_shell') {
+    if (args.background) return 30000;
+    return Math.min(Number(args.timeoutMs) || 60000, 300000) + 15000;
+  }
+  if (name.startsWith('browser_')) return name === 'browser_open' ? 120000 : 90000;
+  if (name.startsWith('terminal_')) return 30000;
+  if (name.startsWith('workspace_')) return 60000;
+  if (tool?.timeoutMs) return tool.timeoutMs;
+  return 90000;
+}
+ // Stop repeated failed compactions, not a long-running task's successful compactions.
 // 这些错误说明「本步还没产出可用结果」，退避后重做同一讨论步；参数错误（4xx）不在此列
 
 const SYSTEM = `你是桌面端通用 Agent，帮助用户阅读和修改代码、处理文件、研究问题、浏览网页与调用工具。
@@ -28,7 +46,7 @@ const SYSTEM = `你是桌面端通用 Agent，帮助用户阅读和修改代码�
 只读权限下只做调查。命令是否隔离由应用实际状态决定，不把 cwd 或 Node vm 当作安全沙箱。Windows 命令使用 PowerShell。
 核心工具用于文件、执行、提问和上下文。需要网页时用 browser_open 打开，再用 browser_snapshot 读取。浏览器与外部 MCP 用 discover_tools 按需加载，不编造工具；缺少用户必要信息时使用 ask_user。
 多步任务可以维护 todo_write。能自行查证的信息先查证，不为常规步骤反复询问。完成后说明修改、验证结果和未解决问题；不能把任务投递当作执行完成。
-大输出落盘或分页，避免重复读取。默认使用中文，表达简洁。`;
+大输出落盘或分页，避免重复读取。每次工具调用都有超时：脚本和命令用 timeoutMs 显式给出预计耗时（workspace_run/shell 默认 60s、上限 300s，npm 默认 180s、上限 600s），更久的工作用后台任务并轮询；其他工具超时会返回错误，应缩小范围或拆分步骤，不要重复同样的长调用。默认使用中文，表达简洁。`;
 
 const DISCOVER = { name: 'discover_tools', description: '按需启用工具组：browser=页面阅读、交互和抓包；debugger=脚本源码、搜索、文本/XHR断点、暂停/单步/调用栈/作用域求值、控制台与WebSocket；mcp=用户连接的服务。网站分析先打开浏览器再启用 debugger。不会授予额外权限。', schema: { type: 'object', properties: { group: { type: 'string', enum: ['browser', 'debugger', 'mcp'] } }, required: ['group'] } };
 
@@ -50,6 +68,7 @@ class Agent {
     this.getToolContext = getToolContext || (() => ({})); this.getWorkspace = getWorkspace || (() => null); this.record = record || (() => {});
     this.getGoal = getGoal || (() => this.getToolContext().getGoal?.());
     this.groups = new Set(['core']);
+    this.callSignal = null;
     this.hist = new History({ system: SYSTEM + profilePrompt(this.getSettings()) });
     this.hist.ctxDir = this.ctxDir();
     this.running = false; this.abort = null; this.wrapUp = false;
@@ -191,10 +210,14 @@ class Agent {
         const workerArgs = { ...v.value };
         if (workerArgs.source && ctx.workRoot && !fs.existsSync(resolveIn(ctx.workRoot, workerArgs.source))) { workerArgs.code = fs.readFileSync(resolveIn(this.projectDir, workerArgs.source), 'utf8'); delete workerArgs.source; }
         const script = process.argv[1] && /\.(?:mjs|cjs|js)$/.test(process.argv[1]) ? [process.argv[1]] : [];
-        const job = await ctx.exec({ file: process.execPath, args: script, cwd: ctx.workRoot, timeoutMs: 120000, env: { JSRA_MODE: 'tool-worker' }, input: JSON.stringify({ name, args: workerArgs, projectDir: ctx.workRoot }) });
-        const r = await job.done; try { return JSON.parse(r.out); } catch { return { text: r.err || r.out || '分析进程未返回结果', isError: true }; }
+        return await this.boundedTool(name, Math.max(toolTimeoutMs(name, workerArgs, local), 150000), async () => {
+          const job = await ctx.exec({ file: process.execPath, args: script, cwd: ctx.workRoot, timeoutMs: 120000, env: { JSRA_MODE: 'tool-worker' }, input: JSON.stringify({ name, args: workerArgs, projectDir: ctx.workRoot }) });
+          const r = await job.done; try { return JSON.parse(r.out); } catch { return { text: r.err || r.out || '分析进程未返回结果', isError: true }; }
+        });
       }
-      return name.startsWith('browser_') ? await this.browserAction(name, async () => { if (this.mcp.client && ['browser_click', 'browser_fill', 'browser_press'].includes(name)) await this.bindBrowserTarget(); return local.run(v.value, ctx); }) : await local.run(v.value, ctx);
+      return await this.boundedTool(name, toolTimeoutMs(name, v.value, local), async signal => name.startsWith('browser_')
+        ? await this.browserAction(name, async () => { if (this.mcp.client && ['browser_click', 'browser_fill', 'browser_press'].includes(name)) await this.bindBrowserTarget(signal); return local.run(v.value, { ...ctx, signal }); })
+        : await local.run(v.value, { ...ctx, signal }));
     }
     if (name === REF_TOOL.name) {
       const v = validateArgs(REF_TOOL.schema, callArgs);
@@ -202,32 +225,51 @@ class Agent {
       return readRef(this.ctxDir(), v.value.ref, v.value.offset, v.value.length);
     }
     // 用户接入的 MCP 工具（名字带服务前缀，可能含 oneOf/$ref，交给对方服务自己校验）
-    if (this.mcpHost?.has?.(name)) return await this.mcpHost.call(name, callArgs, this.abort?.signal);
+    if (this.mcpHost?.has?.(name)) return await this.boundedTool(name, toolTimeoutMs(name, callArgs), signal => this.mcpHost.call(name, callArgs, signal));
     // MCP 内核工具自带 inputSchema（可能含 oneOf/$ref），交给内核自己校验
-    if (this.mcp.has(name)) return await this.browserAction(name, async () => {
+    if (this.mcp.has(name)) return await this.boundedTool(name, toolTimeoutMs(name, callArgs), async signal => this.browserAction(name, async () => {
       await ctx.ensureDebugger();
       const safeArgs = { ...callArgs };
       for (const key of ['filePath', 'outputFile', 'localFilePath']) if (safeArgs[key]) safeArgs[key] = workspacePath(ctx, safeArgs[key], { write: key !== 'localFilePath' });
-      await this.bindBrowserTarget();
-      const result = await this.mcp.call(name, safeArgs, this.abort?.signal);
+      await this.bindBrowserTarget(signal);
+      const result = await this.mcp.call(name, safeArgs, signal);
       if (!result.isError && ['step', 'get_paused_info'].includes(name)) this.emit('debugger-state', { paused: true });
       if (!result.isError && name === 'pause_or_resume' && safeArgs.action === 'resume') this.emit('debugger-state', { paused: false });
       return result;
-    });
+    }));
     return { text: `未知工具：${name}`, isError: true };
   }
 
+  async boundedTool(name, budget, run) {
+    if (!budget) return run(null);
+    const control = new AbortController(), parent = this.abort?.signal;
+    const forward = () => control.abort();
+    if (parent) { if (parent.aborted) control.abort(); else parent.addEventListener('abort', forward, { once: true }); }
+    this.callSignal = control.signal;
+    let timer;
+    const timeout = new Promise(resolve => { timer = setTimeout(() => {
+      control.abort();
+      resolve({ text: `[超时] ${name} 超过 ${Math.round(budget / 1000)} 秒未返回，已中止。请缩小范围、拆分步骤，或在参数中设置 timeoutMs 后重试。`, isError: true });
+    }, budget); });
+    try {
+      const work = Promise.resolve().then(() => run(control.signal));
+      work.catch(() => {}); // 超时后不再等待它，但避免未处理的 rejection
+      return await Promise.race([work, timeout]);
+    } finally {
+      clearTimeout(timer); parent?.removeEventListener('abort', forward); this.callSignal = null;
+    }
+  }
   async browserAction(name, run) {
     this.emit('browser-activity', { active: true, tool: name });
     try { return await run(); }
     finally { this.emit('browser-activity', { active: false, tool: name }); }
   }
-  async bindBrowserTarget() {
-    if (this.browser?.bindDebuggerTarget) return this.browser.bindDebuggerTarget(this.abort?.signal);
+  async bindBrowserTarget(signal = this.abort?.signal) {
+    if (this.browser?.bindDebuggerTarget) return this.browser.bindDebuggerTarget(signal);
     const page = this.browser?.activePage; if (!page || page.isClosed()) throw new Error('浏览器页面已关闭');
     const cdp = await page.context().newCDPSession(page);
     let target; try { target = await cdp.send('Target.getTargetInfo'); } finally { await cdp.detach(); }
-    await this.mcp.selectTarget(target.targetInfo.targetId, this.abort?.signal);
+    await this.mcp.selectTarget(target.targetInfo.targetId, signal);
   }
 
   // 把应用自身已捕获的状态告诉模型：MCP 内核只能看到它连接之后的请求，避免模型误判"没有请求"而浪费步数
