@@ -1166,6 +1166,11 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   const terminalId = await page.locator('.dock-tab-wrap[data-tab-kind="terminal"]').getAttribute('data-tab-id');
   await page.getByRole('menu').waitFor({ state: 'detached' });
   await page.waitForFunction(() => document.activeElement?.matches('.terminal-screen .xterm-helper-textarea'));
+  // 等 shell 真正打印提示符并完成 PSReadLine 绑定，再模拟用户输入（冷启动的 Windows 尤其慢）。
+  const promptRe = process.platform === 'win32' ? /PS [^>\r\n]*>/ : /[$#] /;
+  const promptDeadline = Date.now() + 15000;
+  while (!promptRe.test((await rpc('terminal-snapshot', { sessionId: workChat.id, id: terminalId })).output)) { if (Date.now() > promptDeadline) throw Error('Terminal prompt not ready'); await page.waitForTimeout(100); }
+  await page.waitForTimeout(800);
   await page.keyboard.type(process.platform === 'win32' ? "Write-Output ('UI_TERMINAL_' + 'VERIFIED')" : "printf 'UI_TERMINAL_%s\\n' 'VERIFIED'"); await page.keyboard.press('Enter');
   const terminalDeadline = Date.now() + 12000;
   while (!(await rpc('terminal-snapshot', { sessionId: workChat.id, id: terminalId })).output.includes('UI_TERMINAL_VERIFIED')) { if (Date.now() > terminalDeadline) throw Error('Terminal UI input failed'); await page.waitForTimeout(50); }
