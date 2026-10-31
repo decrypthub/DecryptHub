@@ -21,3 +21,14 @@ export function resolveAddress(value) {
   if (!input.includes('.')) return /^[a-z0-9-]+$/i.test(input) ? `https://${input}.com` : 'https://www.baidu.com/s?wd=' + encodeURIComponent(input);
   return input;
 }
+
+// 把 Playwright/Chromium 的原始错误整理成用户能读懂的提示。
+export function describeBrowserError(message) {
+  const text = String(message ?? '');
+  if (/ERR_NAME_NOT_RESOLVED/i.test(text)) return '无法解析该域名，请检查网址拼写，例如 https://www.baidu.com';
+  if (/ERR_INTERNET_DISCONNECTED|ERR_NETWORK_CHANGED/i.test(text)) return '网络连接不可用，请检查网络后重试';
+  if (/ERR_CONNECTION_REFUSED/i.test(text)) return '目标网站拒绝连接';
+  if (/ERR_CONNECTION_TIMED_OUT|ERR_TIMED_OUT/i.test(text)) return '连接超时，请稍后重试';
+  if (/ERR_CERT_|SSL/i.test(text)) return '网站证书校验失败，无法安全打开';
+  return text.split('\n')[0];
+}

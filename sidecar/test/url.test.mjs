@@ -23,3 +23,10 @@ test('address bar searches phrases instead of navigating to an invalid host', ()
 test('normalization still rejects non-http schemes', () => {
   assert.throws(() => normalizeTargetUrl('javascript:alert(1)'), /HTTP/);
 });
+
+test('browser errors are translated into readable messages', async () => {
+  const { describeBrowserError } = await import('../url.mjs');
+  assert.match(describeBrowserError('page.goto: net::ERR_NAME_NOT_RESOLVED at https://baidu/'), /无法解析该域名/);
+  assert.match(describeBrowserError('net::ERR_INTERNET_DISCONNECTED'), /网络连接不可用/);
+  assert.equal(describeBrowserError('随便一个错误\n堆栈'), '随便一个错误');
+});

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { addDockTab, closeDockTab, syncBrowserPages, workspaceKey } from './dock-tabs.js';
-import { normalizeTargetUrl } from '../../sidecar/url.mjs';
+import { normalizeTargetUrl, describeBrowserError } from '../../sidecar/url.mjs';
 export function useWorkspaceTabs({ presentation, sid, cur, session, api, toast, setWorkspacePrompt, setView }) {
   const current = useRef(); current.current = { presentation, sid, cur, session };
   const sequence = useRef(0), switching = useRef(null), [pending, setPending] = useState(null);
@@ -59,7 +59,7 @@ export function useWorkspaceTabs({ presentation, sid, cur, session, api, toast, 
       else status = await api.invoke('browser-tab-navigate', { sessionId: sid, pageId: tab.pageId, url });
       if (status?.superseded) return;
       presentation.update(sid, view => ({ dock: syncBrowserPages(view.dock, status.pages || current.current.cur.status.pages, current.current.sid === sid && intent === sequence.current) }));
-    } catch (e) { toast(e.message, 'err', 6000); }
+    } catch (e) { toast(describeBrowserError(e.message), 'err', 6000); }
     finally { if (switching.current?.intent === intent) { switching.current = null; setPending(null); } }
   }
   function openWebLink(url) {
