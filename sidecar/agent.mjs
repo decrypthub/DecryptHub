@@ -71,6 +71,7 @@ class Agent {
     this.callSignal = null;
     this.notices = [];
     this.steers = [];
+    this.acceptingSteer = false;
     this.hist = new History({ system: SYSTEM + profilePrompt(this.getSettings()) });
     this.hist.ctxDir = this.ctxDir();
     this.running = false; this.abort = null; this.wrapUp = false;
@@ -168,7 +169,7 @@ class Agent {
 
   // 主代理可以在子代理运行中追加要求；模型会在下一次决策前作为用户消息看到它。
   queueSteer(text) {
-    if (!this.running) return false;
+    if (!this.running || !this.acceptingSteer) return false;
     this.steers.push(String(text || '').slice(0, 4000));
     if (this.steers.length > 8) this.steers.shift();
     return true;
@@ -396,7 +397,7 @@ class Agent {
 
   async send(userText, { auto, maxSteps: stepsOverride, tokenBudget, attachments, runId, continuation = false } = {}) {
     if (this.running) throw new Error('Agent 正在运行');
-    this.running = true; this.abort = new AbortController();
+    this.running = true; this.acceptingSteer = true; this.abort = new AbortController();
     const usage = { prompt: 0, completion: 0, reasoning: 0, cached: 0, calls: 0, ms: 0 };
     let stop = ''; const startedAt = Date.now(); this.turnId = runId || crypto.randomUUID();
     try {
@@ -415,6 +416,7 @@ class Agent {
       while (true) {
         if (this.abort.signal.aborted) { stop = 'interrupted'; break; }
         const final = this.wrapUp || (maxSteps > 0 && steps >= maxSteps) || repeatedFailures >= 6 || (budget && usage.prompt + usage.completion >= budget);
+        if (final) this.acceptingSteer = false;
         if (final) {
           stop = this.wrapUp ? 'time-limit' : maxSteps > 0 && steps >= maxSteps ? 'max-steps' : repeatedFailures >= 6 ? 'stalled' : 'budget';
           const reason = stop === 'stalled' ? '相同调用连续六轮返回相同错误，且提醒改变方法后仍未取得进展' : `已达用户设置的${stop === 'max-steps' ? `工具轮数上限（${maxSteps} 轮）` : stop === 'time-limit' ? '时间上限' : 'Token 预算上限'}`;
@@ -478,7 +480,7 @@ class Agent {
       const endedAt = Date.now();
       if (this.currentItem && (this.partial || this.partialReasoning)) this.hist.append({ t: 'assistant', ...this.currentItem, phase: 'partial_answer', content: this.partial || '', ...(this.partialReasoning ? { reasoning: this.partialReasoning } : {}), interrupted: true });
       this.hist.append({ t: 'turn-end', turnId: this.turnId, stop, startedAt, endedAt, usage: { ...usage } });
-      this.running = false; this.abort = null; this.wrapUp = false; this._emergency = null;
+      this.running = false; this.acceptingSteer = false; this.abort = null; this.wrapUp = false; this._emergency = null;
       this.persist();
       this.emitContext();
       this.emit('done', { turnId: this.turnId, stop, usage, startedAt, endedAt });

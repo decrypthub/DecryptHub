@@ -47,7 +47,7 @@ export class ResearchAgents {
     const record = { id, task, title: task.slice(0, 60), parentRunId: ctx.runId || null, goalKey: ctx.goalBudget?.key, workspaceId: ctx.workspaceId, status: 'running', mode: fork ? 'fork' : 'fresh', startedAt: Date.now() }; this.records.push(record); this.records = this.records.slice(-30);
     const agent = this.childAgent(projectDir, ctx, record);
     if (fork) {
-      const seed = forkEvents.slice(-20).map(e => ({ t: e.t === 'assistant' ? 'assistant' : 'user', content: String(e.content || '').slice(0, 2000), at: e.at || Date.now(), _fork: true }));
+      const seed = forkEvents.slice(-60).map(e => ({ t: ['user', 'assistant', 'tool', 'continuation'].includes(e.t) ? e.t : 'user', content: String(e.content || '').slice(0, 2000), ...(e.calls?.length ? { calls: e.calls } : {}), ...(e.t === 'tool' ? { id: e.id, name: e.name } : {}), at: e.at || Date.now(), _fork: true }));
       if (seed[seed.length - 1]?.t === 'user') seed.push({ t: 'assistant', content: '已了解父对话上下文，继续。', at: Date.now(), _fork: true });
       agent.hist.events = seed;
     }

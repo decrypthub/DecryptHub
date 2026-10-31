@@ -219,7 +219,7 @@ async function startServer() {
     'agent-queue-clear': a => { const s = S(a); s.queue = []; s.saveState(); sessions.emitList(); return { ok: true }; },
     'agent-state': a => { const s = S(a); s.ensureAgent(); return s.publicState(); },
     'goal-start': a => S(a).startGoal(a.objective, a.attachments),
-    'goal-action': a => S(a).goalAction(a.action),
+    'goal-action': a => S(a).goalAction(a.action, { revision: a.revision }),
     'subagent-start': a => S(a).subagents.spawn(a.task),
     'subagent-result': a => { const s = S(a); return s.subagents.wait(a.id, { waitMs: 0, workspaceId: s.workspace.id }); },
     'subagent-cancel': a => ({ ok: S(a).subagents.cancel(a.id) }),

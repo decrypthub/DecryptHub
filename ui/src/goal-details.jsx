@@ -26,7 +26,7 @@ export function GoalResumeBanner() {
     const sid = w.sid; if (busy) return;
     setBusy(true); setError('');
     try {
-      const result = await w.api.invoke('goal-action', { sessionId: sid, action: 'resume' });
+      const result = await w.api.invoke('goal-action', { sessionId: sid, action: 'resume', revision: goal.revision });
       if (!result.ok && w.isCurrentSession(sid)) setError(result.error || '继续目标失败');
     } catch (e) { if (w.isCurrentSession(sid)) setError(e.message); }
     finally { if (w.isCurrentSession(sid)) setBusy(false); }
@@ -40,7 +40,7 @@ export function GoalDetails({ goal }) {
     if (busy) return;
     const sid = w.sid; setBusy(true); setError('');
     try {
-      const result = await w.api.invoke('goal-action', { sessionId: sid, action: name });
+      const result = await w.api.invoke('goal-action', { sessionId: sid, action: name, revision: goal.revision });
       if (!result.ok && w.isCurrentSession(sid)) setError(result.error || '目标操作失败');
     } catch (e) { if (w.isCurrentSession(sid)) setError(e.message); }
     finally { if (w.isCurrentSession(sid)) setBusy(false); }

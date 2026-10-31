@@ -35,7 +35,10 @@ test('goal continues only within its bound, persists as paused, and requires exp
   await until(() => s.goal.status === 'paused' && !s.agent.running);
   assert.equal(s.goal.turns, 2); assert.equal(manager(dir).get('main').goal.status, 'paused');
   const complete = s.ensureAgent(); let calls = 0; complete.chat = async () => ++calls === 1 ? { content: '', toolCalls: [{ id: 'complete', name: 'goal_update', args: { status: 'complete', summary: '测试已验证，目标完成。', criteria: [{ content: '验证目标生命周期', status: 'verified' }], evidence: ['本地 fixture 生命周期断言通过'] } }] } : result('目标完成。');
-  assert.equal((await s.goalAction('resume')).ok, true); await until(() => s.goal.status === 'complete' && !s.agent.running);
+  s.goal.usedTokens = 42;
+  assert.equal((await s.goalAction('resume')).ok, true);
+  assert.equal(s.goal.usedTokens, 42, 'resume must not reset token accounting');
+  assert.equal((await s.goalAction('pause', { revision: 999 })).ok, false, 'stale revision must be rejected'); await until(() => s.goal.status === 'complete' && !s.agent.running);
   assert.equal(s.goal.summary, '测试已验证，目标完成。'); assert.equal(s.goal.turns, 1);
   await s.goalAction('clear'); assert.equal(s.goal, null);
 });

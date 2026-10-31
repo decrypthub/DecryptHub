@@ -68,8 +68,8 @@ class Session {
     this.ratings = st.ratings && typeof st.ratings === 'object' && !Array.isArray(st.ratings) ? { ...st.ratings } : {};
     // 「本会话始终允许」只在这次运行的内存里有效。磁盘上的旧 allows 不恢复。
     this.allows = new Set();
-    this.subagentNotices = [];
     this.todos = this.readTodos(st.todos);
+    this.subagentNotices = Array.isArray(st.notices) ? st.notices.slice(-10) : [];
     this.goal = restoreGoal(st.goal);
     this.goalDriver = new GoalDriver({ current: () => this.goal,
       idle: () => !this.closing && !this.agent?.running && !this.activeRun && !this.queue.length && !this.pending.size && !this.askPending.size && this.goal?.workspaceId === this.workspace.id,
@@ -90,7 +90,7 @@ class Session {
     return [];
   }
   saveState() {
-    atomicJson(this.stateFile(), { mode: this.mode === 'full-access' ? 'standard' : this.mode, review: this.review, todos: this.todos, workspace: this.workspace, projectId: this.projectId, queue: this.queue, ratings: this.ratings, goal: this.goal });
+    atomicJson(this.stateFile(), { mode: this.mode === 'full-access' ? 'standard' : this.mode, review: this.review, todos: this.todos, workspace: this.workspace, projectId: this.projectId, queue: this.queue, ratings: this.ratings, goal: this.goal, notices: this.subagentNotices });
   }
   setTodos(list) { this.todos = list; this.saveState(); this.emit('agent-todos', this.todos); }
   setMode(mode, review) {
@@ -245,21 +245,39 @@ class Session {
     const label = record.status === 'completed' ? '已完成' : record.status === 'limited' ? '达到上限' : record.status === 'cancelled' ? '已取消' : '已结束';
     const notice = `子代理「${record.title}」${label}（id=${record.id}）。用 agent_wait("${record.id}") 读取完整结论，核验后再采纳；需要继续研究时用 agent_message 追加要求。`;
     if (this.agent?.running) this.agent.queueNotice(notice);
-    else { this.subagentNotices.push(notice); if (this.subagentNotices.length > 10) this.subagentNotices.shift(); }
+    else { this.subagentNotices.push(notice); if (this.subagentNotices.length > 10) this.subagentNotices.shift(); this.saveState(); }
     this.emit('subagent-finished', { id: record.id, status: record.status, title: record.title });
   }
-  forkSeedForSubagent(limit = 12000) {
+  forkSeedForSubagent(limit = 20000) {
     const events = this.agent?.hist?.events || [];
-    const picked = []; let chars = 0;
-    for (let i = events.length - 1; i >= 0; i--) {
+    let end = -1;
+    for (let i = events.length - 1; i >= 0; i--) { const e = events[i]; if (e.t === 'assistant' && e.content && !e.calls?.length) { end = i; break; } }
+    if (end < 0) return [];
+    // 只取已完成的对话轮次：从一个 user/continuation 开始，到最后一个不带工具调用的 assistant 结束。
+    let start = 0;
+    for (let i = end; i >= 0; i--) { const e = events[i]; if (e.t === 'summary') { start = i + 1; break; } if (e.t === 'user' || e.t === 'continuation') { start = i; break; } }
+    const turns = []; let current = [];
+    const push = () => { if (current.length) turns.push(current); current = []; };
+    for (let i = start; i <= end; i++) {
       const e = events[i];
-      if (!((e.t === 'user' || e.t === 'assistant') && e.content)) continue;
-      const text = String(e.displayContent || e.content).replace(/\s+/g, ' ').slice(0, 1200);
-      if (chars + text.length > limit) break;
-      picked.unshift({ t: e.t, content: text, at: e.at || Date.now() });
-      chars += text.length;
+      if (!['user', 'assistant', 'tool', 'continuation'].includes(e.t)) continue;
+      if (e.t === 'user' || e.t === 'continuation') push();
+      current.push(e);
     }
-    return picked;
+    push();
+    const pickedTurns = []; let chars = 0;
+    for (let i = turns.length - 1; i >= 0; i--) {
+      const size = turns[i].reduce((n, e) => n + Math.min(String(e.content || '').length, 2000), 0);
+      if (chars + size > limit) break;
+      pickedTurns.unshift(turns[i]); chars += size;
+    }
+    // 图片/附件属于父会话目录，不能复制到子代理；只保留文字与工具调用/结果。
+    return pickedTurns.flat().map(e => {
+      const copy = { t: e.t, content: String(e.content || '').slice(0, 2000), at: e.at || Date.now(), _fork: true };
+      if (e.calls?.length) copy.calls = e.calls.map(c => ({ id: c.id, name: c.name, args: c.args }));
+      if (e.t === 'tool') { copy.id = e.id; copy.name = e.name; }
+      return copy;
+    });
   }
   contextForSubagent(limit = 6000) {
     const parts = [];
@@ -276,7 +294,7 @@ class Session {
       components: this.mgr.components, plugins:this.mgr.plugins, extensions: this.mgr.extensions, sessionId: this.id, projectId: this.projectId, projectRoots: this.workspace.roots || [], projectDir: this.projectDir, browser: this.browser, mcp: this.mcp, relaunch: o => this.relaunch(o),
       openBrowser: opts => this.browser.running ? this.browser.navigate(opts.url).then(() => ({ ok: true })) : this.launch(opts),
       ensureDebugger: () => this.ensureDebugger(),
-      subagents: this.subagents, getGoal: () => this.goal, updateGoal: value => this.updateGoal(value), parentContext: () => this.contextForSubagent(), forkSeed: () => this.forkSeedForSubagent(),
+      subagents: this.subagents, getGoal: () => this.goal, updateGoal: (value, options) => this.updateGoal(value, options), parentContext: () => this.contextForSubagent(), forkSeed: () => this.forkSeedForSubagent(),
       goalBudget: this.activeRun?.source === 'goal' && this.goal ? { key: this.goal.id + ':' + this.goal.batchId, ...(this.goal.tokenBudget > 0 ? { remaining: Math.max(0, this.goal.tokenBudget - (this.goal.usedTokens || 0)) } : {}) } : null,
       workRoot: this.workspace.root, workspaceId: this.workspace.id, workspaceKind: this.workspace.kind, mode: this.mode, protectedRoot: this.mgr.userDataDir,
       changes: this.changes, readHashes: this.readHashes, runId: this.activeRun?.id,
@@ -371,7 +389,7 @@ class Session {
     if (!continuation) this.suggestTitle(text);
     this.updatedAt = Date.now(); this.mgr.emitList();
     const goalTimer = goalId && this.goal.deadline ? setTimeout(() => agent.finishSoon(), Math.max(1, this.goal.deadline - Date.now())) : null;
-    if (this.subagentNotices.length) for (const notice of this.subagentNotices.splice(0)) agent.queueNotice(notice);
+    if (this.subagentNotices.length) { for (const notice of this.subagentNotices.splice(0)) agent.queueNotice(notice); this.saveState(); }
     this.completion = agent.send(text, { auto, maxSteps, tokenBudget, attachments, runId: run.id, continuation }).then(result => {
       if (goalId && this.goal?.id === goalId) {
         const hasWork = (this.goal.revision || 0) !== goalRevision || agent.hist.events.some(e => e.t === 'tool' && e.turnId === run.id && !e.isError && !['goal_update', 'goal_get', 'todo_write', 'agent_list'].includes(e.name));
@@ -399,28 +417,30 @@ class Session {
     if (!result.ok) { this.goal = previous; this.goalDriver.schedule(); }
     this.saveState(); this.emit('goal', this.goal); return result;
   }
-  async goalAction(action) {
+  async goalAction(action, { revision } = {}) {
     if (!this.goal) return { ok: false, error: '当前没有目标。输入 /goal 后填写要完成的任务。' };
+    if (revision !== undefined && revision !== null && Number(revision) !== (Number(this.goal.revision) || 0)) return { ok: false, error: '目标已在别处更新，请刷新后重试' };
     if (action === 'pause' || action === 'clear') { this.interrupt(); if (action === 'clear') this.goal = null; }
     else if (action === 'resume') {
       if (this.agent?.running) return { ok: false, error: '请等待当前任务结束' };
       if (this.goal.workspaceId !== this.workspace.id) return { ok: false, error: '目标绑定的工作区已变化，请切回原工作区或新建目标' };
       if (this.goal.status === 'complete') return { ok: false, error: '此目标已经完成，请新建目标' };
       if (!this.goal.limitsVersion) Object.assign(this.goal, { maxTurns: 0, tokenBudget: this.mgr.getSettings().tokenBudget || 0, limitsVersion: 1 });
-      this.goalDriver.cancel(); this.goal.status = 'active'; this.goal.batchId = crypto.randomUUID(); this.goal.turns = 0; this.goal.usedTokens = 0; this.goal.deadline = null; this.goal.stopReason = null; this.goal.resumeNote = '';
+      this.goalDriver.cancel(); this.goal.status = 'active'; this.goal.batchId = crypto.randomUUID(); this.goal.turns = 0; this.goal.revision = (Number(this.goal.revision) || 0) + 1; this.goal.deadline = null; this.goal.stopReason = null; this.goal.resumeNote = '';
       const r = await this.send({ text: '', source: 'goal' }, GOAL_CONTINUATION);
       if (!r.ok) this.goal.status = 'paused'; this.saveState(); this.emit('goal', this.goal); return r;
     } else return { ok: false, error: '未知目标操作' };
     this.saveState(); this.emit('goal', this.goal); return { ok: true };
   }
-  updateGoal(value) {
+  updateGoal(value, { revision } = {}) {
     if (!this.goal || this.goal.status !== 'active' || this.activeRun?.source !== 'goal') throw new Error('只有用户通过 /goal 启动的当前目标可以更新');
+    if (revision !== undefined && revision !== null && Number(revision) !== (Number(this.goal.revision) || 0)) throw new Error('目标已在别处更新，请刷新后重试');
     if (value.status === 'complete' && this.subagents.jobs.size) throw new Error('请先等待或取消研究子代理，并核验其结果，再完成目标');
     this.goal = updateGoal(this.goal, value, { runId: this.activeRun.id });
     if (this.goal.status !== 'active') this.goalDriver.cancel();
     this.saveState(); this.emit('goal', this.goal); return this.goal;
   }
-  interrupt() { this.goalDriver.cancel(); clearTimeout(this.queueTimer); this.queue = []; if (this.goal?.status === 'active') { this.goal.status = 'paused'; this.emit('goal', this.goal); } this.subagents.cancelAll(); this.saveState(); this.agent?.interrupt(); killAllJobs(this.projectDir); this.mgr.emitList(); }
+  interrupt() { this.goalDriver.cancel(); clearTimeout(this.queueTimer); this.queue = []; if (this.goal?.status === 'active') { this.goal.status = 'paused'; this.goal.revision = (Number(this.goal.revision) || 0) + 1; this.emit('goal', this.goal); } this.subagents.cancelAll(); this.saveState(); this.agent?.interrupt(); killAllJobs(this.projectDir); this.mgr.emitList(); }
   resumeQueue() { if (this.agent?.running) throw new Error('任务正在运行'); const next = this.queue.shift(); const result = next ? this.send(next) : { ok: false, error: '队列为空' }; if (next && !result.ok) this.queue.unshift(next); this.saveState(); this.mgr.emitList(); return result; }
   removeQueued(id) {
     const index = this.queue.findIndex(q => q.id === String(id || ''));
