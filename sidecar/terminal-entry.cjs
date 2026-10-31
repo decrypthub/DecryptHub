@@ -25,7 +25,9 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     } else if (message.action === 'input' && terminal && !stopping) {
           // PSReadLine 打开 win32-input-mode 时，换行必须作为 Enter 键事件发送，裸 CR 会被当成插入换行。
           const enter = '\x1b[13;28;13;1;0;1_\x1b[13;28;13;0;0;1_';
-          terminal.write(win32Input ? String(message.data).replace(/\r\n?/g, enter) : message.data);
+          const text = String(message.data);
+          // Windows 控制台把裸 CR 当行内回车；提交一行需要 CRLF（PSReadLine 模式则用键事件）。
+          terminal.write(win32Input ? text.replace(/\r\n?/g, enter) : process.platform === 'win32' ? text.replace(/\r\n?/g, '\r\n') : text);
         }
     else if (message.action === 'resize' && terminal && !stopping) terminal.resize(message.cols, message.rows);
     else if (message.action === 'close') stop();

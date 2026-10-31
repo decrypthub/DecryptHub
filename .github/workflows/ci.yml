@@ -53,7 +53,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: decrypthub/WebDecryptHub
-          ref: bc103f33c9b44b52e102de50fb1c3056718a1777
+          ref: beed60d
           path: wdh
       - uses: actions/setup-node@v4
         with:
