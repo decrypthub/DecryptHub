@@ -194,6 +194,9 @@ await new Promise(r => srv.listen(PORT, '127.0.0.1', r));
 
 const { chromium } = await import('../node_modules/@zhizhuodemao/patchright/index.mjs');
 const browser = await chromium.launch({ headless: true, executablePath: CHROME });
+// 首次引导在真实用户那里只出现一次；UI 回归里统一跳过，避免它和布局检查抢时序。
+const newContext = browser.newContext.bind(browser);
+browser.newContext = async (...args) => { const context = await newContext(...args); await context.addInitScript(() => { window.__JSRA_SKIP_ONBOARD = 1; }); return context; };
 fs.mkdirSync(SHOTS, { recursive: true });
 
 async function checkWindowChrome(scheme) {

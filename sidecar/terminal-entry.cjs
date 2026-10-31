@@ -2,7 +2,7 @@
 const path = require('node:path');
 const readline = require('node:readline');
 const pty = require('node-pty');
-let terminal, stopping = false;
+let terminal, stopping = false, win32Input = false;
 const send = message => process.stdout.write(JSON.stringify(message) + '\n');
 const exit = code => { send({ type: 'exit', exitCode: code }); process.stdout.write('', () => process.exit(code || 0)); };
 const stop = () => { if (stopping) return; stopping = true; if (terminal) { try { terminal.kill(); } catch {} } else exit(0); setTimeout(() => process.exit(0), 1500); };
@@ -14,9 +14,17 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
       const file = process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe') : '/bin/bash';
       const args = process.platform === 'win32' ? ['-NoLogo', '-NoProfile'] : ['--noprofile', '--norc'];
       terminal = pty.spawn(file, args, { cwd: message.cwd, cols: message.cols, rows: message.rows, env: process.env, name: 'xterm-256color', useConpty: true });
-      terminal.onData(data => send({ type: 'data', data })); terminal.onExit(event => exit(event.exitCode));
+      terminal.onData(data => {
+        if (data.includes('\x1b[?9001h')) win32Input = true;
+        if (data.includes('\x1b[?9001l')) win32Input = false;
+        send({ type: 'data', data });
+      }); terminal.onExit(event => exit(event.exitCode));
       send({ type: 'ready' });
-    } else if (message.action === 'input' && terminal && !stopping) terminal.write(message.data);
+    } else if (message.action === 'input' && terminal && !stopping) {
+          // PSReadLine 打开 win32-input-mode 时，换行必须作为 Enter 键事件发送，裸 CR 会被当成插入换行。
+          const enter = '\x1b[13;28;13;1;0;1_\x1b[13;28;13;0;0;1_';
+          terminal.write(win32Input ? String(message.data).replace(/\r\n?/g, enter) : message.data);
+        }
     else if (message.action === 'resize' && terminal && !stopping) terminal.resize(message.cols, message.rows);
     else if (message.action === 'close') stop();
   } catch (error) { send({ type: 'error', message: error.message }); stop(); }
