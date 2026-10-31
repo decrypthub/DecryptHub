@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { resolveAddress } from '../../sidecar/url.mjs';
 import { Box, DropdownMenu, Text, TextField, Spinner } from '@radix-ui/themes';
 import { ActionIcon, Button, EmptyState, Icon } from './kit.jsx';
 import { useWorkbench } from './bus.jsx';
@@ -49,7 +50,7 @@ export function BrowserPanel({ children }) {
       <Box flexGrow="1" style={{ minWidth: 0 }}>
         <TextField.Root ref={refs.urlRef} size="2" radius="full" value={address} aria-label="目标网址"
           onChange={e => { dirty.current = true; setAddress(e.target.value); }}
-          onKeyDown={e => { if (e.key === 'Enter') { dirty.current = false; tabs.navigate(address); } }} onFocus={e => e.target.select()}
+          onKeyDown={e => { if (e.key === 'Enter') { dirty.current = false; tabs.navigate(resolveAddress(address)); } }} onFocus={e => e.target.select()}
           placeholder="输入网址，按回车前往（Ctrl+L）" spellCheck={false}><TextField.Slot><Icon n="globe" size={13} /></TextField.Slot>{(launching[sid] || tabs.pending === tab.id) && <TextField.Slot side="right"><Spinner size="1" /></TextField.Slot>}</TextField.Root>
       </Box>
       <ActionIcon icon="network" variant="soft" color="gray" title={network ? '返回网页' : '显示网络请求'} aria-pressed={network} onClick={() => tabs.updateTab(tab.id, { mode: network ? 'page' : 'network' })} />

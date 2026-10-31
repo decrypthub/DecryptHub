@@ -10,3 +10,14 @@ export function normalizeTargetUrl(value) {
   }
   return `${LOCAL_HOST_WITH_PORT.test(input) ? 'http' : 'https'}://${input}`;
 }
+
+// 地址栏输入：单段词按域名猜测（baidu -> baidu.com），带空格或无法当作主机的输入走搜索。
+export function resolveAddress(value) {
+  const input = String(value ?? '').trim();
+  if (!input) return '';
+  if (/^https?:\/\//i.test(input) || /^about:blank$/i.test(input)) return input;
+  if (/^[a-z][a-z\d+.-]*:/i.test(input) || HOST_WITH_PORT.test(input)) return input;
+  if (/\s/.test(input)) return 'https://www.baidu.com/s?wd=' + encodeURIComponent(input);
+  if (!input.includes('.')) return /^[a-z0-9-]+$/i.test(input) ? `https://${input}.com` : 'https://www.baidu.com/s?wd=' + encodeURIComponent(input);
+  return input;
+}
