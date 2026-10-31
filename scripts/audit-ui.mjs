@@ -14,6 +14,10 @@ const PORT = 5211, WS_PORT = 5212;
 const CHROME = process.env.CHROME_PATH || [
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+  path.join(os.homedir(), 'Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),
+  path.join(os.homedir(), 'Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'),
   '/usr/bin/google-chrome', '/usr/bin/chromium',
 ].find(p => fs.existsSync(p));
 
@@ -82,7 +86,7 @@ const expandRail = page.getByRole('button', { name: '展开会话列表' });
 if (await expandRail.count()) await expandRail.first().click();
 await page.waitForTimeout(300);
 
-const ROWS = '.rail-item, .session-focus, .prov-row, .task-row, .file-row, .req-row';
+const ROWS = '.rail-nav .nav-button, .rail-account, .session-focus, .prov-row, .task-row, .file-row, .req-row';
 let scanned = 0;
 const hit = async label => {
   const r = await page.evaluate(sel => {
@@ -100,7 +104,8 @@ const hit = async label => {
 };
 
 await hit('对话');
-await page.locator('.rail button', { hasText: '设置' }).first().click();
+await page.locator('.rail-bottom .rail-account').click();
+await page.getByRole('menuitem', { name: /^设置/ }).click();
 await page.waitForTimeout(600);
 await hit('设置');
 await page.locator('.screen-head button').first().click();

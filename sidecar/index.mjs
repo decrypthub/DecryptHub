@@ -1,6 +1,7 @@
 // Sidecar host: Windows Node bundle / Linux executable. Legacy worker modes remain for compatibility.
 import path from 'node:path';
 import fs from 'node:fs';
+import { BrowserManager } from './browser.mjs';
 import { fileURLToPath } from 'node:url';
 
 const MODE = process.env.JSRA_MODE || 'server';
@@ -37,6 +38,9 @@ async function startServer() {
   const { publicSettings, decryptSecrets, mirrorProvider } = await import('./secrets.mjs');
   const { registerAttachment, attachmentPreview } = await import('./attachments.mjs');
   const { conversationMarkdown } = await import('./transcript.mjs');
+  const { searchSessions } = await import('./session-search.mjs');
+  const { openFeedback } = await import('./feedback.mjs');
+  const { readDocument } = await import('./documents.mjs');
   const consumedGrants = new Map();
   const usedNativeNonces = new Set();
 
@@ -70,6 +74,9 @@ async function startServer() {
     onChange: status => { broadcast('mcp-status', status); plugins?.notify(); },
   });
   const sessions = new SessionManager({ userDataDir: settingsMod.userDataDir(), getSettings: () => settings, broadcast, chromeMod, mcpHost });
+  // 内核管理不依赖会话：全新安装（零项目/零会话）也必须能查询、下载和测试内核。
+  const kernelHost = new BrowserManager({ components: sessions.components, getRoot: () => settingsMod.userDataDir(), dataDir: path.join(settingsMod.userDataDir(), '.kernel-host'), kernelDir: settingsMod.userDataDir() });
+  kernelHost.on('download-progress', value => broadcast('download-progress', value));
   plugins = new PluginManager({ components:sessions.components, mcpHost, getSettings:()=>settings, saveSettings:()=>settingsMod.save(settings), getSessions:()=>[...sessions.sessions.values()], broadcast });
   sessions.plugins = plugins;
   mcpHost.apply().catch(e => fileLog('MCP 服务启动失败: ' + e.message));
@@ -82,6 +89,7 @@ async function startServer() {
     changed: () => { for (const s of sessions.sessions.values()) s.agent?.emitContext(); broadcast('extensions-changed', true); } });
   sessions.extensions = extensions;
   const projects = new ProjectService(sessions, (grant, sid) => consumeFolderGrant(wsToken, grant, sid, consumedGrants));
+  projects.start();
   tasks.start();
   const S = a => { const session = sessions.get(a?.sessionId); if (session.closing) throw Error('会话正在关闭或删除'); return session; };
   const B = a => { const s = S(a); if (!s.browser.running) throw new Error('该会话的浏览器未启动'); return s.browser; };
@@ -115,9 +123,11 @@ async function startServer() {
     'mcp-restart': async a => { await mcpHost.restart(String(a?.name || '')); return mcpHost.status(); },
     'mcp-save': a => extensions.saveMcp(a?.servers || {}, a?.approveNames || []),
     'projects-list': () => sessions.projects.list(),
-    'project-save': a => projects.save(a.project || {}, S(a).id),
+    'project-save': a => projects.save(a.project || {}, a.scope || a.sessionId),
+    'projects-check': () => projects.checkDirectories(),
     'project-attach': a => projects.attach(S(a).id, a.projectId || null),
-    'project-remove': a => projects.remove(a.id),
+    'project-remove': a => projects.remove(a.id, a),
+    'project-move': a => projects.move(a.id, a.beforeId),
     'extensions-list': a => { const s = S(a); return extensions.list(a.kind, { sessionId: s.id, projectId: s.projectId }); },
     'extension-read': a => { const s = S(a); return extensions.read(a.kind, a, { sessionId: s.id, projectId: s.projectId }); },
     'component-info': () => sessions.components.info(),
@@ -125,28 +135,34 @@ async function startServer() {
     'kernel-info': async () => {
       const component=sessions.components.info();
       if(!component.installed||!component.enabled)return {component,hostIntegrity:await windowsRuntime.hostIntegrity(),kernel:settings.kernel};
-      const info=await S().browser.control('kernel-info');return {...info,component,hostIntegrity:await windowsRuntime.hostIntegrity(),kernel:settings.kernel,downloading:!!downloading};
+      const info=await kernelHost.control('kernel-info');return {...info,component,hostIntegrity:await windowsRuntime.hostIntegrity(),kernel:settings.kernel,downloading:!!downloading};
     },
-    'kernel-repair': async a => {if([...sessions.sessions.values()].some(s=>s.browser.running))return {ok:false,error:'请先关闭所有浏览器再修复内核'};return S().browser.control('kernel-repair',a);},
-    'download-kernel': async a => {if(downloading)return {ok:false,error:'已有下载正在运行'};downloading=S().browser.control('kernel-download',a);try{const result=await downloading;settings.kernel=result.kind;settingsMod.save(settings);return {ok:true,...result};}catch(e){return {ok:false,error:e.message};}finally{downloading=null;}},
-    'download-chrome': async () => {try{const result=await S().browser.control('kernel-cft');settings.kernel='bundled';settingsMod.save(settings);return {ok:true,...result};}catch(e){return {ok:false,error:e.message};}},
-    'probe-kernel': async a => S().browser.control('kernel-probe',a),
-    'delete-chrome': async () => S().browser.control('kernel-delete'),
+    'kernel-repair': async a => {if([...sessions.sessions.values()].some(s=>s.browser.running))return {ok:false,error:'请先关闭所有浏览器再修复内核'};return kernelHost.control('kernel-repair',{kind:settingsMod.KERNEL});},
+    // 内核固定 CloakBrowser：下载源与仓库不接受调用方覆盖，避免被当成通用内核下载器。
+    'download-kernel': async a => {if(downloading)return {ok:false,error:'已有下载正在运行'};const args={repository:'CloakHQ/cloakbrowser',tag:a?.tag||'',asset:a?.asset||''};downloading=kernelHost.control('kernel-download',args);try{const result=await downloading;settings.kernel=settingsMod.KERNEL;settingsMod.save(settings);return {ok:true,...result};}catch(e){return {ok:false,error:e.message};}finally{downloading=null;}},
+    'probe-kernel': async a => kernelHost.control('kernel-probe',{...a,kernel:settingsMod.KERNEL}),
     // 会话（多目标站点并行分析，每个会话独立 Chrome/内核/Agent）
     'session-list': () => sessions.list(),
+    'session-search': (a, context) => searchSessions({ sessions: sessions.sessions, projects: sessions.projects.list(), query: a?.query, signal: context?.signal }),
+    'feedback-open': () => openFeedback({ nativeHost: !!nativeKey }),
     'session-diagnostics': a => {
       const s = S(a), agent = s.ensureAgent(), run = s.runs.latest(), context = agent.stats();
       const model = (settings.provider === 'anthropic' ? settings.anthropic : settings.openai)?.model;
       return { sessionId: s.id, runId: run?.id || null, status: run?.status || 'idle', stop: run?.stop || null, mode: s.mode, review: s.review, workspace: s.workspace.root, provider: settings.provider, model, context: { used: context.used, limit: context.limit, inferred: context.inferred }, limits: { maxSteps: settings.maxSteps || 0, tokenBudget: settings.tokenBudget || 0 }, usage: run?.usage || null, appVersion: process.env.JSRA_APP_VERSION || 'development', platform: process.platform, node: process.versions.node };
     },
-    'session-create': a => sessions.create(a || {}).info(),
+    'session-create': a => { if (!a?.projectId) throw Error('请先选择项目'); return sessions.create({ projectId: a.projectId, title: typeof a.title === 'string' ? a.title.slice(0, 200) : undefined }).info(); },
     'session-close': async a => { await sessions.close(a?.sessionId); return sessions.list(); },
     'session-delete': async a => { await sessions.delete(a?.sessionId); return sessions.list(); },
+    'terminal-open': a => S(a).terminals.open(a),
+    'terminal-snapshot': a => S(a).terminals.snapshot(a.id),
+    'terminal-input': a => S(a).terminals.input(a.id, a.data),
+    'terminal-resize': a => S(a).terminals.resize(a.id, a.cols, a.rows),
+    'terminal-close': a => S(a).terminals.close(a.id),
+    'document-read': a => readDocument(S(a), a),
     'session-rename': a => { S(a).rename(a.title); return true; },
     'session-pin': a => { const s = S(a); s.setPinned(!!a.pinned); return sessions.list(); },
     'session-focus': async a => { await sessions.focus(a?.sessionId); return true; },
     'workspace-recent': () => sessions.workspaces.recent(),
-    'workspace-set': a => projects.choose(S(a).id, a),
     'executor-status': a => executor.probe(!!a?.refresh),
     'run-events': a => S(a).runs.events(Number(a?.after) || 0),
     'agent-history': a => { const s = S(a); return s.ensureAgent().hist.events; },
@@ -162,10 +178,14 @@ async function startServer() {
     'browser-viewport': async a => { const s = S(a); return s.browser.fitViewport(a.width, a.height, a.dpr); },
     'embed-inset': a => S(a).browser.embedInset(),
     'embed-fallback': async a => { const s = S(a); const r = await s.browser.embedFallback(a.reason); sessions.emitList(); return r; },
+    'browser-dock': a => S(a).browser.control('dock', a),
     'browser-close': async a => { await S(a).closeBrowser(); return true; },
     'navigate': a => B(a).navigate(a.url),
     'new-page': a => B(a).newPage(a.url),
     'select-page': a => B(a).selectPage(a.index),
+    'browser-tab-select': a => S(a).browserTabs.select(String(a.pageId || '')),
+    'browser-tab-close': a => S(a).browserTabs.close(String(a.pageId || '')),
+    'browser-tab-navigate': a => S(a).browserTabs.navigate(a.pageId, a.url),
     'go-back': a => B(a).goBack(),
     'reload': a => B(a).reload(),
     'clear-requests': a => S(a).browser.clearRequests(),
@@ -192,19 +212,40 @@ async function startServer() {
     'git-diff': a => git.gitDiff(S(a).toolCtx(), a.path),
     'agent-send': a => S(a).send(a),
     'agent-queue-resume': a => S(a).resumeQueue(),
+    'agent-queue-remove': a => S(a).removeQueued(a?.id),
+    'agent-queue-edit': a => S(a).editQueued(a?.id, a?.text),
+    'agent-turn-edit': a => S(a).editTurn(a?.turnId, a?.text),
+    'agent-rate': a => S(a).rateMessage(a?.id, a?.rating),
     'agent-queue-clear': a => { const s = S(a); s.queue = []; s.saveState(); sessions.emitList(); return { ok: true }; },
     'agent-state': a => { const s = S(a); s.ensureAgent(); return s.publicState(); },
     'goal-start': a => S(a).startGoal(a.objective, a.attachments),
-    'goal-action': a => S(a).goalAction(a.action),
+    'goal-action': a => S(a).goalAction(a.action, { revision: a.revision }),
     'subagent-start': a => S(a).subagents.spawn(a.task),
     'subagent-result': a => { const s = S(a); return s.subagents.wait(a.id, { waitMs: 0, workspaceId: s.workspace.id }); },
     'subagent-cancel': a => ({ ok: S(a).subagents.cancel(a.id) }),
     'session-snapshot': a => { const s = S(a), ag = s.ensureAgent(); return { state: s.publicState(), events: ag.hist.events, partial: ag.partial || '', partialReasoning: ag.partialReasoning || '', partialItem: ag.currentItem || null, context: ag.stats() }; },
     'test-seed-history': a => {
       if (process.env.JSRA_TEST_FIXTURES !== '1') throw new Error('disabled');
-      const ag = S(a).ensureAgent(); if (ag.running) throw new Error('busy');
+      const s = S(a), ag = s.ensureAgent(); if (ag.running) throw new Error('busy');
       const { events } = a; if (!Array.isArray(events) || events.length > 1000) throw new Error('invalid fixture');
+      if (a.subagents !== undefined) {
+        if (!Array.isArray(a.subagents) || a.subagents.length > 30 || a.subagents.some(agent => !agent.id || agent.status === 'running')) throw new Error('invalid subagent fixture');
+        s.subagents.records = a.subagents.map(agent => ({ ...agent, workspaceId: s.workspace.id })); s.subagents.save();
+      }
       ag.hist.events = events; ag.persist(); return true;
+    },
+    // UI 验收用：伪造 agent.running，覆盖「运行中改权限」这类界面路径；不启动模型。
+    'test-set-running': a => {
+      if (process.env.JSRA_TEST_FIXTURES !== '1') throw new Error('disabled');
+      const s = S(a); s.agent = s.agent || {}; s.agent.running = !!a.running; sessions.emitList(); return { ok: true, running: s.agent.running };
+    },
+    // UI 验收用：直接写入待发送队列，不启动模型或后台任务。
+    'test-seed-queue': a => {
+      if (process.env.JSRA_TEST_FIXTURES !== '1') throw new Error('disabled');
+      const s = S(a);
+      if (!Array.isArray(a.items) || a.items.length > 10 || a.items.some(item => typeof item?.text !== 'string')) throw new Error('invalid queue fixture');
+      s.queue = a.items.map(item => ({ id: crypto.randomUUID(), text: item.text.slice(0, 4000), source: 'user', attachments: item.attachments || [] }));
+      s.saveState(); sessions.emitList(); return { ok: true, queued: s.queue.length };
     },
     'session-set-mode': a => S(a).setMode(a?.mode, a?.review),
     'agent-approval-reply': a => ({ ok: S(a).replyApproval(a?.id, { allow: !!a?.allow, always: !!a?.always }) }),
@@ -305,23 +346,30 @@ async function startServer() {
     const denied = denyReason(req, wsToken);
     if (denied) { fileLog('拒绝 WS 连接：' + denied + '（origin=' + String(req.headers.origin || '无') + '）'); ws.close(1008, denied); return; }
     clients.add(ws);
-    ws.on('close', () => clients.delete(ws));
+    let searchController;
+    ws.on('close', () => { clients.delete(ws); searchController?.abort(); });
     ws.on('message', async raw => {
       let m; try { m = JSON.parse(raw); } catch { return; }
       if (m.type === 'input') { sessions.focused()?.browser.input(m.payload); return; }
       if (m.type === 'invoke') {
         const h = handlers[m.channel];
         let result, error = null;
-        try { result = h ? await h(m.args) : undefined; if (!h) error = '未知通道: ' + m.channel; }
+        try {
+          if (m.channel === 'session-search') { searchController?.abort(); searchController = new AbortController(); }
+          result = h ? await h(m.args, m.channel === 'session-search' ? { signal: searchController.signal } : undefined) : undefined;
+          if (!h) error = '未知通道: ' + m.channel;
+        }
         catch (e) { error = e.message || String(e); }
         try { ws.send(JSON.stringify({ type: 'reply', id: m.id, result, error })); } catch {}
       }
     });
   });
   async function gracefulExit() {
+    projects.stop();
     try { await plugins.close(); } catch {}
     try { await mcpHost.close(); } catch {}
     try { await sessions.closeAll(); } catch {}
+    try { await kernelHost.close(); } catch {}
     fileLog('sidecar 退出');
     process.exit(0);
   }

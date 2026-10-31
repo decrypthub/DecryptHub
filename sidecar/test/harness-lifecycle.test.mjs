@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { SessionManager } from '../sessions.mjs';
+import { TestSessionManager as SessionManager } from './project-fixture.mjs';
 import { Agent } from '../agent.mjs';
 import { ResearchAgents } from '../subagents.mjs';
 import { HARNESS_TOOLS } from '../harnesstools.mjs';
@@ -11,12 +11,12 @@ import { CLASSIFIED } from '../policy.mjs';
 import { parseCommand, commandMatches } from '../../ui/src/commands.js';
 const result = content => ({ content, toolCalls: [], finishReason: 'stop', usage: null });
 // These lifecycle fixtures explicitly opt into a session work directory.
-const manager = (dir, choose = true) => { const mgr = new SessionManager({ userDataDir: dir, getSettings: () => ({ openai: { apiKey: 'fixture', model: 'test', contextWindow: 1000000 } }), broadcast() {}, chromeMod: {} }); if (choose && mgr.get('main').workspace.kind === 'unselected') mgr.get('main').setWorkspace(null); return mgr; };
+const manager = dir => new SessionManager({ userDataDir: dir, getSettings: () => ({ openai: { apiKey: 'fixture', model: 'test', contextWindow: 1000000 } }), broadcast() {}, chromeMod: {} });
 function root(t) { const p = fs.mkdtempSync(path.join(os.tmpdir(), 'wdh-harness-life-')); t.after(() => fs.rmSync(p, { recursive: true, force: true })); return p; }
 const until = async fn => { const end = Date.now() + 5000; while (!fn()) { assert.ok(Date.now() < end, 'state did not settle'); await new Promise(r => setTimeout(r, 15)); } };
 test('session identifiers survive restoration and run journals include their session', async t => {
   const dir = root(t), mgr = manager(dir); t.after(() => mgr.closeAll());
-  const s = mgr.create({ title: 'ID fixture', managed: true }), id = s.id; assert.match(id, /^s[0-9a-f]{32}$/);
+  const s = mgr.create({ title: 'ID fixture' }), id = s.id; assert.match(id, /^s[0-9a-f]{32}$/);
   s.ensureAgent().chat = async () => result('done'); s.send({ text: 'ID fixture' }); await s.completion;
   assert.equal(s.runs.latest().sessionId, id); assert.ok(s.runs.events().every(e => e.sessionId === id));
   const restored = manager(dir); t.after(() => restored.closeAll()); assert.equal(restored.get(id).id, id);
@@ -35,7 +35,10 @@ test('goal continues only within its bound, persists as paused, and requires exp
   await until(() => s.goal.status === 'paused' && !s.agent.running);
   assert.equal(s.goal.turns, 2); assert.equal(manager(dir).get('main').goal.status, 'paused');
   const complete = s.ensureAgent(); let calls = 0; complete.chat = async () => ++calls === 1 ? { content: '', toolCalls: [{ id: 'complete', name: 'goal_update', args: { status: 'complete', summary: '测试已验证，目标完成。', criteria: [{ content: '验证目标生命周期', status: 'verified' }], evidence: ['本地 fixture 生命周期断言通过'] } }] } : result('目标完成。');
-  assert.equal((await s.goalAction('resume')).ok, true); await until(() => s.goal.status === 'complete' && !s.agent.running);
+  s.goal.usedTokens = 42;
+  assert.equal((await s.goalAction('resume')).ok, true);
+  assert.equal(s.goal.usedTokens, 42, 'resume must not reset token accounting');
+  assert.equal((await s.goalAction('pause', { revision: 999 })).ok, false, 'stale revision must be rejected'); await until(() => s.goal.status === 'complete' && !s.agent.running);
   assert.equal(s.goal.summary, '测试已验证，目标完成。'); assert.equal(s.goal.turns, 1);
   await s.goalAction('clear'); assert.equal(s.goal, null);
 });

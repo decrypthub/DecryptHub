@@ -7,12 +7,30 @@ import path from 'node:path';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'wdh-set-'));
 
-test('old implicit forty-step limit migrates; explicit budgets and installed kernel selection survive restart', async () => {
+test('old implicit forty-step limit migrates; every stored kernel is forced to CloakBrowser', async () => {
   const root = tmp(), directory = path.join(root, 'WebDecryptHub'); fs.mkdirSync(directory);
-  for (const [raw, expected] of [[{ maxSteps: 40, kernel: 'cloak' }, 0], [{ maxSteps: 40, runLimitsVersion: 1, kernel: 'github' }, 40], [{ maxSteps: 120, kernel: 'custom' }, 120]]) {
+  for (const [raw, expected] of [[{ maxSteps: 40, kernel: 'cloak' }, 0], [{ maxSteps: 40, runLimitsVersion: 1, kernel: 'github' }, 40], [{ maxSteps: 120, kernel: 'custom', chromePath: '/opt/chromium' }, 120]]) {
     fs.writeFileSync(path.join(directory, 'settings.json'), JSON.stringify(raw));
-    await withAppData(root, mod => { const loaded = mod.load(); assert.equal(loaded.maxSteps, expected); assert.equal(loaded.kernel, raw.kernel); assert.equal(loaded.runLimitsVersion, 1); });
+    await withAppData(root, mod => {
+      const loaded = mod.load();
+      assert.equal(loaded.maxSteps, expected);
+      assert.equal(loaded.kernel, 'cloak');
+      assert.equal(loaded.chromePath, '');
+      assert.equal(loaded.runLimitsVersion, 1);
+    });
   }
+});
+
+test('save() keeps CloakBrowser even when a caller passes another kernel', async () => {
+  const root = tmp();
+  await withAppData(root, mod => {
+    const settings = mod.load();
+    settings.kernel = 'system'; settings.chromePath = '/usr/bin/google-chrome';
+    mod.save(settings);
+    const written = JSON.parse(fs.readFileSync(path.join(root, 'WebDecryptHub', 'settings.json'), 'utf8'));
+    assert.equal(written.kernel, 'cloak');
+    assert.equal(written.chromePath, '');
+  });
 });
 
 /** 在临时 APPDATA 下调用一次 load()，避免碰真实用户目录 */
@@ -67,4 +85,12 @@ test('wantEmbed: 有头 + Windows 才内嵌；Wayland/Linux 需要 DISPLAY', asy
   assert.equal(mod.wantEmbed({ headless: false, embedMode: 'embedded' }, 'linux', { DISPLAY: ':0' }), true);
   assert.equal(mod.wantEmbed({ headless: false }, 'linux', {}), false);
   assert.equal(mod.wantEmbed({ headless: false }, 'darwin', {}), false);
+});
+
+test('browserPresentation: macOS 默认串流；停靠模式有头且不串流', async () => {
+  const mod = await import('../settings.mjs');
+  assert.deepEqual(mod.browserPresentation({ headless: false, embedMode: 'auto' }, 'darwin', {}), { embed: false, headless: true, dock: false });
+  assert.deepEqual(mod.browserPresentation({ headless: false, embedMode: 'docked' }, 'darwin', {}), { embed: false, headless: false, dock: true });
+  assert.deepEqual(mod.browserPresentation({ headless: true, embedMode: 'docked' }, 'darwin', {}), { embed: false, headless: true, dock: false });
+  assert.deepEqual(mod.browserPresentation({ headless: false, embedMode: 'docked' }, 'win32', {}), { embed: true, headless: false, dock: false });
 });

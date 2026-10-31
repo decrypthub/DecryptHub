@@ -17,13 +17,14 @@ import { useWorkbench } from './bus.jsx';
 import { Button, ActionIcon, Icon, EmptyState, askConfirm } from './kit.jsx';
 import { Section, Row } from './settings-kit.jsx';
 // ---------- 浏览器 ----------
+// 桌面版只使用 WDH 自带的 CloakBrowser 内核，其它内核选项已移除。
+const KERNEL = 'cloak';
 export function BrowserSettings({ s, up }) {
   const w = useWorkbench();
   const [kernel, setKernel] = useState(null),
     [dl, setDl] = useState(null),
     [err, setErr] = useState('');
-  const [repo, setRepo] = useState('CloakHQ/cloakbrowser'),
-    [tag, setTag] = useState(''),
+  const [tag, setTag] = useState(''),
     [asset, setAsset] = useState('');
   const load = () =>
     window.api
@@ -34,32 +35,24 @@ export function BrowserSettings({ s, up }) {
     load();
     return window.api.on('download-progress', (p) => setDl(['done', 'error'].includes(p.phase) ? null : p));
   }, []);
-  const k = s.kernel || 'system',
-    info = kernel?.[k],
+  const info = kernel?.[KERNEL],
     pct = dl?.total ? Math.round((dl.got / dl.total) * 100) : null;
   async function download() {
     setErr('');
     setDl({ phase: 'metadata', got: 0, total: 0 });
     const r = await window.api
-      .invoke(k === 'bundled' ? 'download-chrome' : 'download-kernel', {
-        repository: k === 'cloak' ? 'CloakHQ/cloakbrowser' : repo,
-        tag: tag.trim(),
-        asset: asset.trim(),
-      })
+      .invoke('download-kernel', { repository: 'CloakHQ/cloakbrowser', tag: tag.trim(), asset: asset.trim() })
       .catch((e) => ({ ok: false, error: e.message }));
     setDl(null);
     load();
-    if (r.ok) {
-      up('kernel', r.kind || 'bundled');
-      up('chromePath', '');
-      w.toast('浏览器内核已就绪，新打开浏览器时生效', 'ok');
-    } else setErr(r.error);
+    if (r.ok) w.toast('CloakBrowser 已就绪，新打开浏览器时生效', 'ok');
+    else setErr(r.error);
   }
   async function probe() {
     setErr('');
     setDl({ phase: 'probe' });
     const r = await window.api
-      .invoke('probe-kernel', { kernel: k, chromePath: s.chromePath })
+      .invoke('probe-kernel', { kernel: KERNEL })
       .catch((e) => ({ ok: false, error: e.message }));
     setDl(null);
     if (r.ok) w.toast('浏览器启动与画面检查通过', 'ok');
@@ -69,7 +62,7 @@ export function BrowserSettings({ s, up }) {
     setErr('');
     setDl({ phase: 'probe' });
     const r = await window.api
-      .invoke('kernel-repair', { kind: k })
+      .invoke('kernel-repair', { kind: KERNEL })
       .catch((e) => ({ ok: false, error: e.message }));
     setDl(null);
     if (r.ok) {
@@ -110,97 +103,49 @@ export function BrowserSettings({ s, up }) {
     <>
       <Section
         title="WebDecryptHub · 浏览器内核"
-        desc="使用系统 Chrome / Edge、自定义 Chromium，或从 GitHub Release 下载。新设置在下次打开浏览器时生效。"
+        desc="桌面版只使用 WDH 自带的 CloakBrowser，不再提供系统 Chrome / Edge、自定义 Chromium、GitHub Release 与 Chrome for Testing。"
       >
-        <SegmentedControl.Root
-          size="2"
-          value={k}
-          onValueChange={(v) => {
-            up('kernel', v);
-            setErr('');
-          }}
-        >
-          <SegmentedControl.Item value="system">系统</SegmentedControl.Item>
-          <SegmentedControl.Item value="custom">自定义</SegmentedControl.Item>
-          <SegmentedControl.Item value="cloak">CloakBrowser</SegmentedControl.Item>
-          <SegmentedControl.Item value="github">GitHub</SegmentedControl.Item>
-          <SegmentedControl.Item value="bundled">Chromium</SegmentedControl.Item>
-        </SegmentedControl.Root>
-        {k === 'system' && (
-          <Text as="p" size="1" color={kernel?.system ? 'gray' : 'amber'}>
-            {kernel?.system?.path || '没有找到系统 Chrome / Edge'}
+        <Box mt="3">
+          <Text as="p" size="1" color="gray">
+            来源：CloakHQ/cloakbrowser · 官方 Release，验证发布签名与 SHA-256。官方未提供当前平台内核时，可填写版本标签或文件名。
           </Text>
-        )}
-        {k === 'custom' && (
-          <Box mt="3">
-            <Text as="div" size="1" color="gray" mb="1">
-              浏览器可执行文件的完整路径
-            </Text>
+          <Text as="p" size="1" color={info ? 'green' : 'gray'}>
+            {info ? `已安装 ${info.version || ''} · ${info.verified || 'Chromium'}` : '尚未安装 CloakBrowser'}
+          </Text>
+          <Flex direction="column" gap="2" mt="2">
             <TextField.Root
-              size="2"
-              value={s.chromePath || ''}
-              onChange={(e) => up('chromePath', e.target.value)}
-              placeholder="C:\Program Files\Chromium\chrome.exe"
-              spellCheck={false}
+              aria-label="CloakBrowser 版本标签"
+              value={tag}
+              onChange={(e) => setTag(e.target.value)}
+              placeholder="版本标签（留空使用官方最新可用 Release）"
             />
-            <Text as="p" size="1" color="gray">
-              支持兼容 Chrome DevTools Protocol 的 Chromium 内核。
-            </Text>
-          </Box>
-        )}
-        {['cloak', 'github', 'bundled'].includes(k) && (
-          <Box mt="3">
-            {k === 'cloak' && (
+            <TextField.Root
+              aria-label="CloakBrowser 文件名"
+              value={asset}
+              onChange={(e) => setAsset(e.target.value)}
+              placeholder="压缩包文件名（留空按系统匹配）"
+            />
+          </Flex>
+          {dl ? (
+            <Flex direction="column" gap="2" mt="3">
+              <Progress value={pct ?? 8} size="1" />
               <Text as="p" size="1" color="gray">
-                来源：CloakHQ/cloakbrowser · 官方 Release，验证发布签名与 SHA-256。
+                {dl.phase === 'metadata'
+                  ? '读取 Release…'
+                  : dl.phase === 'probe'
+                    ? '检查内核启动…'
+                    : dl.phase === 'extract'
+                      ? '校验完成，正在解压…'
+                      : `${pct ?? ''}% · ${((dl.got || 0) / 1e6).toFixed(0)} MB`}
               </Text>
-            )}
-            {k === 'github' && (
-              <Flex direction="column" gap="2">
-                <TextField.Root
-                  aria-label="GitHub 仓库"
-                  value={repo}
-                  onChange={(e) => setRepo(e.target.value)}
-                  placeholder="owner/repo"
-                />
-                <TextField.Root
-                  aria-label="Release 标签"
-                  value={tag}
-                  onChange={(e) => setTag(e.target.value)}
-                  placeholder="版本标签（留空使用最新 Release）"
-                />
-                <TextField.Root
-                  aria-label="Release 文件名"
-                  value={asset}
-                  onChange={(e) => setAsset(e.target.value)}
-                  placeholder="压缩包文件名（留空按系统匹配）"
-                />
-              </Flex>
-            )}
-            <Text as="p" size="1" color={info ? 'green' : 'gray'}>
-              {info ? `已安装 ${info.version || ''} · ${info.verified || 'Chromium'}` : '尚未安装'}
-            </Text>
-            {dl ? (
-              <>
-                <Progress value={pct ?? 8} size="1" />
-                <Text as="p" size="1" color="gray">
-                  {dl.phase === 'metadata'
-                    ? '读取 Release…'
-                    : dl.phase === 'probe'
-                      ? '检查内核启动…'
-                      : dl.phase === 'extract'
-                        ? '校验完成，正在解压…'
-                        : `${pct ?? ''}% · ${((dl.got || 0) / 1e6).toFixed(0)} MB`}
-                </Text>
-              </>
-            ) : (
-              <Button size="2" variant="soft" onClick={download}>
-                <Icon n="download" size={16} />
-                {info ? '下载更新' : '下载内核'}
-              </Button>
-            )}
-          </Box>
-        )}
+            </Flex>
+          ) : (
+            <Box mt="3"><Button size="2" variant="soft" onClick={download}>
+              <Icon n="download" size={16} />
+              {info ? '下载更新' : '下载 CloakBrowser'}
+            </Button></Box>
+          )}
+        </Box>
         {kernel?.hostIntegrity?.normal === false && (
           <Text as="p" size="1" color="red">
             当前程序受 Windows 低完整性限制。请关闭旧窗口，从普通终端重新启动桌面程序。
@@ -208,9 +153,9 @@ export function BrowserSettings({ s, up }) {
         )}
         <Flex mt="3" gap="2" wrap="wrap">
           <Button size="2" variant="soft" color="gray" disabled={!!dl} onClick={probe}>
-            测试所选内核
+            测试 CloakBrowser
           </Button>
-          {info && ['cloak', 'github', 'bundled'].includes(k) && (
+          {info && (
             <Button
               size="2"
               variant="soft"
@@ -240,29 +185,17 @@ export function BrowserSettings({ s, up }) {
             <SegmentedControl.Item value="iso">每次全新</SegmentedControl.Item>
           </SegmentedControl.Root>
         </Row>
-        <Row label="显示模式" desc="无头模式不弹窗口，只能看画面串流">
+        <Row label="浏览器显示" desc="macOS 没有原生嵌入：可选有头窗口停靠（清晰、低延迟，窗口独立存在）或画面串流（嵌在应用内）。">
           <SegmentedControl.Root
             size="2"
-            value={s.headless ? 'headless' : 'head'}
-            onValueChange={(v) => up('headless', v === 'headless')}
+            value={s.embedMode === 'docked' ? 'docked' : s.headless || s.embedMode === 'screencast' ? 'screencast' : 'auto'}
+            onValueChange={(v) => { up('headless', v === 'screencast'); up('embedMode', v); }}
           >
-            <SegmentedControl.Item value="head">有头（推荐）</SegmentedControl.Item>
-            <SegmentedControl.Item value="headless">无头</SegmentedControl.Item>
+            <SegmentedControl.Item value="auto">自动</SegmentedControl.Item>
+            <SegmentedControl.Item value="docked">停靠窗口</SegmentedControl.Item>
+            <SegmentedControl.Item value="screencast">画面串流</SegmentedControl.Item>
           </SegmentedControl.Root>
         </Row>
-        {!s.headless && (
-          <Row label="画面嵌入" desc="原生嵌入会把真实 Chrome 窗口贴进右侧面板；失败自动回落画面串流">
-            <SegmentedControl.Root
-              size="2"
-              value={s.embedMode || 'auto'}
-              onValueChange={(v) => up('embedMode', v)}
-            >
-              <SegmentedControl.Item value="auto">自动</SegmentedControl.Item>
-              <SegmentedControl.Item value="embedded">原生嵌入</SegmentedControl.Item>
-              <SegmentedControl.Item value="screencast">画面串流</SegmentedControl.Item>
-            </SegmentedControl.Root>
-          </Row>
-        )}
       </Section>
 
       <Section title="行为">

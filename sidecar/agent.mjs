@@ -15,9 +15,28 @@ import { validateArgs } from './contract.mjs';
 import { decideTool, toolRisk, HOST_EXEC, WORKER_TOOLS } from './policy.mjs';
 import { formatTodos } from './todos.mjs';
 import { workspacePath } from './workspaces.mjs';
+import { profilePrompt } from './profile.mjs';
 
 const REF_TOOL = { name: 'context_ref_read', description: '读取被截断的长工具输出（截断提示里的 ctx_ref）。offset/length 分页（默认 6000 字符）。', schema: { type: 'object', properties: { ref: { type: 'string' }, offset: { type: 'number' }, length: { type: 'number' } }, required: ['ref'] } };
-const MAX_AUTO_FAILURES = 2; // Stop repeated failed compactions, not a long-running task's successful compactions.
+const MAX_AUTO_FAILURES = 2;
+// 每次工具调用都要有上限：模型给 workspace_run/shell/npm 的 timeoutMs 优先，
+// 其余工具按类别给默认值；0 表示不设上限（等待用户输入的 ask_user）。
+export function toolTimeoutMs(name, args = {}, tool = null) {
+  if (name === 'ask_user') return 0;
+  if (name === 'compact_context') return 180000;
+  if (name === 'workspace_run') return Math.min(Number(args.timeoutMs) || 60000, 300000) + 15000;
+  if (name === 'workspace_npm') return Math.min(Number(args.timeoutMs) || 180000, 600000) + 15000;
+  if (name === 'workspace_shell') {
+    if (args.background) return 30000;
+    return Math.min(Number(args.timeoutMs) || 60000, 300000) + 15000;
+  }
+  if (name.startsWith('browser_')) return name === 'browser_open' ? 120000 : 90000;
+  if (name.startsWith('terminal_')) return 30000;
+  if (name.startsWith('workspace_')) return 60000;
+  if (tool?.timeoutMs) return tool.timeoutMs;
+  return 90000;
+}
+ // Stop repeated failed compactions, not a long-running task's successful compactions.
 // 这些错误说明「本步还没产出可用结果」，退避后重做同一讨论步；参数错误（4xx）不在此列
 
 const SYSTEM = `你是桌面端通用 Agent，帮助用户阅读和修改代码、处理文件、研究问题、浏览网页与调用工具。
@@ -27,7 +46,7 @@ const SYSTEM = `你是桌面端通用 Agent，帮助用户阅读和修改代码�
 只读权限下只做调查。命令是否隔离由应用实际状态决定，不把 cwd 或 Node vm 当作安全沙箱。Windows 命令使用 PowerShell。
 核心工具用于文件、执行、提问和上下文。需要网页时用 browser_open 打开，再用 browser_snapshot 读取。浏览器与外部 MCP 用 discover_tools 按需加载，不编造工具；缺少用户必要信息时使用 ask_user。
 多步任务可以维护 todo_write。能自行查证的信息先查证，不为常规步骤反复询问。完成后说明修改、验证结果和未解决问题；不能把任务投递当作执行完成。
-大输出落盘或分页，避免重复读取。默认使用中文，表达简洁。`;
+大输出落盘或分页，避免重复读取。每次工具调用都有超时：脚本和命令用 timeoutMs 显式给出预计耗时（workspace_run/shell 默认 60s、上限 300s，npm 默认 180s、上限 600s），更久的工作用后台任务并轮询；其他工具超时会返回错误，应缩小范围或拆分步骤，不要重复同样的长调用。默认使用中文，表达简洁。`;
 
 const DISCOVER = { name: 'discover_tools', description: '按需启用工具组：browser=页面阅读、交互和抓包；debugger=脚本源码、搜索、文本/XHR断点、暂停/单步/调用栈/作用域求值、控制台与WebSocket；mcp=用户连接的服务。网站分析先打开浏览器再启用 debugger。不会授予额外权限。', schema: { type: 'object', properties: { group: { type: 'string', enum: ['browser', 'debugger', 'mcp'] } }, required: ['group'] } };
 
@@ -49,7 +68,11 @@ class Agent {
     this.getToolContext = getToolContext || (() => ({})); this.getWorkspace = getWorkspace || (() => null); this.record = record || (() => {});
     this.getGoal = getGoal || (() => this.getToolContext().getGoal?.());
     this.groups = new Set(['core']);
-    this.hist = new History({ system: SYSTEM });
+    this.callSignal = null;
+    this.notices = [];
+    this.steers = [];
+    this.acceptingSteer = false;
+    this.hist = new History({ system: SYSTEM + profilePrompt(this.getSettings()) });
     this.hist.ctxDir = this.ctxDir();
     this.running = false; this.abort = null; this.wrapUp = false;
     this.calib = 1; this.compressing = false; this.lastCompressAfter = null;
@@ -131,17 +154,31 @@ class Agent {
   // 对话上下文落盘，重启应用后恢复（系统提示总用最新版本）
   histFile() { return this.projectDir ? this.projectDir + '/.agent-history.json' : null; }
   persist() { const f = this.histFile(); if (f && !this.hist.save(f)) throw new Error('无法保存对话状态，已停止以免丢失执行记录'); }
-  restore() { const f = this.histFile(); if (!f) return; const h = History.load(f, SYSTEM); h.ctxDir = this.ctxDir(); if (h.events.length) this.hist = h; this.hist.onAppend = () => this.persist(); }
+  restore() { const f = this.histFile(); if (!f) return; const h = History.load(f, SYSTEM + profilePrompt(this.getSettings())); h.ctxDir = this.ctxDir(); if (h.events.length) this.hist = h; this.hist.onAppend = () => this.persist(); }
 
 
   allTools() {
     if (this.browser?.running) this.groups.add('browser');
-    this.hist.system = SYSTEM;
+    this.hist.system = SYSTEM + profilePrompt(this.getSettings());
     const mcpTools = this.groups.has('debugger') ? (this.mcp.tools || []).map(t => ({ name: t.name, description: t.description, schema: t.inputSchema })) : [];
     // 用户接入的 MCP 服务：工具名已带「服务名__」前缀
     const ext = this.groups.has('mcp') ? (this.mcpHost?.tools?.() || []).map(t => ({ name: t.name, description: t.description, schema: t.inputSchema })) : [];
     const local = this.localTools.filter(t => this.groups.has(t.group || 'core')).map(t => ({ name: t.name, description: t.description, schema: t.schema }));
     return [...mcpTools, ...ext, ...local, REF_TOOL, DISCOVER];
+  }
+
+  // 主代理可以在子代理运行中追加要求；模型会在下一次决策前作为用户消息看到它。
+  queueSteer(text) {
+    if (!this.running || !this.acceptingSteer) return false;
+    this.steers.push(String(text || '').slice(0, 4000));
+    if (this.steers.length > 8) this.steers.shift();
+    return true;
+  }
+
+  queueNotice(text) {
+    if (!text) return;
+    this.notices.push(String(text).slice(0, 2000));
+    if (this.notices.length > 8) this.notices.shift();
   }
 
   async runTool(name, args) {
@@ -190,10 +227,14 @@ class Agent {
         const workerArgs = { ...v.value };
         if (workerArgs.source && ctx.workRoot && !fs.existsSync(resolveIn(ctx.workRoot, workerArgs.source))) { workerArgs.code = fs.readFileSync(resolveIn(this.projectDir, workerArgs.source), 'utf8'); delete workerArgs.source; }
         const script = process.argv[1] && /\.(?:mjs|cjs|js)$/.test(process.argv[1]) ? [process.argv[1]] : [];
-        const job = await ctx.exec({ file: process.execPath, args: script, cwd: ctx.workRoot, timeoutMs: 120000, env: { JSRA_MODE: 'tool-worker' }, input: JSON.stringify({ name, args: workerArgs, projectDir: ctx.workRoot }) });
-        const r = await job.done; try { return JSON.parse(r.out); } catch { return { text: r.err || r.out || '分析进程未返回结果', isError: true }; }
+        return await this.boundedTool(name, Math.max(toolTimeoutMs(name, workerArgs, local), 150000), async () => {
+          const job = await ctx.exec({ file: process.execPath, args: script, cwd: ctx.workRoot, timeoutMs: 120000, env: { JSRA_MODE: 'tool-worker' }, input: JSON.stringify({ name, args: workerArgs, projectDir: ctx.workRoot }) });
+          const r = await job.done; try { return JSON.parse(r.out); } catch { return { text: r.err || r.out || '分析进程未返回结果', isError: true }; }
+        });
       }
-      return name.startsWith('browser_') ? await this.browserAction(name, async () => { if (this.mcp.client && ['browser_click', 'browser_fill', 'browser_press'].includes(name)) await this.bindBrowserTarget(); return local.run(v.value, ctx); }) : await local.run(v.value, ctx);
+      return await this.boundedTool(name, toolTimeoutMs(name, v.value, local), async signal => name.startsWith('browser_')
+        ? await this.browserAction(name, async () => { if (this.mcp.client && ['browser_click', 'browser_fill', 'browser_press'].includes(name)) await this.bindBrowserTarget(signal); return local.run(v.value, { ...ctx, signal }); })
+        : await local.run(v.value, { ...ctx, signal }));
     }
     if (name === REF_TOOL.name) {
       const v = validateArgs(REF_TOOL.schema, callArgs);
@@ -201,32 +242,51 @@ class Agent {
       return readRef(this.ctxDir(), v.value.ref, v.value.offset, v.value.length);
     }
     // 用户接入的 MCP 工具（名字带服务前缀，可能含 oneOf/$ref，交给对方服务自己校验）
-    if (this.mcpHost?.has?.(name)) return await this.mcpHost.call(name, callArgs, this.abort?.signal);
+    if (this.mcpHost?.has?.(name)) return await this.boundedTool(name, toolTimeoutMs(name, callArgs), signal => this.mcpHost.call(name, callArgs, signal));
     // MCP 内核工具自带 inputSchema（可能含 oneOf/$ref），交给内核自己校验
-    if (this.mcp.has(name)) return await this.browserAction(name, async () => {
+    if (this.mcp.has(name)) return await this.boundedTool(name, toolTimeoutMs(name, callArgs), async signal => this.browserAction(name, async () => {
       await ctx.ensureDebugger();
       const safeArgs = { ...callArgs };
       for (const key of ['filePath', 'outputFile', 'localFilePath']) if (safeArgs[key]) safeArgs[key] = workspacePath(ctx, safeArgs[key], { write: key !== 'localFilePath' });
-      await this.bindBrowserTarget();
-      const result = await this.mcp.call(name, safeArgs, this.abort?.signal);
+      await this.bindBrowserTarget(signal);
+      const result = await this.mcp.call(name, safeArgs, signal);
       if (!result.isError && ['step', 'get_paused_info'].includes(name)) this.emit('debugger-state', { paused: true });
       if (!result.isError && name === 'pause_or_resume' && safeArgs.action === 'resume') this.emit('debugger-state', { paused: false });
       return result;
-    });
+    }));
     return { text: `未知工具：${name}`, isError: true };
   }
 
+  async boundedTool(name, budget, run) {
+    if (!budget) return run(null);
+    const control = new AbortController(), parent = this.abort?.signal;
+    const forward = () => control.abort();
+    if (parent) { if (parent.aborted) control.abort(); else parent.addEventListener('abort', forward, { once: true }); }
+    this.callSignal = control.signal;
+    let timer;
+    const timeout = new Promise(resolve => { timer = setTimeout(() => {
+      control.abort();
+      resolve({ text: `[超时] ${name} 超过 ${Math.round(budget / 1000)} 秒未返回，已中止。请缩小范围、拆分步骤，或在参数中设置 timeoutMs 后重试。`, isError: true });
+    }, budget); });
+    try {
+      const work = Promise.resolve().then(() => run(control.signal));
+      work.catch(() => {}); // 超时后不再等待它，但避免未处理的 rejection
+      return await Promise.race([work, timeout]);
+    } finally {
+      clearTimeout(timer); parent?.removeEventListener('abort', forward); this.callSignal = null;
+    }
+  }
   async browserAction(name, run) {
     this.emit('browser-activity', { active: true, tool: name });
     try { return await run(); }
     finally { this.emit('browser-activity', { active: false, tool: name }); }
   }
-  async bindBrowserTarget() {
-    if (this.browser?.bindDebuggerTarget) return this.browser.bindDebuggerTarget(this.abort?.signal);
+  async bindBrowserTarget(signal = this.abort?.signal) {
+    if (this.browser?.bindDebuggerTarget) return this.browser.bindDebuggerTarget(signal);
     const page = this.browser?.activePage; if (!page || page.isClosed()) throw new Error('浏览器页面已关闭');
     const cdp = await page.context().newCDPSession(page);
     let target; try { target = await cdp.send('Target.getTargetInfo'); } finally { await cdp.detach(); }
-    await this.mcp.selectTarget(target.targetInfo.targetId, this.abort?.signal);
+    await this.mcp.selectTarget(target.targetInfo.targetId, signal);
   }
 
   // 把应用自身已捕获的状态告诉模型：MCP 内核只能看到它连接之后的请求，避免模型误判"没有请求"而浪费步数
@@ -337,7 +397,7 @@ class Agent {
 
   async send(userText, { auto, maxSteps: stepsOverride, tokenBudget, attachments, runId, continuation = false } = {}) {
     if (this.running) throw new Error('Agent 正在运行');
-    this.running = true; this.abort = new AbortController();
+    this.running = true; this.acceptingSteer = true; this.abort = new AbortController();
     const usage = { prompt: 0, completion: 0, reasoning: 0, cached: 0, calls: 0, ms: 0 };
     let stop = ''; const startedAt = Date.now(); this.turnId = runId || crypto.randomUUID();
     try {
@@ -356,6 +416,7 @@ class Agent {
       while (true) {
         if (this.abort.signal.aborted) { stop = 'interrupted'; break; }
         const final = this.wrapUp || (maxSteps > 0 && steps >= maxSteps) || repeatedFailures >= 6 || (budget && usage.prompt + usage.completion >= budget);
+        if (final) this.acceptingSteer = false;
         if (final) {
           stop = this.wrapUp ? 'time-limit' : maxSteps > 0 && steps >= maxSteps ? 'max-steps' : repeatedFailures >= 6 ? 'stalled' : 'budget';
           const reason = stop === 'stalled' ? '相同调用连续六轮返回相同错误，且提醒改变方法后仍未取得进展' : `已达用户设置的${stop === 'max-steps' ? `工具轮数上限（${maxSteps} 轮）` : stop === 'time-limit' ? '时间上限' : 'Token 预算上限'}`;
@@ -372,6 +433,8 @@ class Agent {
         this.emit('assistant-start', this.currentItem);
         // ③ 调模型（含网络抖动重试）
         const t0 = Date.now();
+        if (this.steers.length) for (const steer of this.steers.splice(0, 8)) this.hist.append({ t: 'user', content: '【主代理在任务运行中追加的要求】' + steer });
+        if (this.notices.length) for (const notice of this.notices.splice(0, 8)) this.hist.append({ t: 'continuation', content: '【应用通知】' + notice });
         const res = await this.askModel({ settings, tools: final ? [] : this.allTools(), step: steps });
         const ms = Date.now() - t0;
         usage.calls++; usage.ms += ms;
@@ -416,8 +479,8 @@ class Agent {
     } finally {
       const endedAt = Date.now();
       if (this.currentItem && (this.partial || this.partialReasoning)) this.hist.append({ t: 'assistant', ...this.currentItem, phase: 'partial_answer', content: this.partial || '', ...(this.partialReasoning ? { reasoning: this.partialReasoning } : {}), interrupted: true });
-      this.hist.append({ t: 'turn-end', turnId: this.turnId, stop, startedAt, endedAt });
-      this.running = false; this.abort = null; this.wrapUp = false; this._emergency = null;
+      this.hist.append({ t: 'turn-end', turnId: this.turnId, stop, startedAt, endedAt, usage: { ...usage } });
+      this.running = false; this.acceptingSteer = false; this.abort = null; this.wrapUp = false; this._emergency = null;
       this.persist();
       this.emitContext();
       this.emit('done', { turnId: this.turnId, stop, usage, startedAt, endedAt });

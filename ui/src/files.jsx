@@ -12,7 +12,7 @@ export function WorkspaceFiles() {
   const [selected, setSelected] = useState(null), [content, setContent] = useState(''), [focus, setFocus] = useState('');
   const epoch = useRef(0), reading = useRef(0), tree = useRef(null), inFlight = useRef(new Set());
   const ws = session?.workspace;
-  const identity = `${sid}:${ws?.id}:${ws?.revision}:${ws?.projectRevision}:${ws?.root}:${rootId}`;
+  const identity = `${sid}:${ws?.id}:${ws?.revision}:${ws?.projectRevision}:${ws?.root}:${ws?.availability}:${rootId}`;
   useEffect(() => setRootId('primary'), [sid, ws?.id, ws?.projectRevision]);
   async function load(path = '.', generation = epoch.current) {
     const key = generation + ':' + path;
@@ -29,7 +29,7 @@ export function WorkspaceFiles() {
     const generation = ++epoch.current;
     setBranches({}); setGit(null);
     if (reset) { reading.current++; setExpanded(new Set()); setSelected(null); setContent(''); setFocus(''); }
-    if (ws?.kind === 'unselected') return;
+    if (!ws || ws.availability !== 'ready') return;
     load('.', generation);
     if (!reset) for (const path of expanded) load(path, generation);
     if (rootId === 'primary') api.invoke('git-status', { sessionId: sid }).then(value => { if (generation === epoch.current) setGit(value); }).catch(e => { if (generation === epoch.current) setGit({ available: false, error: e.message }); });
@@ -46,6 +46,7 @@ export function WorkspaceFiles() {
     if (!expanded.has(item.path) && !branches[item.path]) load(item.path);
   }
   async function open(path, diff = false) {
+    if (!diff) { w.tabs.openDocument(path, { root: rootId }); return; }
     const request = ++reading.current;
     setSelected({ path, diff }); setContent('加载中…');
     try { const value = await api.invoke(diff ? 'git-diff' : 'read-file', { sessionId: sid, root: rootId === 'primary' ? undefined : rootId, ...(diff ? { path } : { file: 'workspace/' + path }) }); if (request === reading.current) setContent(typeof value === 'string' ? value : value.text); }
@@ -65,11 +66,11 @@ export function WorkspaceFiles() {
     e.preventDefault();
   }
   const root = branches['.'];
-  if (ws?.kind === 'unselected') return <EmptyState icon="folder" title="尚未选择工作目录" description="选择项目或文件夹后即可浏览代码。"><Button size="2" onClick={() => w.setWorkspacePrompt(true)}>选择工作目录</Button></EmptyState>;
+  if (!ws || ws.availability !== 'ready') return <EmptyState icon="folder" title="项目目录不可用" description="重新连接项目目录后可继续浏览文件。"><Button size="2" onClick={() => w.setProjectEditor({ ...w.projects.find(p => p.id === w.session?.projectId), relink: true })}>重新选择目录</Button></EmptyState>;
   return <Tabs.Root value={fileView} onValueChange={value => { reading.current++; setSelected(null); setFileView(value); if (value === 'git') setRootId('primary'); }} className="workspace-files">
     <div className="bar"><Tabs.List size="1" aria-label="工作区文件视图" className="file-tabs"><Tabs.Trigger value="local">本地文件</Tabs.Trigger><Tabs.Trigger value="git">Git 改动</Tabs.Trigger></Tabs.List><ActionIcon icon="reload" variant="soft" color="gray" onClick={() => refresh()} title="刷新文件目录" /></div>
     <Tabs.Content value="local" className="files-content">
-    <div className="workspace-tree-root" title={ws?.root}><Icon n="folder" size={14} /><Text size="1" className="ellipsis">{ws?.label || '会话工作区'}</Text></div>
+    <div className="workspace-tree-root" title={ws?.root}><Icon n="folder" size={14} /><Text size="1" className="ellipsis" style={{ flex: 1 }}>{ws?.label || '会话工作区'}</Text><ActionIcon icon="copy" size="1" title="复制工作目录路径" onClick={() => navigator.clipboard.writeText(rootId === 'primary' ? ws.root : ws.roots.find(r => r.id === rootId)?.root || ws.root).then(() => toast('工作目录已复制', 'ok')).catch(e => toast(e.message, 'err'))} /></div>
     {ws?.roots?.length > 1 && <div className="project-file-root"><Dropdown label="文件目录" value={rootId} options={ws.roots.map(r => ({ value: r.primary ? 'primary' : r.id, label: r.label + (r.primary ? ' · 主目录' : ' · 只读') }))} onChange={setRootId} /></div>}
     <div className="file-list workspace-tree" role="tree" aria-label="工作区目录" ref={tree}>
       {root?.loading && !root.entries && <Text as="p" size="1" color="gray">正在读取目录…</Text>}

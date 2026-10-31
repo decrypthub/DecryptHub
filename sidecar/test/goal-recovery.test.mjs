@@ -6,7 +6,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { getEventListeners } from 'node:events';
 import { Agent } from '../agent.mjs';
-import { SessionManager } from '../sessions.mjs';
+import { TestSessionManager as SessionManager } from './project-fixture.mjs';
 import { createGoal, restoreGoal, updateGoal, finishGoalRound, GoalDriver } from '../goals.mjs';
 import { withModelRetries } from '../model-retry.mjs';
 import { post } from '../providers/http.mjs';
@@ -24,7 +24,7 @@ function root(t) { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dh-goal-re
 function session(t) {
   const dir = root(t), events = [];
   const mgr = new SessionManager({ userDataDir: dir, getSettings: () => ({ openai: { apiKey: 'fixture', model: 'fixture', contextWindow: 1000000 } }), broadcast: (name, value, sid) => events.push({ name, value, sid }), chromeMod: {}, titleGenerator: async () => '' });
-  const s = mgr.get('main'); s.setWorkspace(null); s.goalDriver.delayMs = 10;
+  const s = mgr.get('main'); s.goalDriver.delayMs = 10;
   t.after(() => mgr.closeAll()); return { s, mgr, events, dir };
 }
 async function server(t, handler) {

@@ -1,9 +1,9 @@
 // 数据管道：settings / 会话 / 事件流 / 浏览器嵌框 / 动作。
 // 界面组件只从这里取状态和动作，不自己发 RPC。
-import React, { createContext, useCallback, useContext, useEffect, useReducer, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
 import { toast as notify } from 'sonner';
 import { blankSession, sessionReducer, mod, isApi } from './state.js';
-import { askConfirm, askQuestion } from './kit.jsx';
+import { askConfirm, askQuestion, DocumentLinks } from './kit.jsx';
 import { onConnState, native } from './transport.js';
 import { normalizeTargetUrl } from '../../sidecar/url.mjs';
 import { scheduleStartupCheck } from './updater.js';
@@ -11,7 +11,9 @@ import { historyEvents } from './conversation.js';
 import { rememberPreview } from './attachments.jsx';
 import { parseCommand, extensionRequest } from './commands.js';
 import { BrowserSurface } from './browser-surface.js';
+import { BrowserFrames } from './browser-frames.js';
 import { useSessionView } from './use-session-view.jsx';
+import { useWorkspaceTabs } from './use-workspace-tabs.jsx';
 
 const api = window.api;
 const Ctx = createContext(null);
@@ -34,6 +36,7 @@ export function Workbench({ children }) {
   const [projectEditor, setProjectEditor] = useState(null), [moveSession, setMoveSession] = useState(null), [workspacePrompt, setWorkspacePrompt] = useState(false);
   const [commandForm, setCommandForm] = useState(null), [extensionBrowser, setExtensionBrowser] = useState(null), [commandFeedback, setCommandFeedback] = useState({});
   const [automationDraft, setAutomationDraft] = useState(false);
+  const [editTarget, setEditTarget] = useState(null); // { sid, turnId } 编辑已发送消息
   useEffect(() => api.on('projects', setProjects), []);
 
   const sid = sessions.focused;
@@ -46,8 +49,32 @@ export function Workbench({ children }) {
   const sidRef = useRef(sid); sidRef.current = sid;
   const input = drafts[sid] || '';
   const setInput = useCallback(value => setDrafts(d => ({ ...d, [sidRef.current]: value })), []);
+  const startEdit = useCallback(turn => {
+    if (!turn?.user?.content) return;
+    setEditTarget({ sid: sidRef.current, turnId: turn.id });
+    setDrafts(d => ({ ...d, [sidRef.current]: turn.user.content }));
+    setTimeout(() => inputRef.current?.focus(), 30);
+  }, []);
+  const cancelEdit = useCallback(() => { setEditTarget(null); setDrafts(d => ({ ...d, [sidRef.current]: '' })); }, []);
+  const rate = useCallback(async (id, value) => {
+    const target = sidRef.current;
+    const current = S[target]?.ratings?.[id];
+    const next = current === value ? '' : value;
+    dispatch({ t: 'patch', sid: target, patch: { ratings: { ...(S[target]?.ratings || {}), [id]: next } } });
+    try { const r = await api.invoke('agent-rate', { sessionId: target, id, rating: next }); if (r?.ratings) dispatch({ t: 'patch', sid: target, patch: { ratings: r.ratings } }); }
+    catch (e) { toast(e.message, 'err'); }
+  }, []);
   const viewRef = useRef();       // 浏览器画面容器
+  const [viewElement, setViewElement] = useState(null);
+  const bindViewport = useCallback(element => { viewRef.current = element; setViewElement(element); }, []);
   const canvasRef = useRef();     // 画面
+  const frames = useRef(null);
+  if (!frames.current) frames.current = new BrowserFrames();
+  const activePage = cur.status.pages.find(page => page.active);
+  const frameTarget = cur.status.running && activePage ? JSON.stringify([sid, cur.status.chromePid, activePage.id, activePage.url]) : null;
+  const frameTargetRef = useRef(frameTarget); frameTargetRef.current = frameTarget;
+  useLayoutEffect(() => { frames.current.select(frameTarget); }, [frameTarget]);
+  const bindCanvas = useCallback(element => { canvasRef.current = element; frames.current.select(frameTarget); frames.current.bind(element); }, [frameTarget]);
   const urlRef = useRef();        // 地址栏
   const inputRef = useRef();      // 输入框
   const chatRef = useRef();       // 消息滚动区
@@ -58,7 +85,6 @@ export function Workbench({ children }) {
   const seen = useRef(new Set());
   const settingsRef = useRef(settings); settingsRef.current = settings;
   const prevRun = useRef({});
-  const frameSeq = useRef(0);
   const embedTry = useRef({});
   const surface = useRef(null);
   if (!surface.current) surface.current = new BrowserSurface({ show: native.embedShow, hide: native.embedHide, release: native.embedRelease });
@@ -73,6 +99,11 @@ export function Workbench({ children }) {
     if (k === side && sideOpen) { setSideOpen(false); return; }
     setSide(k); setSideOpen(true);
   }, [side, sideOpen]);
+  const tabs = useWorkspaceTabs({ presentation, sid, cur, session, api, toast, setWorkspacePrompt, setView });
+  function openContentLink(href, options) {
+    if (/^https?:\/\//i.test(href || '')) tabs.openWebLink(href);
+    else tabs.openDocument(href, { ...options, link: true });
+  }
 
   const addAtt = useCallback((list) => {
     const s = sidRef.current;
@@ -148,9 +179,8 @@ export function Workbench({ children }) {
       const restoredSessions = await api.invoke('session-list'); setSessions(restoredSessions);
       setProjects(await api.invoke('projects-list'));
       const doc = await api.invoke('doctor');
-      const activeKey = s.providers.find(p => p.id === s.activeProviderId)?.hasKey;
-      const keyMissing = !(activeKey || (s.provider === 'anthropic' ? s.anthropic.hasKey : s.openai.hasKey));
-      if (keyMissing && !window.__JSRA_SKIP_ONBOARD) setFirstRun(true);
+      const profileDone = !!(s.onboarding?.completedAt || s.onboarding?.skippedAt);
+      if (!profileDone && !window.__JSRA_SKIP_ONBOARD) setFirstRun(true);
       const shot = window.__JSRA_SHOT;
       if (['settings', 'automations'].includes(shot)) setView(shot);
       else if (['browser', 'evidence', 'code'].includes(shot)) { setSide(shot, restoredSessions.focused); setSideOpen(true, restoredSessions.focused); }
@@ -159,16 +189,7 @@ export function Workbench({ children }) {
 
   // ---- 画面帧 ----
   const drawFrame = useCallback(f => {
-    const cv = canvasRef.current; if (!cv) return;
-    const seq = ++frameSeq.current;
-    const img = new Image();
-    img.onload = () => {
-      if (seq !== frameSeq.current) return;
-      if (cv.width !== img.width) cv.width = img.width;
-      if (cv.height !== img.height) cv.height = img.height;
-      try { const g = cv.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0); } catch {}
-    };
-    img.src = 'data:image/' + (f.fmt === 'png' ? 'png' : 'jpeg') + ';base64,' + f.data;
+    frames.current.receive(frameTargetRef.current, f);
   }, []);
 
   // ---- 事件订阅 ----
@@ -178,6 +199,7 @@ export function Workbench({ children }) {
       on('sessions', v => setSessions(v)),
       on('goal', (v, s) => dispatch({ t: 'patch', sid: s, patch: { goal: v } })),
       on('subagents', (v, s) => dispatch({ t: 'patch', sid: s, patch: { subagents: v } })),
+      on('subagent-finished', (v, s) => { if (s === sidRef.current) toast(`子代理${v.status === 'completed' ? '已完成' : '已结束'}：${v.title}`, v.status === 'completed' ? 'ok' : 'warn', 5000); }),
       on('agent-debugger-state', (v, s) => dispatch({ t: 'patch', sid: s, patch: { debuggerPaused: !!v.paused } })),
       on('settings-changed', v => setSettings(v)),
       on('browser-status', (v, s) => dispatch({ t: 'status', sid: s, v })),
@@ -232,7 +254,7 @@ export function Workbench({ children }) {
   // 会话列表变化 → 同步运行态（UI 比浏览器晚启动时也要对）
   useEffect(() => {
     for (const s of sessions.sessions) {
-      const patch = { agentRunning: s.agentRunning, mode: s.mode || 'standard', review: s.review || 'manual', run: s.run, queued: s.queued || 0 };
+      const patch = { agentRunning: s.agentRunning, mode: s.mode || 'standard', review: s.review || 'manual', run: s.run, queued: s.queued || 0, queuedItems: s.queuedItems || [] };
       if (s.running) patch.status = { ...blankSession().status, ...(S[s.id]?.status || {}), running: true, embed: !!s.embed, chromePid: s.chromePid || null };
       dispatch({ t: 'patch', sid: s.id, patch });
     }
@@ -248,7 +270,7 @@ export function Workbench({ children }) {
       dispatch({ t: 'patch', sid: s.id, patch });
       api.invoke('session-snapshot', { sessionId: s.id }).then(v => {
         const events = historyEvents(v.events, v.partial, v.partialItem, v.partialReasoning);
-        dispatch({ t: 'patch', sid: s.id, patch: { events, ctx: v.context, mode: v.state.mode, review: v.state.review || 'manual', todos: v.state.todos, approvals: v.state.approvals || [], question: v.state.questions?.[0] || null, run: v.state.run, retry: v.state.modelRetry || null, debuggerPaused: !!v.state.debuggerPaused, goal: v.state.goal, subagents: v.state.subagents || [] } });
+        dispatch({ t: 'patch', sid: s.id, patch: { events, ctx: v.context, mode: v.state.mode, review: v.state.review || 'manual', todos: v.state.todos, approvals: v.state.approvals || [], question: v.state.questions?.[0] || null, run: v.state.run, ratings: v.state.ratings || {}, retry: v.state.modelRetry || null, debuggerPaused: !!v.state.debuggerPaused, goal: v.state.goal, subagents: v.state.subagents || [] } });
       }).catch(() => seen.current.delete(s.id));
       api.invoke('get-requests', { sessionId: s.id }).then(r => r?.list?.length && dispatch({ t: 'requests', sid: s.id, v: r.list })).catch(() => {});
     }
@@ -271,13 +293,13 @@ export function Workbench({ children }) {
     };
     const ro = new ResizeObserver(push); ro.observe(el); push();
     return () => { ro.disconnect(); clearTimeout(t); };
-  }, [sid, runningNow, view, side, sideOpen]);
+  }, [sid, runningNow, view, side, sideOpen, tabs.activeTab?.id, tabs.browserReady, viewElement]);
 
   // 原生嵌入：把面板矩形报告给 Rust，Chrome 子窗口跟随
   const embedOn = !!(cur.status.running && cur.status.embed && cur.status.chromePid);
   const [embedCovered, setEmbedCovered] = useState(false);
   useEffect(() => {
-    if (!embedOn || view !== 'chat' || side !== 'browser' || !sideOpen) { surface.current.hide().catch(() => {}); return; }
+    if (!embedOn || !tabs.browserReady || view !== 'chat' || side !== 'browser' || !sideOpen) { surface.current.hide().catch(() => {}); return; }
     const el = viewRef.current; if (!el) return;
     const mySid = sid, pid = cur.status.chromePid;
     let dead = false, t = null, inset = null, insetAt = 0, lastKey = '', force = true;
@@ -316,7 +338,7 @@ export function Workbench({ children }) {
     const iv = setInterval(() => { force = true; kick(); }, 1500);
     kick();
     return () => { dead = true; if (activityKick.current === kick) activityKick.current = null; clearTimeout(t); clearInterval(iv); cancelAnimationFrame(raf); ro.disconnect(); mo.disconnect(); window.removeEventListener('resize', kick); document.removeEventListener('visibilitychange', kick); surface.current.hide().catch(() => {}); };
-  }, [embedOn, sid, cur.status.chromePid, toast, view, side, sideOpen]);
+  }, [embedOn, sid, cur.status.chromePid, toast, view, side, sideOpen, tabs.activeTab?.id, tabs.browserReady, viewElement]);
 
   // 会话浏览器关闭 → 释放宿主窗口
   useEffect(() => {
@@ -334,7 +356,6 @@ export function Workbench({ children }) {
     setLaunching(l => ({ ...l, [target]: true }));
     try {
       const r = await api.invoke('browser-launch', { sessionId: target });
-      if (r.code === 'workspace-required' && sidRef.current === target) setWorkspacePrompt(true);
       if (!r.ok) { dispatch({ t: 'patch', sid: target, patch: { browserError: r.error } }); toast(r.error, 'err', 6000); return false; }
       dispatch({ t: 'patch', sid: target, patch: { toolCount: r.toolCount } });
       return true;
@@ -358,10 +379,12 @@ export function Workbench({ children }) {
     } finally { dispatch({ t: 'patch', sid: target, patch: { navigating: false } }); }
   }
 
-  async function newSession() {
+  async function newSession(projectId) {
     const initialView = { side, sideOpen, manuallyClosed: false };
     try {
-      const s = await api.invoke('session-create', projectFilter ? { projectId: projectFilter } : {});
+      const targetProject = typeof projectId === 'string' ? projectId : [projectFilter, session?.projectId].find(id => projects.some(p => p.id === id));
+      if (!targetProject) { setWorkspacePrompt('create'); return; }
+      const s = await api.invoke('session-create', { projectId: targetProject });
       presentation.update(s.id, initialView);
       await api.invoke('session-focus', { sessionId: s.id });
       setView('chat');
@@ -404,11 +427,24 @@ export function Workbench({ children }) {
   }
 
   async function send(auto, override) {
+    if (!sid) { setProjectEditor({}); return; }
     const target = sid, sentDraft = input;
     if (sending[target]) return;
     let text = auto ? '' : String(typeof override === 'string' ? override : input).trim();
     if (!auto && !text && !(atts[sid] || []).length) return;
     if (uploads[sid]) { toast('附件仍在添加，请稍候', 'info'); return; }
+    if (!auto && editTarget && editTarget.sid === target) {
+      if (!text) return;
+      if ((atts[sid] || []).length) { toast('编辑重发暂不支持附件，请先移除附件', 'warn'); return; }
+      setSending(m => ({ ...m, [target]: true }));
+      try {
+        const r = await api.invoke('agent-turn-edit', { sessionId: target, turnId: editTarget.turnId, text });
+        if (!r?.ok) { toast(r?.error || '编辑重发失败', 'warn'); return; }
+        setEditTarget(null); setInput(''); if (inputRef.current) inputRef.current.style.height = '';
+        return true;
+      } catch (e) { toast('编辑重发失败：' + e.message, 'err'); return; }
+      finally { setSending(m => ({ ...m, [target]: false })); }
+    }
     const command = !auto && parseCommand(text);
     const feedback = (state, message) => setCommandFeedback(m => ({ ...m, [target]: { name: command?.name || '', state, text: message } }));
     if (command) {
@@ -421,15 +457,14 @@ export function Workbench({ children }) {
       if (['goal', 'skill', 'memory', 'agent'].includes(command.name) && !command.argument) { setCommandForm({ name: command.name, sessionId: target }); return; }
       const request = extensionRequest(command.name, command.argument);
       if (request) {
-        if (session?.workspace?.kind === 'unselected') { setWorkspacePrompt(true); return; }
+        if (session?.workspace?.availability !== 'ready') { feedback('error', '项目目录不可用，请重新选择目录。'); return; }
         text = request;
       } else {
       feedback('running', '正在执行 /' + command.name + '…');
-      if (command.name === 'status') { feedback('success', ['会话 ID：' + target, session?.workspace?.kind === 'unselected' ? '尚未选择工作目录' : session?.workspace?.root, '权限：' + cur.mode, cur.goal ? '目标：' + cur.goal.objective : ''].filter(Boolean).join('\n')); }
+      if (command.name === 'status') { feedback('success', ['会话 ID：' + target, session?.workspace?.root, '权限：' + cur.mode, cur.goal ? '目标：' + cur.goal.objective : ''].filter(Boolean).join('\n')); }
       else {
         if (command.name === 'compact' && cur.agentRunning) { feedback('error', '请先停止当前任务，再压缩上下文。'); return; }
-        if (command.name === 'agent' && session?.workspace?.kind === 'unselected') { setWorkspacePrompt(true); feedback('error', '请选择工作目录后再启动研究任务。'); return; }
-        if (command.name === 'goal' && !['pause', 'resume', 'clear'].includes(command.argument) && session?.workspace?.kind === 'unselected') { setWorkspacePrompt(true); feedback('error', '请选择工作目录后再启动目标。'); return; }
+        if (['agent', 'goal'].includes(command.name) && !['pause', 'clear'].includes(command.argument) && session?.workspace?.availability !== 'ready') { feedback('error', '项目目录不可用，请重新选择目录。'); return; }
         if (['goal', 'agent'].includes(command.name) && !command.argument) { if (command.name === 'goal' && cur.goal) toast(cur.goal.summary || cur.goal.objective, 'info'); else toast(`在 /${command.name} 后填写${command.name === 'goal' ? '目标' : '研究任务'}。`, 'info'); return; }
         setSending(m => ({ ...m, [target]: true }));
         try {
@@ -437,11 +472,12 @@ export function Workbench({ children }) {
           if (command.name === 'goal') r = await api.invoke(['pause', 'resume', 'clear'].includes(command.argument) ? 'goal-action' : 'goal-start', { sessionId: target, action: command.argument, objective: command.argument, attachments: commandAttachments.map(({ key, ...a }) => a) });
           if (command.name === 'compact') r = await api.invoke('agent-compress', { sessionId: target, instructions: command.argument });
           if (command.name === 'agent') { await api.invoke('subagent-start', { sessionId: target, task: command.argument }); r = { ok: true }; }
-          if (command.name === 'agents') { dispatch({ t: 'patch', sid: target, patch: { subagents: (await api.invoke('agent-state', { sessionId: target })).subagents || [] } }); toast('研究任务会显示在输入框上方，可展开查看状态和结论。', 'info'); }
+          if (command.name === 'agents') { dispatch({ t: 'patch', sid: target, patch: { subagents: (await api.invoke('agent-state', { sessionId: target })).subagents || [] } }); toast('从对话顶部的子代理入口，或所属轮次的执行过程中查看状态和结论。', 'info'); }
           if (command.name === 'stop') await api.invoke('agent-interrupt', { sessionId: target });
           if (command.name === 'new') await newSession();
           if (r?.ok === false) { feedback('error', r.error || '命令未执行'); return; }
-          feedback('success', command.name === 'compact' ? `上下文已压缩：${r.before} → ${r.after} tokens` : command.name === 'goal' ? '目标操作已完成，进展显示在输入框上方。' : '/' + command.name + ' 已执行');
+          if (command.name === 'goal') setCommandFeedback(m => ({ ...m, [target]: null }));
+          else feedback('success', command.name === 'compact' ? `上下文已压缩：${r.before} → ${r.after} tokens` : '/' + command.name + ' 已执行');
           if (command.name === 'goal' && !['pause', 'resume', 'clear'].includes(command.argument)) { const consumed = new Set(commandAttachments.map(a => a.key)); setAtts(m => ({ ...m, [target]: (m[target] || []).filter(a => !consumed.has(a.key)) })); }
         } catch (e) { feedback('error', e.message || '命令执行失败'); return; }
         finally { setSending(m => ({ ...m, [target]: false })); }
@@ -449,15 +485,16 @@ export function Workbench({ children }) {
       setDrafts(m => m[target] === sentDraft ? { ...m, [target]: '' } : m); if (inputRef.current) inputRef.current.style.height = ''; return true;
       }
     }
-    if (session?.workspace?.kind === 'unselected') { setWorkspacePrompt(true); return; }
+    if (session?.workspace?.availability !== 'ready') { toast('项目目录不可用，请重新选择目录。', 'warn'); return; }
     const list = auto ? [] : (atts[sid] || []);
     let r;
     setSending(m => ({ ...m, [target]: true }));
-    try { r = await api.invoke('agent-send', { sessionId: target, text, auto, enqueue: cur.agentRunning, attachments: list.map(({ key, ...a }) => a) }); }
+    // 是否入队交给 sidecar 判断：本地 agentRunning 可能比实际状态晚一拍。
+    try { r = await api.invoke('agent-send', { sessionId: target, text, auto, enqueue: true, attachments: list.map(({ key, ...a }) => a) }); }
     catch (e) { toast('发送失败：' + e.message, 'err'); return; }
     finally { setSending(m => ({ ...m, [target]: false })); }
     if (!r?.ok) {
-      if (r?.code === 'workspace-required') { if (sidRef.current === target) setWorkspacePrompt(true); } else toast(r?.error || '发送失败', 'warn');
+      toast(r?.error || '发送失败', 'warn');
       if (sidRef.current === target && /API Key/.test(r?.error || '')) setView('settings');
       return;
     }
@@ -528,8 +565,9 @@ export function Workbench({ children }) {
   // ---- 快捷键 ----
   useEffect(() => {
     const h = e => {
+      if (e.target.closest?.('.terminal-screen') && !e.altKey) return;
       if (mod(e) && e.key === 'Enter') { e.preventDefault(); send(false); }
-      else if (mod(e) && e.key.toLowerCase() === 'l') { e.preventDefault(); setView('chat'); setSide('browser'); setSideOpen(true); setTimeout(() => { urlRef.current?.focus(); urlRef.current?.select(); }, 60); }
+      else if (mod(e) && e.key.toLowerCase() === 'l') { e.preventDefault(); if (!sid) { setWorkspacePrompt('create'); return; } setView('chat'); setSide('browser'); setSideOpen(true); setTimeout(() => { urlRef.current?.focus(); urlRef.current?.select(); }, 60); }
       else if (mod(e) && e.key.toLowerCase() === 't') { e.preventDefault(); newSession(); }
       else if (mod(e) && e.key === ',') { e.preventDefault(); setView(v => v === 'settings' ? 'chat' : 'settings'); }
       else if (mod(e) && /^[1-4]$/.test(e.key) && e.altKey) {
@@ -551,17 +589,18 @@ export function Workbench({ children }) {
     commandFeedback: commandFeedback[sid], clearCommandFeedback: () => setCommandFeedback(m => ({ ...m, [sid]: null })),
     settings, saveSettings, setSettings, firstRun, setFirstRun,
     sessions, sid, session, cur, dispatch, focusSession,
-    view, setView, side, setSide, sideOpen, setSideOpen, openSide, panelLayout: presentation.layout, setPanelLayout: presentation.setPanelLayout,
+    view, setView, side, setSide, sideOpen, setSideOpen, openSide, panelLayout: presentation.layout, setPanelLayout: presentation.setPanelLayout, tabs,
     launching, launch, go, newSession, closeSession, pinSession, cleanRetry,
-    input, setInput, atts: atts[sid] || [], addAtt, rmAtt, addFiles, uploading: !!uploads[sid], sending: !!sending[sid], enableImages,
+    input, setInput, editTarget: editTarget?.sid === sid ? editTarget : null, startEdit, cancelEdit, rate,
+    atts: atts[sid] || [], addAtt, rmAtt, addFiles, uploading: !!uploads[sid], sending: !!sending[sid], enableImages,
     send, sendInput, compactNow, pickModel, inv,
     setTheme,
-    refs: { viewRef, canvasRef, urlRef, inputRef, chatRef },
+    refs: { viewRef: bindViewport, canvasRef: bindCanvas, urlRef, inputRef, chatRef },
     embedOn, embedCovered,
     isApi, fmt: { hostOf: undefined },
   };
 
   return <Ctx.Provider value={value}>
-    {children}
+    <DocumentLinks.Provider value={openContentLink}>{children}</DocumentLinks.Provider>
   </Ctx.Provider>;
 }

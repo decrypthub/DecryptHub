@@ -6,6 +6,13 @@ const isNative = () => !!(window.__JSRA_NATIVE || window.__TAURI_INTERNALS__ || 
 // ---------- 原生命令 ----------
 export const native = {
   isNative,
+  async accountStatus(refresh = false) { return isNative() ? tauriInvoke('account_status', { refresh }) : { available: false, phase: 'signed-out', profile: null, error: null }; },
+  async accountAvatar() { return isNative() ? tauriInvoke('account_avatar') : null; },
+  async accountLogin() { if (!isNative()) throw new Error('请在桌面应用中登录账号'); return tauriInvoke('account_login'); },
+  async accountCancel() { return tauriInvoke('account_cancel'); },
+  async accountLogout() { return tauriInvoke('account_logout'); },
+  async accountReopenLogin() { return tauriInvoke('account_reopen_login'); },
+  async accountOpenPage(page = 'home') { return tauriInvoke('account_open_page', { page }); },
   async appInfo() {
     if (isNative()) { try { return await tauriInvoke('app_info'); } catch {} }
     return { name: 'DecryptHub', version: '1.4.0 (web)', os: 'web', arch: '-', keyringBackend: '进程内存（开发预览，不持久保存）' };
@@ -118,7 +125,7 @@ window.api = {
   invoke(channel, ...args) {
     const id = ++seq;
     const msg = JSON.stringify({ type: 'invoke', id, channel, args: args.length <= 1 ? args[0] : args });
-    return new Promise((res, rej) => { pending.set(id, { res, rej }); sendRaw(msg); setTimeout(() => { if (pending.has(id)) { pending.delete(id); rej(new Error('请求超时，逻辑进程可能繁忙或已退出')); } }, /^(download-chrome|download-kernel)$/.test(channel) ? 900000 : 130000); });
+    return new Promise((res, rej) => { pending.set(id, { res, rej }); sendRaw(msg); setTimeout(() => { if (pending.has(id)) { pending.delete(id); rej(new Error('请求超时，逻辑进程可能繁忙或已退出')); } }, channel === 'download-kernel' ? 900000 : 130000); });
   },
   sendInput(ev) { sendRaw(JSON.stringify({ type: 'input', payload: ev })); },
   on(channel, cb) { if (!listeners.has(channel)) listeners.set(channel, new Set()); listeners.get(channel).add(cb); return () => listeners.get(channel)?.delete(cb); },

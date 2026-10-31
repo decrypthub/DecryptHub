@@ -17,6 +17,8 @@ hmac = "0.12"
 sha2 = "0.10"
 aes-gcm = "0.10"
 getrandom = "0.3"
+base64 = "0.23"
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls"] }
 
 raw-window-handle = "0.6"
 serde = { version = "1", features = ["derive"] }

@@ -9,6 +9,9 @@ import os from 'node:os';
 import WebSocket from 'ws';
 import { DEFAULT_TODOS } from '../sidecar/todos.mjs';
 import { folderProof } from '../sidecar/grants.mjs';
+import { checkConversationNavigation } from './check-conversation-ui.mjs';
+import { checkSidebarBrowser } from './check-sidebar-ui.mjs';
+import { checkAccountMenu } from './check-account-ui.mjs';
 
 const ROOT = process.cwd();
 const DIST = path.join(ROOT, 'ui-dist');
@@ -17,6 +20,10 @@ const PORT = 5311, WS_PORT = 5312;
 const CHROME = process.env.CHROME_PATH || [
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+  path.join(os.homedir(), 'Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),
+  path.join(os.homedir(), 'Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'),
   '/usr/bin/google-chrome', '/usr/bin/chromium',
 ].find(p => fs.existsSync(p));
 
@@ -25,6 +32,25 @@ if (!CHROME) { console.error('找不到 Chrome/Edge，设置 CHROME_PATH'); proc
 
 const fails = [];
 const ok = (cond, msg) => { if (!cond) fails.push(msg); };
+async function checkProcessRow(page, label) {
+  const issues = await page.locator('.turn-process > summary:not([hidden])').evaluateAll(rows => rows.flatMap(row => {
+    const bounds = row.getBoundingClientRect(), issues = [];
+    let right = bounds.left;
+    for (const item of row.children) {
+      const box = item.getBoundingClientRect();
+      if (box.left < right - 1 || box.right > bounds.right + 1) issues.push('状态内容重叠或超出折叠按钮');
+      right = box.right;
+      if (item.matches('.turn-process-label, .turn-process-elapsed, .tool-count')) {
+        const range = document.createRange(); range.selectNodeContents(item);
+        const lines = new Set([...range.getClientRects()].filter(r => r.width > 0).map(r => Math.round(r.top)));
+        if (lines.size > 1) issues.push('状态文字被拆成多行：' + item.textContent);
+        if (item.matches('.turn-process-label') && item.textContent.length <= 22 && item.scrollWidth > item.clientWidth + 1) issues.push('状态或耗时被过早省略：' + item.textContent);
+      }
+    }
+    return issues;
+  }));
+  for (const issue of issues) ok(false, label + ' ' + issue);
+}
 const rpc = (channel, args = {}) => new Promise((resolve, reject) => {
   const ws = new WebSocket('ws://127.0.0.1:' + WS_PORT + '/?token=ui-check');
   const timer = setTimeout(() => { ws.terminate(); reject(Error('UI RPC timeout: ' + channel)); }, 30000);
@@ -53,7 +79,8 @@ async function checkWindowDragging(page, selectors, label) {
   } finally { await page.addScriptTag({ url: bridge + '?restore=1' }); }
 }
 
-const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'ui-check-'));
+const DATA = process.env.JSRA_UI_DATA_DIR ? path.resolve(process.env.JSRA_UI_DATA_DIR) : fs.mkdtempSync(path.join(os.tmpdir(), 'ui-check-'));
+fs.mkdirSync(DATA, { recursive: true });
 const MODEL_BASE = 'http://127.0.0.1:' + PORT + '/__ui-model/v1', modelRequests = [];
 const pendingReasoning = new Map();
 const modelRetries = new Map();
@@ -73,12 +100,32 @@ fs.writeFileSync(path.join(DATA, 'WebDecryptHub', 'settings.json'), JSON.stringi
   ],
 }));
 const sidecar = spawn(process.execPath, [path.join(ROOT, 'sidecar', 'index.mjs')], {
-  cwd: ROOT, env: { ...process.env, DECRYPTHUB_DATA_DIR: path.join(DATA, 'WebDecryptHub'), JSRA_WS_PORT: String(WS_PORT), JSRA_WS_TOKEN: 'ui-check', JSRA_TEST_FIXTURES: '1', JSRA_DEV: '1' }, stdio: ['ignore', 'pipe', 'ignore'],
+  cwd: ROOT, env: { ...process.env, DECRYPTHUB_DATA_DIR: path.join(DATA, 'WebDecryptHub'), JSRA_WS_PORT: String(WS_PORT), JSRA_WS_TOKEN: 'ui-check', JSRA_TEST_FIXTURES: '1', JSRA_DEV: '1' }, stdio: ['ignore', 'pipe', 'pipe'],
 });
+sidecar.stderr?.on('data', d => process.stderr.write('[sidecar] ' + String(d)));
 await new Promise((res, rej) => { const t = setTimeout(() => rej(new Error('sidecar 未就绪')), 20000); sidecar.stdout.on('data', d => { if (/JSRA_PORT=/.test(String(d))) { clearTimeout(t); res(); } }); }).catch(e => { console.error(e.message); process.exit(2); });
+// UI 回归不需要首次引导：直接写入已完成偏好，避免弹层和布局检查抢时序。
+await rpc('save-settings', { onboarding: { version: 1, completedAt: new Date().toISOString() } }).catch(error => console.error('save onboarding:', error.message));
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png' };
 const srv = http.createServer((req, res) => {
+  if (req.url.startsWith('/__ui-folder-grant')) {
+    const query = new URL(req.url, 'http://x').searchParams, directory = path.join(DATA, 'ui-picker-' + (query.get('scheme') === 'light' ? 'light' : 'dark'));
+    fs.mkdirSync(directory, { recursive: true });
+    const grant = { sessionId: query.get('scope'), path: directory, expiresAt: Date.now() + 60000 }; grant.signature = folderProof('ui-check', grant);
+    res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(grant)); return;
+  }
+  if (req.url.startsWith('/__ui-folder-bridge')) {
+    res.setHeader('Content-Type', 'application/javascript'); res.setHeader('Cache-Control', 'no-store');
+    const query = new URL(req.url, 'http://x').searchParams;
+    if (query.has('restore')) { res.end('if(window.__uiFolderBridgeBackup === undefined) delete window.__TAURI_INTERNALS__; else window.__TAURI_INTERNALS__=window.__uiFolderBridgeBackup; delete window.__uiFolderBridgeBackup;'); return; }
+    const scheme = query.get('scheme') === 'light' ? 'light' : 'dark';
+    res.end('window.__uiFolderBridgeBackup=window.__TAURI_INTERNALS__; window.__TAURI_INTERNALS__={metadata:{currentWindow:{label:"main"}},invoke:async function(command,args){if(command==="pick_work_folder")return fetch("/__ui-folder-grant?scheme=' + scheme + '&scope="+encodeURIComponent(args.sessionId)).then(r=>r.json());throw Error("Unexpected native command: "+command);}};'); return;
+  }
+  if (req.url.startsWith('/__ui-native-titlebar')) {
+    res.setHeader('Content-Type', 'application/javascript');
+    res.end('window.__JSRA_NATIVE_TITLEBAR = ' + (new URL(req.url, 'http://x').searchParams.get('enabled') === '1') + ';'); return;
+  }
   if (req.url.startsWith('/__ui-window-bridge')) {
     res.setHeader('Content-Type', 'application/javascript'); res.setHeader('Cache-Control', 'no-store');
     res.end(req.url.includes('restore=1') ? 'if(window.__uiSavedBridge === undefined) delete window.__TAURI_INTERNALS__; else window.__TAURI_INTERNALS__=window.__uiSavedBridge; delete window.__uiSavedBridge; document.documentElement.removeAttribute("data-ui-window-calls");' : 'window.__uiSavedBridge=window.__TAURI_INTERNALS__; document.documentElement.setAttribute("data-ui-window-calls","[]"); window.__TAURI_INTERNALS__={metadata:{currentWindow:{label:"main"}},invoke:async function(command){const root=document.documentElement;const calls=JSON.parse(root.getAttribute("data-ui-window-calls")||"[]");calls.push(command);root.setAttribute("data-ui-window-calls",JSON.stringify(calls));}};'); return;
@@ -89,7 +136,9 @@ const srv = http.createServer((req, res) => {
       if (input.messages[0]?.content?.startsWith('你是会话标题生成器')) { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.end('data: ' + JSON.stringify({ choices: [{ delta: { content: '验证图片与工作区操作' }, finish_reason: 'stop' }] }) + '\n\ndata: [DONE]\n\n'); return; }
       modelRequests.push(input);
       if (input.messages[0]?.content?.startsWith('你是上下文检查点生成器')) { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.end('data: ' + JSON.stringify({ choices: [{ delta: { content: '已验证工作区文件、图片和工具操作。保留当前任务、代码路径与后续检查。' }, finish_reason: 'stop' }] }) + '\n\ndata: [DONE]\n\n'); return; }
-      const latest = input.messages.findLast(m => m.role === 'user'), text = typeof latest?.content === 'string' ? latest.content : latest?.content.find(p => p.type === 'text')?.text || '';
+      // 子代理完成通知/目标接续也会以 user 角色注入；取最后一条真正的用户输入，跳过应用注入的【…】事件。
+      const userText = m => typeof m.content === 'string' ? m.content : (m.content?.find?.(p => p.type === 'text')?.text || '');
+      const text = [...input.messages].reverse().filter(m => m.role === 'user').map(userText).find(t => t && !t.startsWith('【')) || '';
       const retryFixture = text.match(/UI_RETRY_CHECK_(dark|light)/)?.[1];
       if (retryFixture) {
         const count = (modelRetries.get(retryFixture) || 0) + 1; modelRetries.set(retryFixture, count);
@@ -115,7 +164,7 @@ const srv = http.createServer((req, res) => {
         { index: 1, id: 'ui-snapshot', type: 'function', function: { name: 'browser_snapshot', arguments: '{}' } },
       ] };
       if (text.includes('你是主代理创建的研究子代理')) delta = input.messages.at(-1)?.role === 'tool' ? { content: '研究完成：工作区证据已核对。' } : { tool_calls: [{ index: 0, id: 'child-list', type: 'function', function: { name: 'workspace_list', arguments: '{}' } }] };
-      if (text.includes('验证目标机制')) delta = input.messages.at(-1)?.role === 'tool' ? { content: '目标验证完成。' } : { tool_calls: [{ index: 0, id: 'goal-done', type: 'function', function: { name: 'goal_update', arguments: JSON.stringify({ status: 'complete', summary: '目标机制验证通过。', criteria: [{ content: '验证目标更新和会话持久化', status: 'verified' }], evidence: ['UI_GOAL_EVIDENCE：本地模型调用 goal_update，状态已持久化。'] }) } }] };
+      if (text.includes('验证目标机制')) delta = input.messages.at(-1)?.role === 'tool' ? { content: '目标验证完成。' } : { tool_calls: [{ index: 0, id: 'goal-done', type: 'function', function: { name: 'goal_update', arguments: JSON.stringify({ status: 'complete', summary: '目标机制验证通过。', criteria: [{ content: '验证目标更新和会话持久化', status: 'verified' }], evidence: ['UI_GOAL_EVIDENCE：本地模型调用 goal_update，状态已持久化。'] }) } }, { index: 1, id: 'goal-plan', type: 'function', function: { name: 'todo_write', arguments: JSON.stringify({ steps: PLAN_STEPS.slice(0, 3) }) } }] };
       if (text.includes('UI_MEMORY_CHECK')) delta = input.messages.at(-1)?.role === 'tool' ? { content: '记忆保存验证完成。' } : { tool_calls: [{ index: 0, id: 'memory-write', type: 'function', function: { name: 'memory_manage', arguments: JSON.stringify({ action: 'write', name: 'ui-memory', scope: 'session', content: 'UI_MEMORY_SAVED: verified fixture fact' }) } }] };
       if (text.includes('UI_SKILL_CHECK')) delta = input.messages.at(-1)?.role === 'tool' ? { content: '技能保存验证完成。' } : { tool_calls: [{ index: 0, id: 'skill-write', type: 'function', function: { name: 'skill_manage', arguments: JSON.stringify({ action: 'write', name: 'ui-workflow', scope: 'session', content: '---\nname: ui-workflow\ndescription: Verify project evidence\n---\n\nRead sources, verify claims, record results.' }) } }] };
       const lastUser = input.messages.findLast(m => m.role === 'user')?.content;
@@ -140,13 +189,51 @@ const srv = http.createServer((req, res) => {
   let p = path.join(DIST, decodeURIComponent(new URL(req.url, 'http://x').pathname));
   if (!fs.existsSync(p) || fs.statSync(p).isDirectory()) p = path.join(DIST, 'index.html');
   res.writeHead(200, { 'Content-Type': MIME[path.extname(p)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
-  res.end(fs.readFileSync(p));
+  const nativeTitlebar = new URL(req.url, 'http://x').searchParams.get('native-titlebar');
+  res.end(path.extname(p) === '.html' && nativeTitlebar !== null ? fs.readFileSync(p, 'utf8').replace('<head>', '<head><script src="/__ui-native-titlebar?enabled=' + (nativeTitlebar === '1' ? '1' : '0') + '"></script>') : fs.readFileSync(p));
 });
 await new Promise(r => srv.listen(PORT, '127.0.0.1', r));
 
 const { chromium } = await import('../node_modules/@zhizhuodemao/patchright/index.mjs');
 const browser = await chromium.launch({ headless: true, executablePath: CHROME });
+
 fs.mkdirSync(SHOTS, { recursive: true });
+
+async function checkWindowChrome(scheme) {
+  for (const nativeTitlebar of [false, true]) {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: scheme });
+    const page = await context.newPage();
+    page.on('pageerror', error => console.error('Window chrome runtime error: ' + error.message));
+    try {
+      await page.goto('http://127.0.0.1:' + PORT + '/?port=' + WS_PORT + '&token=ui-check&native-titlebar=' + (nativeTitlebar ? '1' : '0'));
+      await page.locator('.stage-head').waitFor();
+      const skip = page.getByRole('button', { name: '稍后', exact: true });
+      if (await skip.count()) await skip.click();
+      const label = '[' + scheme + '] ' + (nativeTitlebar ? 'Mac 原生标题栏' : '自定义标题栏');
+      ok(await page.locator('.rail').isVisible(), label + ' 新用户应默认展开侧栏');
+      for (const name of ['最小化', '最大化', '关闭']) ok(await page.locator('.win-controls').getByRole('button', { name, exact: true }).count() === (nativeTitlebar ? 0 : 1), label + ' 窗口按钮重复或缺失：' + name);
+      ok(await page.locator('.win-controls .tool-panel-toggle').isVisible(), label + ' 工具面板开关应保留');
+      ok(await page.locator('.app').evaluate(element => getComputedStyle(element).getPropertyValue('--window-controls-space').trim()) === (nativeTitlebar ? '60px' : '174px'), label + ' 窗口按钮预留空间错误');
+      await page.getByRole('button', { name: '收起会话列表', exact: true }).click();
+      await page.locator('.rail').waitFor({ state: 'detached' });
+      await page.reload();
+      await page.getByRole('button', { name: '展开会话列表', exact: true }).waitFor();
+      ok(await page.locator('.rail').count() === 0, label + ' 重载不能丢失明确的折叠偏好');
+      if (nativeTitlebar) ok(await page.locator('.stage-head').evaluate(element => parseFloat(getComputedStyle(element).paddingLeft)) >= 104, label + ' 折叠后必须为原生窗口按钮保留安全区');
+      await page.getByRole('button', { name: '展开会话列表', exact: true }).click();
+      await page.locator('.rail').waitFor();
+      await page.locator('.rail-bottom .rail-account').click();
+      await page.getByRole('menuitem', { name: /^设置/ }).click();
+      await page.locator('.settings-nav').waitFor();
+      ok(await page.locator('.win-controls button').count() === (nativeTitlebar ? 0 : 3), label + ' 设置页窗口按钮错误');
+      await page.screenshot({ path: path.join(SHOTS, scheme + (nativeTitlebar ? '-macos-window-chrome.png' : '-custom-window-chrome.png')) });
+    } catch (error) {
+      await page.screenshot({ path: path.join(SHOTS, scheme + '-window-chrome-failure.png') }).catch(() => {});
+      console.error('Window chrome diagnostics: ' + (await page.locator('body').innerText()).slice(0, 2000));
+      throw error;
+    } finally { await context.close(); }
+  }
+}
 
 // 文字对比度：前景 vs 最近的不透明背景
 const contrast = () => {
@@ -211,9 +298,26 @@ const checkNavSpacing = (rows, label) => rows.forEach((row, i) => {
   if (i) ok(row.y - rows[i - 1].y - rows[i - 1].height >= 8, label + ' 菜单间距不足：' + row.name);
 });
 
+async function showTool(page, kind) {
+  const panelToggle = page.locator('.tool-panel-toggle'); await panelToggle.waitFor();
+  if (await panelToggle.getAttribute('aria-pressed') !== 'true') await panelToggle.click();
+  await page.locator('.dock').waitFor();
+  const label = kind === 'files' ? '工作区文件' : '浏览器';
+  const tab = page.locator('.dock-tabs').getByRole('tab', { name: label, exact: true }).first();
+  if (await tab.count()) await tab.click(); else { await page.getByRole('button', { name: '新建标签页', exact: true }).click(); await page.getByRole('menuitem', { name: label + '标签页', exact: true }).click(); }
+  if (kind !== 'files') {
+    const toggle = page.locator('.browser-bar button[aria-pressed]');
+    await toggle.waitFor();
+    if ((await toggle.getAttribute('aria-pressed') === 'true') !== (kind === 'network')) await toggle.click();
+    await page.getByRole('button', { name: kind === 'network' ? '返回网页' : '显示网络请求', exact: true }).waitFor();
+  }
+}
+
 let activePage;
 try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SCHEME] : ['dark', 'light'])) {
   console.log('检查主题：' + scheme);
+  await checkWindowChrome(scheme);
+  await checkAccountMenu({ browser, baseUrl: 'http://127.0.0.1:' + PORT, wsPort: WS_PORT, scheme, shots: SHOTS, ok });
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: scheme });
   await ctx.grantPermissions(['clipboard-read', 'clipboard-write']);
   const page = await ctx.newPage();
@@ -226,49 +330,139 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   if (await skip.count()) await skip.first().click();
   await page.waitForTimeout(300);
 
-  // 默认是聊天优先：侧栏与右侧工具面板都收起。回归用例先展开，后续断言覆盖完整工作台。
+  // 首次启动展开项目侧栏，工具面板按需打开。
   await page.screenshot({ path: path.join(SHOTS, scheme + '-boot.png') });
   if (await page.getByText('查看错误详情', { exact: true }).count()) {
     await page.getByText('查看错误详情', { exact: true }).click();
     throw new Error(await page.locator('body').innerText());
   }
   const expandRail = page.getByRole('button', { name: '展开会话列表' });
+  ok(await page.locator('.rail').isVisible(), '[' + scheme + '] 首次启动侧栏应默认打开');
   if (await expandRail.count()) await expandRail.first().click();
+  const initialSessions = await rpc('session-list');
+  if (!initialSessions.sessions.length) {
+    ok(await page.getByRole('textbox', { name: '任务指令' }).count() === 0, '[' + scheme + '] 未创建项目时不应创建会话或输入坞');
+    ok(await page.getByRole('heading', { name: '添加第一个项目', exact: true }).isVisible(), '[' + scheme + '] 首次启动应显示项目空状态');
+    // 空状态只保留一个入口，侧栏和标题栏不再重复提示添加项目。
+    ok(await page.getByText('选择项目目录，然后在项目下创建会话。', { exact: true }).count() === 0, '[' + scheme + '] 空状态不应重复说明如何添加项目');
+    ok(await page.getByText('添加项目目录，开始工作', { exact: true }).count() === 0, '[' + scheme + '] 侧栏不应重复提示添加项目');
+    ok(await page.getByRole('button', { name: '选择项目', exact: true }).count() === 0, '[' + scheme + '] 没有项目时不应显示项目选择器');
+    ok(await page.getByRole('button', { name: '添加项目目录', exact: true }).count() === 1, '[' + scheme + '] 空状态应只有一个添加项目入口');
+  }
+  const scope = 'ui-project-' + scheme;
+  const mainRoot = path.join(DATA, 'ui-main-' + scheme), sharedRoot = path.join(DATA, 'ui-shared-' + scheme);
+  fs.mkdirSync(mainRoot); fs.mkdirSync(sharedRoot); fs.writeFileSync(path.join(sharedRoot, 'shared-evidence.txt'), 'SECONDARY_ROOT_VERIFIED_' + scheme);
+  const folder = (directory, key) => { const grant = { sessionId: scope, path: directory, expiresAt: Date.now() + 60000 }; grant.signature = folderProof('ui-check', grant); return { key, grant }; };
+  const codeProject = await rpc('project-save', { scope, project: { name: 'UI Project ' + scheme, folders: [folder(mainRoot, 'main'), folder(sharedRoot, 'shared')], primaryKey: 'main' } });
+  const freshId = (await rpc('session-create', { projectId: codeProject.id })).id;
+  await rpc('session-focus', { sessionId: freshId });
+  await page.locator('.session-item.on').waitFor();
+  ok((await rpc('session-list')).sessions.every(s => !!s.projectId), '[' + scheme + '] 每个真实会话都必须归属项目');
+  ok(await page.locator('.project-tree > section:not([data-project-id])').count() === 0, '[' + scheme + '] 项目树只能包含真实项目');
   const expandTools = page.locator('.win-controls button[aria-label="展开工具面板"]');
   if (await expandTools.count()) await expandTools.first().click();
   const panelToggle = await page.locator('.win-controls .tool-panel-toggle').boundingBox();
   ok(panelToggle.x > 1440 - 190, '[' + scheme + '] 工具面板开关应位于窗口右侧');
   await checkWindowDragging(page, ['.stage-identity strong', '.dock-head'], '[' + scheme + '] 标题栏');
-  await page.locator('.rail .new-session').click();
-  await page.locator('.welcome').waitFor();
-  await page.waitForTimeout(300);
-  const freshId = await page.locator('.session-item.on').getAttribute('data-session-id');
-  ok((await page.locator('.workspace-picker').innerText()).includes('选择项目或文件夹') && !fs.existsSync(path.join(DATA, 'WebDecryptHub/projects', freshId, 'workspace')), '[' + scheme + '] 新会话不应预先创建工作目录');
-  await page.getByRole('textbox', { name: '任务指令' }).fill('保留目录选择前的草稿');
-  await page.getByRole('button', { name: '发送（Enter）', exact: true }).click();
-  await page.getByRole('dialog', { name: '选择工作目录', exact: true }).waitFor();
-  await page.getByRole('button', { name: '不在目录中工作', exact: true }).click();
-  await page.getByRole('dialog', { name: '选择工作目录', exact: true }).waitFor({ state: 'detached' });
-  ok(await page.getByRole('textbox', { name: '任务指令' }).inputValue() === '保留目录选择前的草稿', '[' + scheme + '] 目录选择丢失草稿');
-  await page.getByRole('textbox', { name: '任务指令' }).fill('');
-
-  // Project roots are test-owned folders authorized with the same signed native-picker contract.
-  const mainRoot = path.join(DATA, 'ui-main-' + scheme), sharedRoot = path.join(DATA, 'ui-shared-' + scheme);
-  fs.mkdirSync(mainRoot); fs.mkdirSync(sharedRoot); fs.writeFileSync(path.join(sharedRoot, 'shared-evidence.txt'), 'SECONDARY_ROOT_VERIFIED_' + scheme);
-  const folder = (directory, key) => { const grant = { sessionId: freshId, path: directory, expiresAt: Date.now() + 60000 }; grant.signature = folderProof('ui-check', grant); return { key, grant }; };
-  const codeProject = await rpc('project-save', { sessionId: freshId, project: { name: 'UI Project ' + scheme, folders: [folder(mainRoot, 'main'), folder(sharedRoot, 'shared')], primaryKey: 'main' } });
-  await page.locator('.workspace-picker').click();
-  await page.locator('.project-choice').filter({ hasText: codeProject.name }).click();
-  await page.locator('.workspace-picker').filter({ hasText: codeProject.name }).waitFor();
-  ok((await rpc('session-list')).sessions.find(s => s.id === freshId).projectId === codeProject.id, '[' + scheme + '] 项目未绑定到会话');
-  await page.getByRole('tab', { name: /工作区文件/ }).click();
+  const projectGroup = page.locator('[data-project-id="' + codeProject.id + '"]');
+  const fold = projectGroup.getByRole('button', { name: codeProject.name, exact: true });
+  await fold.click();
+  ok(await projectGroup.locator('.session-item').count() === 0, '[' + scheme + '] 折叠项目应隐藏其中会话');
+  await page.reload(); await page.locator('.rail').waitFor();
+  ok(await fold.getAttribute('aria-expanded') === 'false', '[' + scheme + '] 重载应保留项目折叠选择');
+  await fold.click(); await projectGroup.locator('.session-item.on').waitFor();
+  for (let repeat = 0; repeat < 2; repeat++) {
+    await projectGroup.locator('.project-row').hover();
+    const row = await projectGroup.locator('.project-row').boundingBox(), chat = await projectGroup.locator('.session-item').first().boundingBox();
+    ok(chat.y - row.y - row.height >= 4, '[' + scheme + '] 项目行与会话卡片不应粘连');
+    await fold.click(); await fold.click();
+  }
+  const sectionLeft = await page.locator('.rail-sec').evaluate(el => el.getBoundingClientRect().left);
+  ok(Math.abs((await projectGroup.boundingBox()).x - sectionLeft) < 1, '[' + scheme + '] 项目分组不应额外缩进');
+  const railResize = page.getByRole('separator', { name: '调整左侧栏宽度', exact: true });
+  const initialWidth = await page.locator('.rail').evaluate(el => el.getBoundingClientRect().width);
+  await railResize.focus(); await railResize.press('ArrowRight'); await railResize.press('ArrowRight');
+  ok(Math.round(await page.locator('.rail').evaluate(el => el.getBoundingClientRect().width)) === Math.round(initialWidth + 32), '[' + scheme + '] 左侧栏键盘调宽失败');
+  const railHandle = await railResize.boundingBox();
+  await page.mouse.move(railHandle.x + railHandle.width / 2, railHandle.y + railHandle.height / 2); await page.mouse.down(); await page.mouse.move(railHandle.x + 48, railHandle.y + railHandle.height / 2, { steps: 8 }); await page.mouse.up();
+  const draggedWidth = await page.locator('.rail').evaluate(el => el.getBoundingClientRect().width);
+  ok(draggedWidth > initialWidth + 60, '[' + scheme + '] 左侧栏拖动调宽失败');
+  await page.reload(); await page.locator('.rail').waitFor();
+  ok(Math.abs(await page.locator('.rail').evaluate(el => el.getBoundingClientRect().width) - draggedWidth) < 1, '[' + scheme + '] 左侧栏宽度未持久化');
+  await railResize.dblclick();
+  for (let step = 0; step < 4; step++) await railResize.press('ArrowLeft');
+  for (const width of [220, 236, 252, 268, 284]) {
+    const geometry = await page.locator('.rail-brand').evaluate(brand => {
+      const logo = brand.querySelector('.logo').getBoundingClientRect(), name = brand.querySelector('.rail-name'), badge = brand.querySelector('.rail-badge');
+      const text = name.getBoundingClientRect(), tag = badge.getBoundingClientRect(), bounds = brand.getBoundingClientRect();
+      return { separate: logo.right < text.left && (!tag.width || text.right < tag.left), fits: text.right <= bounds.right && (!tag.width || tag.right <= bounds.right), fullName: name.scrollWidth <= name.clientWidth, badgeVisible: tag.width > 0 };
+    });
+    ok(geometry.separate && geometry.fits && geometry.fullName, '[' + scheme + '] ' + width + 'px 侧栏品牌区重叠、裁切或名称不完整');
+    if (width === 220) ok(!geometry.badgeVisible, '[' + scheme + '] 最窄侧栏应收起 AGENT 标记');
+    if (width === 284) ok(geometry.badgeVisible, '[' + scheme + '] 侧栏加宽后应恢复 AGENT 标记');
+    if (width === 220 || width === 284) await page.screenshot({ path: path.join(SHOTS, scheme + '-sidebar-' + width + '.png') });
+    await railResize.press('ArrowRight');
+  }
+  await railResize.dblclick();
+  const orderRoot = path.join(DATA, 'ui-project-order-' + scheme); fs.mkdirSync(orderRoot); fs.writeFileSync(path.join(orderRoot, 'keep.txt'), 'KEEP_PROJECT_SOURCE');
+  const orderProject = await rpc('project-save', { scope, project: { name: '排序与迁移 ' + scheme, folders: [folder(orderRoot, 'order')], primaryKey: 'order' } });
+  const orderGroup = page.locator('[data-project-id="' + orderProject.id + '"]'); await orderGroup.waitFor();
+  await orderGroup.locator('.project-row').dragTo(projectGroup.locator('.project-row'), { targetPosition: { x: 15, y: 2 } });
+  await page.waitForFunction(({ first, second }) => { const groups = [...document.querySelectorAll('[data-project-id]')].map(el => el.dataset.projectId); return groups.indexOf(first) < groups.indexOf(second); }, { first: orderProject.id, second: codeProject.id });
+  const order = await rpc('projects-list'); ok(order.findIndex(p => p.id === orderProject.id) < order.findIndex(p => p.id === codeProject.id), '[' + scheme + '] 拖动排序未保存到后端');
+  const movingChat = await rpc('session-create', { projectId: orderProject.id, title: '项目迁移测试' });
+  await orderGroup.locator('.project-row').hover(); await orderGroup.getByRole('button', { name: '项目操作 ' + orderProject.name, exact: true }).click();
+  await page.getByRole('menuitem', { name: '删除项目…', exact: true }).click();
+  const removeProject = page.getByRole('dialog', { name: '删除项目', exact: true });
+  await removeProject.getByRole('combobox', { name: '项目会话处理方式', exact: true }).click();
+  await page.getByRole('option', { name: '迁移到 ' + codeProject.name, exact: true }).click();
+  await removeProject.getByRole('button', { name: '删除项目', exact: true }).click();
+  await orderGroup.waitFor({ state: 'detached' });
+  ok((await rpc('session-list')).sessions.find(s => s.id === movingChat.id)?.projectId === codeProject.id, '[' + scheme + '] 删除项目应先迁移其中会话');
+  ok(fs.readFileSync(path.join(orderRoot, 'keep.txt'), 'utf8') === 'KEEP_PROJECT_SOURCE', '[' + scheme + '] 删除项目不能删除源码');
+  await rpc('session-delete', { sessionId: movingChat.id });
+  await page.addScriptTag({ url: 'http://127.0.0.1:' + PORT + '/__ui-folder-bridge?owner=' + freshId + '&scheme=' + scheme });
+  try {
+    await page.getByRole('button', { name: '新建项目', exact: true }).click();
+    const creatingProject = page.getByRole('dialog', { name: '新建项目', exact: true });
+    await creatingProject.getByRole('textbox', { name: '项目名称', exact: true }).fill('UI picker ' + scheme);
+    await creatingProject.getByRole('button', { name: '添加目录', exact: true }).click();
+    await creatingProject.getByText(path.join(DATA, 'ui-picker-' + scheme), { exact: true }).waitFor();
+    await creatingProject.getByRole('button', { name: '保存项目', exact: true }).click();
+    await page.locator('.project-tree').getByText('UI picker ' + scheme, { exact: true }).first().waitFor();
+    const createdProject = (await rpc('projects-list')).find(p => p.name === 'UI picker ' + scheme);
+    const createdList = await rpc('session-list');
+    ok(createdList.sessions.find(s => s.id === createdList.focused)?.projectId === createdProject.id, '[' + scheme + '] 保存新项目后应直接进入项目内新会话');
+    const pickerRoot = path.join(DATA, 'ui-picker-' + scheme);
+    fs.writeFileSync(path.join(pickerRoot, 'keep.txt'), 'KEEP_RELINKED_SOURCE');
+    fs.renameSync(pickerRoot, pickerRoot + '-offline'); await rpc('projects-check');
+    await page.getByText('项目目录不可用，执行已停止。聊天记录保留。', { exact: true }).waitFor();
+    ok(!fs.existsSync(pickerRoot), '[' + scheme + '] 检测目录缺失不能自动重建原路径');
+    await page.getByRole('textbox', { name: '任务指令', exact: true }).fill('relink draft');
+    ok(await page.getByRole('button', { name: '发送（Enter）', exact: true }).isDisabled(), '[' + scheme + '] 缺失目录不能继续执行');
+    await page.getByRole('button', { name: '重新选择目录', exact: true }).click();
+    const relinkDialog = page.getByRole('dialog', { name: '重新连接项目目录', exact: true });
+    await relinkDialog.getByRole('button', { name: '添加目录', exact: true }).click();
+    await relinkDialog.getByText(pickerRoot, { exact: true }).waitFor();
+    await relinkDialog.getByRole('button', { name: '保存项目', exact: true }).click();
+    await page.getByText('项目目录不可用，执行已停止。聊天记录保留。', { exact: true }).waitFor({ state: 'detached' });
+    ok((await rpc('session-list')).focused === createdList.focused, '[' + scheme + '] 重连目录不能更换会话身份');
+    ok(await page.getByRole('textbox', { name: '任务指令', exact: true }).inputValue() === 'relink draft', '[' + scheme + '] 重连目录必须保留草稿');
+    ok(fs.readFileSync(path.join(pickerRoot + '-offline', 'keep.txt'), 'utf8') === 'KEEP_RELINKED_SOURCE', '[' + scheme + '] 重连目录不能移动或删除原文件');
+    await page.getByRole('textbox', { name: '任务指令', exact: true }).fill('');
+    await rpc('session-focus', { sessionId: freshId });
+    await page.locator('.session-item.on[data-session-id="' + freshId + '"]').waitFor();
+    await rpc('project-remove', { id: createdProject.id, deleteSessions: true });
+  } finally { await page.addScriptTag({ url: 'http://127.0.0.1:' + PORT + '/__ui-folder-bridge?restore=1' }); }
+  await showTool(page, 'files');
   await page.getByRole('combobox', { name: '文件目录', exact: true }).click();
   await page.getByRole('option', { name: 'ui-shared-' + scheme + ' · 只读', exact: true }).click();
   await page.locator('.workspace-tree [data-path="shared-evidence.txt"]').click();
-  await page.locator('.detail pre').filter({ hasText: 'SECONDARY_ROOT_VERIFIED_' + scheme }).waitFor();
+  await page.locator('.document-content').filter({ hasText: 'SECONDARY_ROOT_VERIFIED_' + scheme }).waitFor();
+  await showTool(page, 'files');
   await page.getByRole('combobox', { name: '文件目录', exact: true }).click();
   await page.getByRole('option', { name: 'ui-main-' + scheme + ' · 主目录', exact: true }).click();
-  await page.getByRole('tab', { name: '浏览器', exact: true }).click();
+  await showTool(page, 'browser');
 
   ok(errs.length === 0, '[' + scheme + '] 页面报错: ' + (errs[0] || ''));
   ok(await page.locator('.stage-head').count() > 0, '[' + scheme + '] 找不到对话顶栏 .stage-head');
@@ -276,7 +470,8 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   ok(await page.locator('.dock-tabs').count() > 0, '[' + scheme + '] 找不到右侧面板页签');
   ok(await page.locator('.statusbar').count() === 0, '[' + scheme + '] 底部状态栏没有移除');
   ok(await page.getByRole('textbox', { name: '筛选会话' }).count() === 0, '[' + scheme + '] 多余的会话筛选框没有移除');
-  ok(await page.locator('.rail').getByText('会话列表', { exact: true }).count() === 1, '[' + scheme + '] 会话列表标题不正确');
+  ok(await page.locator('.rail').getByText('项目', { exact: true }).count() === 1, '[' + scheme + '] 项目树标题不正确');
+  ok(await page.locator('.rail').getByText('本地工作区', { exact: true }).count() === 0, '[' + scheme + '] 设置入口含糊的副标题未移除');
   ok(await page.getByRole('button', { name: '组件样张', exact: true }).count() === 0, '[' + scheme + '] 组件样张入口没有移除');
   ok(await page.locator('.tb').getByRole('button', { name: /搜索/ }).count() === 0, '[' + scheme + '] 标题栏仍有搜索入口');
   checkNavSpacing(await page.locator('.rail-nav .nav-button').evaluateAll(navGeometry), '[' + scheme + '] 主导航');
@@ -296,19 +491,15 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   const composerControls = await page.locator('.composer-bar .rt-SelectTrigger').evaluateAll(els => els.map(el => ({ height: el.getBoundingClientRect().height, font: parseFloat(getComputedStyle(el).fontSize) })));
   ok(composerControls.every(c => c.height === 32 && c.font === 14), '[' + scheme + '] 输入栏选择器尺寸不统一');
   await page.getByRole('button', { name: '选择权限', exact: true }).click();
-  ok(await page.getByRole('radio', { name: '请求批准', exact: true }).count() === 1, '[' + scheme + '] 权限弹窗无法打开');
+  ok(await page.getByRole('menuitemradio', { name: '请求批准', exact: true }).count() === 1, '[' + scheme + '] 权限弹窗无法打开');
+  ok(await page.getByRole('dialog', { name: '权限与执行环境', exact: true }).count() === 0, '[' + scheme + '] 权限切换不应打开居中弹窗');
   await page.waitForTimeout(200);
   await page.screenshot({ path: path.join(SHOTS, scheme + '-permissions.png') });
-  await page.getByRole('radio', { name: '自动批准', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: '自动批准', exact: true }).click();
   await page.getByRole('button', { name: '选择权限', exact: true }).filter({ hasText: '自动批准' }).waitFor();
+  ok(await page.locator('.stage-mode').count() === 0, '[' + scheme + '] 对话顶部不显示权限状态');
   await page.getByRole('button', { name: '选择权限', exact: true }).click();
-  await page.getByRole('radio', { name: '请求批准', exact: true }).click();
-  const beforeEnvironment = await page.locator('.workspace-picker').boundingBox();
-  await page.getByRole('button', { name: '查看执行环境', exact: true }).click();
-  await page.getByRole('dialog', { name: '权限与执行环境', exact: true }).waitFor();
-  const afterEnvironment = await page.locator('.workspace-picker').boundingBox();
-  ok(beforeEnvironment.y === afterEnvironment.y, '[' + scheme + '] 执行环境弹窗挤动了目录选择器');
-  await page.getByRole('dialog', { name: '权限与执行环境', exact: true }).getByRole('button', { name: '关闭', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: '请求批准', exact: true }).click();
   await page.getByRole('combobox', { name: '选择模型' }).click();
   ok(await page.getByRole('option', { name: 'gpt-4o', exact: true }).count() === 1, '[' + scheme + '] 模型菜单无法打开');
   await page.keyboard.press('Escape');
@@ -350,18 +541,19 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.getByRole('button', { name: '发送（Enter）', exact: true }).click();
   await page.locator('.msg.assistant').filter({ hasText: '已创建测试文件。' }).waitFor();
   await page.waitForFunction(() => document.querySelector('.stage-identity strong')?.textContent === '验证图片与工作区操作');
-  await page.getByRole('tab', { name: '工作区文件', exact: true }).click();
+  await showTool(page, 'files');
   ok(await page.locator('.workspace-tree [data-path="src/trace.js"]').count() === 0, '[' + scheme + '] 目录应默认折叠');
   await page.locator('.workspace-tree [data-path="src"]').click();
   await page.locator('.workspace-tree [data-path="src/trace.js"]').waitFor();
   ok(await page.locator('.workspace-tree [data-path="src"]').getAttribute('aria-expanded') === 'true', '[' + scheme + '] 文件夹未展开');
   await page.locator('.workspace-tree [data-path="src/trace.js"]').click();
-  await page.waitForFunction(() => document.querySelector('.detail .raw')?.textContent === 'DIRECTORY_TREE_VERIFIED');
+  await page.waitForFunction(() => document.querySelector('.document-panel:not([hidden]) .document-content')?.textContent === 'DIRECTORY_TREE_VERIFIED' || [...document.querySelectorAll('.document-content')].some(el => el.offsetWidth && el.textContent === 'DIRECTORY_TREE_VERIFIED'));
+  await showTool(page, 'files');
   await page.locator('.workspace-tree [data-path="src"]').press('ArrowLeft');
   ok(await page.locator('.workspace-tree [data-path="src/trace.js"]').count() === 0, '[' + scheme + '] 目录方向键折叠失败');
   await page.locator('.file-row').filter({ hasText: 'ui-example.txt' }).click();
-  await page.waitForFunction(() => document.querySelector('.detail .raw')?.textContent === 'UI change verified');
-  ok(await page.locator('.detail .raw').textContent() === 'UI change verified', '[' + scheme + '] 工作区文件内容错误');
+  await page.waitForFunction(() => [...document.querySelectorAll('.document-content')].some(el => el.offsetWidth && el.textContent === 'UI change verified'));
+  ok(await page.locator('.document-content').filter({ hasText: 'UI change verified' }).textContent() === 'UI change verified', '[' + scheme + '] 工作区文件内容错误');
   ok(await page.getByRole('button', { name: '会话信息', exact: true }).count() === 0, '[' + scheme + '] 顶部不应显示会话信息按钮');
   const focusedId = await page.locator('.session-item.on').getAttribute('data-session-id');
   const menuButton = page.locator('.session-item.on button[aria-label="会话操作"]');
@@ -374,7 +566,8 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   const copied = await page.evaluate(() => navigator.clipboard.readText());
   ok(copied.includes(focusedId) && copied.includes('UI change verified') && copied.includes('workspace_write'), '[' + scheme + '] Markdown 缺少会话信息或工具结果');
   await page.locator('.session-menu').waitFor({ state: 'hidden' });
-  ok(await page.locator('.dock-tabs [role="tab"]').count() === 3, '[' + scheme + '] 工具面板应只保留三个页签');
+  ok(await page.locator('.dock-tabs [role="tab"]').count() >= 2, '[' + scheme + '] 应支持文件与文档独立标签页');
+  await showTool(page, 'files');
   await page.getByRole('tab', { name: 'Git 改动', exact: true }).click();
   await page.getByText('当前目录没有可用的Git仓库', { exact: true }).waitFor();
   ok(await page.locator('.workspace-tree').isVisible() === false, '[' + scheme + '] Git 页签不应混入本地目录');
@@ -391,13 +584,16 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   ok((await page.getByRole('textbox', { name: '任务指令' }).inputValue()).includes('项目'), '[' + scheme + '] 快捷分析没有填入指令');
   await page.getByRole('textbox', { name: '任务指令' }).fill('');
   await page.keyboard.press('Control+k');
-  ok(await page.locator('.session-search-results button').count() === await page.locator('.session-item').count(), '[' + scheme + '] 搜索弹窗包含会话之外的操作');
-  await page.getByRole('textbox', { name: '搜索会话' }).fill('网络请求');
+  await page.getByRole('combobox', { name: '搜索项目与会话' }).waitFor();
+  ok(await page.locator('.project-tree').isVisible() && await page.locator('.session-search-dialog').count() === 0, '[' + scheme + '] 搜索应在侧栏中打开并保留空查询的项目树');
+  await page.getByRole('combobox', { name: '搜索项目与会话' }).fill('UI_NO_SIDEBAR_MATCH_X9ZZ');
+  await page.getByText('未找到项目或会话', { exact: true }).waitFor();
   ok(await page.locator('.session-search-results button').count() === 0, '[' + scheme + '] 搜索仍然包含快捷操作');
   await page.keyboard.press('Escape');
-  await page.getByRole('tab', { name: /网络请求/ }).click();
-  await page.getByRole('tab', { name: /网络请求/ }).press('ArrowRight');
-  ok(await page.getByRole('tab', { name: /工作区文件/ }).getAttribute('aria-selected') === 'true', '[' + scheme + '] 工具页签方向键失效');
+  await showTool(page, 'network');
+  await page.getByRole('button', { name: '返回网页', exact: true }).press('Enter');
+  ok(await page.getByRole('button', { name: '显示网络请求', exact: true }).getAttribute('aria-pressed') === 'false', '[' + scheme + '] 网络请求按钮应支持键盘切回网页');
+  await showTool(page, 'files');
   await page.screenshot({ path: path.join(SHOTS, scheme + '-files.png') });
   await page.keyboard.press('Control+Alt+2');
   await page.locator('.win-controls button[aria-label="收起工具面板"]').click();
@@ -409,12 +605,10 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.waitForTimeout(100);
   ok(await page.getByRole('textbox', { name: '目标网址' }).isVisible(), '[' + scheme + '] 连续 Ctrl+L 关闭了浏览器面板');
 
-  const beforeSessions = await page.locator('.session-item').count();
+  const beforeSessions = (await rpc('session-list')).sessions.length;
   await page.keyboard.press('Control+t');
   await page.waitForTimeout(300);
-  await page.locator('.workspace-picker').click();
-  await page.getByRole('button', { name: '不在目录中工作', exact: true }).click();
-  ok(await page.locator('.session-item').count() === beforeSessions + 1, '[' + scheme + '] Ctrl+T 不能新建会话');
+  ok((await rpc('session-list')).sessions.length === beforeSessions + 1, '[' + scheme + '] Ctrl+T 不能在当前项目新建会话');
   await page.locator('.session-item.on').hover();
   for (const issue of await page.evaluate(actionGeometry)) ok(false, '[' + scheme + '] 会话操作 ' + issue);
   await page.locator('.session-item.on button[aria-label="会话操作"]').press('Enter');
@@ -428,15 +622,17 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.waitForTimeout(250);
   ok((await page.locator('.stage-identity').innerText()).includes('UI 回归验证'), '[' + scheme + '] 会话重命名没有更新');
   await page.locator('.session-focus').first().click();
-  await page.getByRole('button', { name: '查找会话', exact: true }).click();
-  await page.getByRole('textbox', { name: '搜索会话' }).fill('不存在的会话');
+  await page.getByRole('button', { name: '搜索项目与会话', exact: true }).click();
+  await page.getByRole('combobox', { name: '搜索项目与会话' }).fill('不存在的会话');
   ok(await page.locator('.session-search-results button').count() === 0, '[' + scheme + '] 会话搜索无效');
-  await page.getByRole('textbox', { name: '搜索会话' }).fill('UI 回归验证 ' + scheme);
+  await page.getByRole('combobox', { name: '搜索项目与会话' }).fill('UI 回归验证 ' + scheme);
   ok(await page.locator('.session-search-results button').count() === 1, '[' + scheme + '] 搜索没有定位到会话');
   await page.screenshot({ path: path.join(SHOTS, scheme + '-session-search.png') });
-  await page.getByRole('textbox', { name: '搜索会话' }).press('Enter');
+  await page.getByRole('combobox', { name: '搜索项目与会话' }).press('Enter');
   await page.waitForTimeout(250);
   ok((await page.locator('.stage-identity').innerText()).includes('UI 回归验证 ' + scheme), '[' + scheme + '] 搜索结果不能切换会话');
+
+  await checkSidebarBrowser({ page, rpc, scheme, shots: SHOTS, ok, projectId: codeProject.id });
 
   const resize = page.locator('[data-panel-resize-handle-id]');
   const handle = await resize.boundingBox();
@@ -446,10 +642,16 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   ok(Math.abs((await page.locator('.stage').boundingBox()).width - widthBefore) > 30, '[' + scheme + '] 面板分隔线不能调整宽度');
   await page.mouse.move(handle.x - 65, handle.y + 200); await page.mouse.down(); await page.mouse.move(handle.x, handle.y + 200, { steps: 6 }); await page.mouse.up();
 
-  await page.locator('.rail button', { hasText: '设置' }).first().click();
+  await page.locator('.rail-bottom .rail-account').click();
+  await page.getByRole('menuitem', { name: /^设置/ }).click();
   await page.waitForTimeout(600);
   ok(await page.locator('.settings-nav button').count() >= 4, '[' + scheme + '] 设置页导航项不足');
   ok(await page.locator('.settings-col').count() > 0, '[' + scheme + '] 设置页没有内容区');
+  await page.locator('.settings-nav').getByRole('button', { name: '账号', exact: true }).click();
+  ok(await page.getByRole('button', { name: '在浏览器中登录', exact: true }).isDisabled(), '[' + scheme + '] 网页预览不应假装支持原生账号存储');
+  ok(await page.getByText('登录不会上传本地项目或对话，模型渠道继续使用你配置的 API Key。', { exact: true }).isVisible(), '[' + scheme + '] 账号与本地模型权限边界未说明');
+  await page.screenshot({ path: path.join(SHOTS, scheme + '-account.png') });
+  await page.locator('.settings-nav').getByRole('button', { name: 'AI 模型', exact: true }).click();
   const settingsNavBefore = await page.locator('.settings-nav .nav-button').evaluateAll(navGeometry);
   await checkWindowDragging(page, ['.screen-head', '.screen-breadcrumb'], '[' + scheme + '] 设置标题栏');
   checkNavSpacing(settingsNavBefore, '[' + scheme + '] 设置导航');
@@ -471,7 +673,7 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
     const settingsNavAfter = await page.locator('.settings-nav .nav-button').evaluateAll(navGeometry);
     ok(settingsNavAfter.every((row, i) => ['x', 'y', 'width', 'height', 'iconX', 'labelX'].every(k => Math.abs(row[k] - settingsNavBefore[i][k]) < 0.5)), '[' + scheme + '] 点击“' + name + '”导致菜单位置变化');
     for (const c of (await page.evaluate(contrast)).slice(0, 5)) ok(false, '[' + scheme + '] ' + name + ' 对比度不足 ' + c);
-    if (name === 'WDH 组件') { await page.getByRole('button', { name: '测试所选内核', exact: true }).click(); await page.getByText('浏览器启动与画面检查通过', { exact: true }).waitFor(); }
+    if (name === 'WDH 组件') { await page.getByRole('button', { name: '测试 CloakBrowser', exact: true }).click(); await page.getByText('浏览器启动与画面检查通过', { exact: true }).waitFor(); }
     await page.screenshot({ path: path.join(SHOTS, scheme + '-settings-' + ({ 'WDH 组件': 'browser', '运行参数': 'runtime', '外观': 'appearance', '关于与更新': 'about' }[name]) + '.png') });
   }
   await page.locator('.settings-nav').getByRole('button', { name: '外观', exact: true }).click();
@@ -514,16 +716,28 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   ok(await page.locator('.official-plugin').count() === 3, '[' + scheme + '] 官方插件应包含 WDH/IDH/ADH');
   await checkWindowDragging(page, ['.screen-head'], scheme + ' 插件顶部拖动');
   await page.locator('[data-plugin-id="wdh"]').getByRole('button', { name: '配置', exact: true }).click();
-  await page.getByRole('button', { name: '测试所选内核', exact: true }).click();
+  // 缺少组件/内核时直接失败：静默跳过会让“绿”的回归其实没覆盖插件页。
+  const kernelState = await rpc('kernel-info').catch(error => { throw new Error('[' + scheme + '] 无法读取内核状态：' + error.message); });
+  if (!kernelState?.component?.installed) throw new Error('[' + scheme + '] WDH 组件未安装，无法验证插件页；请先安装组件再运行 check:ui');
+  if (!kernelState?.cloak) throw new Error('[' + scheme + '] CloakBrowser 内核未安装，无法验证插件页；请先安装内核再运行 check:ui');
+  await page.getByRole('button', { name: '测试 CloakBrowser', exact: true }).click();
   await page.getByText('浏览器启动与画面检查通过', { exact: true }).waitFor({ timeout: 90000 });
   await page.screenshot({ path: path.join(SHOTS, scheme + '-plugins.png') });
   await page.locator('.screen-head button').first().click();
-  await page.getByRole('tab', { name: '浏览器', exact: true }).click();
+  await showTool(page, 'browser');
   // Only use a local page. Browser launch, streaming, capture and detail are real.
   await page.getByRole('textbox', { name: '目标网址' }).fill('http://127.0.0.1:' + PORT + '/__ui-fixture');
   await page.getByRole('textbox', { name: '目标网址' }).press('Enter');
   // Windows integrity preparation (45s) precedes Chromium's own 30s launch budget.
   await page.locator('.screen-canvas').waitFor({ state: 'visible', timeout: 90000 });
+  ok(await page.locator('.browser-views').count() === 0, '[' + scheme + '] 网页和网络不应再使用额外 Tab 栏');
+  ok(await page.locator('.screen').evaluate(el => el.getBoundingClientRect().height > el.closest('.dock-body').getBoundingClientRect().height * .7), '[' + scheme + '] 网页应占满浏览器内容区域');
+  for (const width of [1080, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const addressBounds = await page.getByRole('textbox', { name: '目标网址' }).boundingBox();
+    const networkBounds = await page.getByRole('button', { name: '显示网络请求', exact: true }).boundingBox();
+    ok(networkBounds.x > addressBounds.x + addressBounds.width && Math.abs(networkBounds.y + networkBounds.height / 2 - addressBounds.y - addressBounds.height / 2) < 2, '[' + scheme + '] 地址栏和网络按钮应保持同一行，宽度 ' + width);
+  }
   await page.getByRole('button', { name: '刷新', exact: true }).waitFor({ state: 'visible' });
   ok(await page.locator('.browser-launch').count() === 0, '[' + scheme + '] 地址栏不应有独立前往按钮');
   await page.getByRole('textbox', { name: '任务指令' }).fill('打开测试浏览器');
@@ -565,6 +779,7 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await debugUiCdp.detach();
 
   await page.keyboard.press('Control+Alt+3');
+  await page.locator('.screen-canvas').waitFor({ state: 'detached' });
   const recordNetwork = page.getByRole('button', { name: /^(开始|继续)抓取网络请求$/ });
   if (await recordNetwork.count()) {
     await recordNetwork.click();
@@ -581,13 +796,15 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await recordNetwork.click();
   await pauseNetwork.waitFor();
   ok(await page.locator('.request-filters').evaluate(el => parseFloat(getComputedStyle(el).gap) >= 8 && getComputedStyle(el).flexWrap === 'nowrap'), '[' + scheme + '] 快捷筛选需要独立间距并在窄面板内横向滚动');
-  ok(await page.locator('.dock-body > .bar').first().innerText().then(text => !/网络请求\s*\d/.test(text)), '[' + scheme + '] 不应重复网络请求标题与数量');
+  ok(await page.locator('.bar').filter({ has: page.getByPlaceholder('过滤 URL / 参数名') }).innerText().then(text => !/网络请求\s*\d/.test(text)), '[' + scheme + '] 不应重复网络请求标题与数量');
   await page.locator('.req-row').filter({ hasText: /api/ }).first().click();
   await page.locator('.detail-tabs').getByRole('tab', { name: '响应', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('.detail-body')?.textContent.includes('UI capture verified'), { timeout: 10000 });
   ok((await page.locator('.detail-body').innerText()).includes('UI capture verified'), '[' + scheme + '] 请求响应没有正确显示');
   await page.screenshot({ path: path.join(SHOTS, scheme + '-network.png') });
   await page.keyboard.press('Control+Alt+2');
+  await page.waitForFunction(() => { const canvas = document.querySelector('.screen-canvas'); return canvas?.width > 50 && canvas.height > 50 && canvas.getContext('2d').getImageData(0, 0, 1, 1).data[3] > 0; });
+  await page.screenshot({ path: path.join(SHOTS, scheme + '-browser-restored.png') });
   await page.getByRole('button', { name: '浏览器菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '关闭浏览器（保留会话）', exact: true }).click();
 
@@ -595,8 +812,6 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.locator('.welcome').waitFor();
 
   const taskInput = page.getByRole('textbox', { name: '任务指令' });
-  await page.locator('.workspace-picker').click();
-  await page.getByRole('button', { name: '不在目录中工作', exact: true }).click();
   await taskInput.focus();
   const inputChrome = await page.locator('.composer-input').evaluate(el => ({ outline: getComputedStyle(el).outlineStyle, shadow: getComputedStyle(el).boxShadow }));
   ok(inputChrome.outline === 'none' && inputChrome.shadow === 'none', '[' + scheme + '] 输入框获得焦点时不应出现内框');
@@ -608,27 +823,67 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await taskInput.press('ArrowDown'); await taskInput.press('Tab');
   ok(await taskInput.inputValue() === '/compact ', '[' + scheme + '] 命令方向键/Tab补全失败');
   await taskInput.fill('/agent 核对工作区证据'); await taskInput.press('Enter');
-  await page.locator('.agents-summary').waitFor(); await page.locator('.agents-summary').click();
+  await page.getByRole('button', { name: '查看子代理', exact: true }).waitFor(); await page.getByRole('button', { name: '查看子代理', exact: true }).click();
   await page.locator('.subagent-row').filter({ hasText: '已完成' }).waitFor();
   await page.getByRole('button', { name: '核对工作区证据', exact: true }).click();
   await page.getByText('研究完成：工作区证据已核对。', { exact: true }).waitFor();
   await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: '关闭子代理列表', exact: true }).click();
   await taskInput.fill('/goal'); await taskInput.press('Enter');
-  await page.getByRole('textbox', { name: '设置目标', exact: true }).fill('验证目标机制');
+  await page.getByRole('textbox', { name: '设置目标', exact: true }).fill('验证目标机制：' + '完整检查项目证据、执行结果与用户界面，确保长目标内容可以在详情中阅读。'.repeat(6));
   await page.getByRole('dialog', { name: '设置目标', exact: true }).getByRole('button', { name: '执行', exact: true }).click();
-  await page.locator('.harness-goal').filter({ hasText: '已完成' }).waitFor();
+  const goalTrigger = page.getByRole('button', { name: '查看目标进展', exact: true });
+  await goalTrigger.filter({ hasText: '已完成' }).waitFor();
   await page.locator('.msg.assistant').filter({ hasText: '目标验证完成。' }).waitFor();
+  ok(await page.locator('.command-feedback').count() === 0, '[' + scheme + '] 目标成功后不应留下重复的命令提示');
+  ok(await page.locator('.composer-wrap .goal-trigger').count() === 0 && await page.locator('.stage-head .goal-trigger').count() === 1, '[' + scheme + '] 目标入口应放在会话标题右侧');
+  ok(!(await goalTrigger.innerText()).includes('验证目标机制'), '[' + scheme + '] 目标全文不应占用标题栏');
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1080, height: 680 }]) {
+    await page.setViewportSize(viewport);
+    if (viewport.width === 1080) for (let i = 0; i < 13; i++) await railResize.press('ArrowRight');
+    const header = await page.locator('.stage-head').evaluate(head => {
+      const bounds = head.getBoundingClientRect(), children = [...head.children].map(el => el.getBoundingClientRect()).filter(r => r.width > 0 && r.height > 0);
+      return { height: bounds.height, inside: children.every(r => r.left >= bounds.left && r.right <= bounds.right && r.top >= bounds.top && r.bottom <= bounds.bottom), separate: children.every((r, i) => !i || r.left >= children[i - 1].right - 1) };
+    });
+    ok(header.inside && header.separate && header.height === 56, '[' + scheme + '] ' + viewport.width + ' 标题、权限与目标/计划按钮应保持单行且不重叠');
+    await page.screenshot({ path: path.join(SHOTS, scheme + '-header-progress-' + viewport.width + '.png') });
+    if (viewport.width === 1080) await railResize.dblclick();
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.screenshot({ path: path.join(SHOTS, scheme + '-harness-goal.png') });
   await page.getByRole('button', { name: '查看目标进展', exact: true }).click();
   await page.locator('.goal-details').waitFor();
   await page.locator('.goal-details').evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished.catch(() => {}))));
   await page.locator('.goal-details').getByText('UI_GOAL_EVIDENCE：本地模型调用 goal_update，状态已持久化。', { exact: true }).waitFor();
   ok(await page.locator('.goal-criteria').getByText('已验证', { exact: true }).count() === 1, '[' + scheme + '] 目标完成条件未展示验证状态');
+  const goalBounds = await page.locator('.goal-details').boundingBox(), clearBounds = await page.getByRole('button', { name: '结束并收起目标', exact: true }).boundingBox();
+  ok(clearBounds.y >= goalBounds.y && clearBounds.y + clearBounds.height <= goalBounds.y + goalBounds.height, '[' + scheme + '] 长目标不应把操作按钮挤出详情浮层');
   await page.screenshot({ path: path.join(SHOTS, scheme + '-goal-details.png') });
   await page.keyboard.press('Escape');
-  await page.reload(); await page.locator('.harness-goal').filter({ hasText: '目标机制验证通过。' }).waitFor();
+  const goalSession = (await rpc('session-list')).focused;
+  await goalTrigger.click(); await rpc('session-focus', { sessionId: freshId });
+  await page.locator('.goal-details').waitFor({ state: 'detached' });
+  ok(await goalTrigger.count() === 0, '[' + scheme + '] 目标入口或详情不应泄漏到其他会话');
+  await rpc('session-focus', { sessionId: goalSession });
+  await page.reload(); await goalTrigger.waitFor();
+  await goalTrigger.click(); await page.locator('.goal-details section .md').getByText('目标机制验证通过。', { exact: true }).waitFor();
   await page.getByRole('button', { name: '结束并收起目标', exact: true }).click();
-  await page.locator('.harness-goal').waitFor({ state: 'detached' });
+  await goalTrigger.waitFor({ state: 'detached' });
+  await page.locator('.goal-details').waitFor({ state: 'detached' });
+  await taskInput.fill('/goal UI_THINKING_CHECK_' + scheme); await taskInput.press('Enter');
+  await page.locator('.reason-head').first().waitFor();
+  await page.locator('.reason-head').first().click();
+  await page.locator('.reasoning-body').filter({ hasText: 'UI_THINKING_LIVE' }).waitFor();
+  await goalTrigger.click(); await page.getByRole('button', { name: '暂停目标', exact: true }).click();
+  await goalTrigger.filter({ hasText: '已暂停' }).waitFor();
+  const resumeBanner = page.locator('.banner').getByRole('button', { name: '继续目标', exact: true });
+  await resumeBanner.waitFor({ state: 'visible' });
+  await resumeBanner.click();
+  await goalTrigger.filter({ hasText: '进行中' }).waitFor();
+  await goalTrigger.click();
+  await page.getByRole('button', { name: '结束并收起目标', exact: true }).click();
+  await goalTrigger.waitFor({ state: 'detached' });
+  await page.getByRole('button', { name: '发送（Enter）', exact: true }).waitFor();
   for (const [command, marker, result] of [['memory', 'UI_MEMORY_CHECK', '记忆保存验证完成。'], ['skill', 'UI_SKILL_CHECK', '技能保存验证完成。']]) {
     await taskInput.fill('/' + command + ' ' + marker); await taskInput.press('Enter');
     await page.getByRole('button', { name: '允许这一次', exact: true }).click();
@@ -675,15 +930,17 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   const imageResult = await mainWorld.send('Runtime.evaluate', { expression: 'window.api.invoke("attach-upload", ' + JSON.stringify({ sessionId: focusedResult.result.value, name: '图片示例.png', mime: 'image/png', data: imageData }) + ')', awaitPromise: true, returnByValue: true });
   const fixtureImageId = imageResult.result.value.id;
   const fixtureEvents = [
-    { t: 'user', id: 'fixture-user', turnId: 'fixture-turn', at: Date.now() - 10000, displayContent: '帮我检查这个项目，修复问题并验证。参考这张图片，把界面收敛得更清楚一些。', content: '帮我检查项目。', attachments: [{ kind: 'attachment', id: fixtureImageId, name: '图片示例.png', image: true }], images: [fixtureImageId] },
-    { t: 'assistant', turnId: 'fixture-turn', phase: 'commentary', content: '我先读取入口文件，再搜索相关逻辑，最后运行测试。', calls: [
+    { t: 'user', id: 'fixture-user', turnId: 'fixture-turn', at: Date.now() - 1556000, displayContent: '帮我检查这个项目，修复问题并验证。参考这张图片，把界面收敛得更清楚一些。', content: '帮我检查项目。', attachments: [{ kind: 'attachment', id: fixtureImageId, name: '图片示例.png', image: true }], images: [fixtureImageId] },
+    { t: 'assistant', turnId: 'fixture-turn', phase: 'commentary', reasoning: 'UI 布局验证：核对项目入口及执行结果。', content: '我先读取入口文件，再搜索相关逻辑，最后运行测试。', calls: [
       {id:'fixture', itemId:'fixture-1', name:'workspace_read', args:{path:'src/main.ts'}},
       {id:'fixture-search', itemId:'fixture-2', name:'workspace_grep', args:{pattern:'TODO'}},
-      {id:'fixture-eval', itemId:'fixture-3', name:'workspace_shell', args:{cmd:'npm test'}}
+      {id:'fixture-eval', itemId:'fixture-3', name:'workspace_shell', args:{cmd:'npm test'}},
+      ...Array.from({ length: 3 }, (_, i) => ({ id: 'fixture-extra-' + i, itemId: 'fixture-extra-' + i, name: 'workspace_read', args: { path: `src/check-${i}.js` } }))
     ] },
     { t: 'tool', turnId:'fixture-turn', id:'fixture', itemId:'fixture-1', name:'workspace_read', content:'export function main() { return true; }', ms:42 },
     { t: 'tool', turnId:'fixture-turn', id:'fixture-search', itemId:'fixture-2', name:'workspace_grep', content:'没有未完成项。', ms:18 },
     { t: 'tool', turnId:'fixture-turn', id:'fixture-eval', itemId:'fixture-3', name:'workspace_shell', content:'Tests: 12 passed', ms:11 },
+    ...Array.from({ length: 3 }, (_, i) => ({ t: 'tool', turnId: 'fixture-turn', id: 'fixture-extra-' + i, itemId: 'fixture-extra-' + i, content: 'fixture verified', ms: 12 })),
     { t: 'assistant', turnId:'fixture-turn', phase:'final_answer', content:'已完成这一轮检查。\n\n- 用户输入、执行过程和最终回复已分开。\n- 工具详情默认收起，需要时可以展开查看。\n- 图片保留在原消息中，重新打开对话后仍可预览。\n\n测试通过，可以继续体验。\n\n```ts\nexport function main() {\n  return true;\n}\n```' },
     { t: 'turn-end', turnId:'fixture-turn', stop:'completed', endedAt: Date.now() - 5000 }
   ];
@@ -693,12 +950,16 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.locator('.msg.user .attachment-image img').waitFor();
   const skipAgain = page.getByRole('button', { name: '稍后', exact: true });
   if (await skipAgain.count()) await skipAgain.click();
-  ok(await page.locator('.todo-strip').count() === 0, '[' + scheme + '] 没有实际任务时仍显示默认清单');
+  ok(await page.locator('.plan-trigger').count() === 0, '[' + scheme + '] 没有实际任务时仍显示默认清单');
   ok(!await page.locator('.tool-head').first().isVisible(), '[' + scheme + '] 连续工具调用没有默认收起');
+  for (const viewport of [{ width: 1080, height: 680 }, { width: 1440, height: 900 }]) {
+    await page.setViewportSize(viewport);
+    await checkProcessRow(page, '[' + scheme + '] ' + viewport.width + ' 执行过程');
+  }
   await page.screenshot({ path: path.join(SHOTS, scheme + '-conversation.png') });
   await page.locator('.tool-group > summary').press('Enter');
   await page.locator('.tool-head').nth(2).waitFor({ state: 'visible' });
-  ok(await page.locator('.tool-head:visible').count() === 3, '[' + scheme + '] 工具分组不能通过键盘展开');
+  ok(await page.locator('.tool-head:visible').count() === 6, '[' + scheme + '] 长工具分组不能通过键盘展开');
   await page.locator('.tool-head').first().click();
   ok(await page.locator('.tool-body').isVisible(), '[' + scheme + '] 工具调用记录不能展开');
   ok((await page.locator('.tool-body').innerText()).includes('42 ms'), '[' + scheme + '] 工具调用时长没有显示在详情中');
@@ -718,9 +979,11 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.locator('.msgs').evaluate(el => { el.style.scrollBehavior = 'auto'; el.scrollTop = 0; });
   await page.screenshot({ path: path.join(SHOTS, scheme + '-conversation-focused.png') });
 
+  await checkConversationNavigation({ page, rpc, scheme, shots: SHOTS, ok });
+
   // Exercise the actual plan tool, live events, saved state and manual UI reading.
   const priorPlanSession = (await rpc('session-list')).focused;
-  const planSession = await rpc('session-create', { title: '完整计划 UI 验证', managed: true });
+  const planSession = await rpc('session-create', { title: '完整计划 UI 验证', projectId: codeProject.id });
   await rpc('session-focus', { sessionId: planSession.id });
   await page.getByRole('textbox', { name: '任务指令' }).fill('UI_PLAN_TEMPLATE');
   await page.getByRole('button', { name: '发送（Enter）', exact: true }).click();
@@ -733,15 +996,21 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.getByRole('textbox', { name: '任务指令' }).fill('UI_PLAN_CHECK');
   await page.getByRole('button', { name: '发送（Enter）', exact: true }).click();
   await page.locator('.msg.assistant').filter({ hasText: '完整计划已建立。' }).waitFor();
+  ok(await page.locator('.stage-head .plan-trigger').count() === 1, '[' + scheme + '] 计划入口应在标题栏内');
+  ok(await planTrigger.innerText().then(text => !text.includes('完整计划中的长步骤')), '[' + scheme + '] 计划步骤全文不应占用标题栏');
+  const closedPlanGeometry = await page.locator('.chat').evaluate(chat => ({ head: chat.querySelector('.stage-head').getBoundingClientRect().bottom, msgs: chat.querySelector('.msgs').getBoundingClientRect().top }));
+  ok(Math.abs(closedPlanGeometry.head - closedPlanGeometry.msgs) < 1, '[' + scheme + '] 标题栏下方不应再有占用消息空间的计划横条');
   await planTrigger.focus(); await planTrigger.press('Enter');
   await planPanel.waitFor();
   ok(await planPanel.locator('li').count() === 30, '[' + scheme + '] 完整计划未列出所有步骤');
+  await planPanel.evaluate(el => Promise.all(el.getAnimations().map(a => a.finished.catch(() => {}))));
   ok(await planPanel.locator('.todo-step-content').first().innerText() === PLAN_STEPS[0].content, '[' + scheme + '] 长步骤内容被截断');
   for (const status of ['completed', 'in_progress', 'cancelled', 'pending']) ok(await planPanel.locator('[data-status="' + status + '"]').count() > 0, '[' + scheme + '] 计划缺少状态：' + status);
   await planPanel.locator('ol').focus(); await planPanel.locator('ol').press('End');
-  await page.waitForFunction(() => { const list = document.querySelector('.todo-plan-list'); return list && list.scrollTop > 0 && list.scrollTop + list.clientHeight >= list.scrollHeight - 2; });
-  const lastStepBounds = await planPanel.locator('li').last().boundingBox(), planListBounds = await planPanel.locator('ol').boundingBox();
-  ok(lastStepBounds.y >= planListBounds.y && lastStepBounds.y + lastStepBounds.height <= planListBounds.y + planListBounds.height + 2, '[' + scheme + '] 不能手动滚动到最后一步');
+  await page.waitForFunction(() => { const list = document.querySelector('.todo-plan-list'); return list && list.scrollTop > 0 && list.scrollTop + list.clientHeight >= list.scrollHeight - .5; });
+  const endGeometry = await planPanel.evaluate(el => { const last = el.querySelector('li:last-child').getBoundingClientRect(), list = el.querySelector('ol').getBoundingClientRect(); return { last: { top: last.top, bottom: last.bottom }, list: { top: list.top, bottom: list.bottom } }; });
+  ok(endGeometry.last.top >= endGeometry.list.top && endGeometry.last.bottom <= endGeometry.list.bottom + 2, '[' + scheme + '] 不能手动滚动到最后一步：' + JSON.stringify(endGeometry));
+  await page.screenshot({ path: path.join(SHOTS, scheme + '-plan-end.png') });
   await planPanel.getByRole('button', { name: '复制计划', exact: true }).click();
   const copiedPlan = await page.evaluate(() => navigator.clipboard.readText());
   ok(PLAN_STEPS.every(step => copiedPlan.includes(step.content)) && copiedPlan.includes('已取消'), '[' + scheme + '] 复制的计划不完整');
@@ -752,7 +1021,7 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await planTrigger.click(); await planPanel.waitFor();
   await rpc('session-focus', { sessionId: priorPlanSession });
   await planPanel.waitFor({ state: 'detached' });
-  ok(await page.locator('.todo-strip').count() === 0, '[' + scheme + '] 计划浮层泄漏到其他会话');
+  ok(await page.locator('.plan-trigger').count() === 0, '[' + scheme + '] 计划浮层泄漏到其他会话');
   await rpc('session-focus', { sessionId: planSession.id });
   await planTrigger.waitFor(); await page.reload(); await planTrigger.waitFor();
   ok((await planTrigger.innerText()).includes('3/30'), '[' + scheme + '] 重开会话丢失计划状态');
@@ -768,14 +1037,14 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   }
   // Tool panels, selected tabs and widths belong to their owning conversation.
   await page.setViewportSize({ width: 1440, height: 900 });
-  const viewA = await rpc('session-create', { title: 'UI 独立布局 A', managed: true }), viewB = await rpc('session-create', { title: 'UI 独立布局 B', managed: true });
+  const viewA = await rpc('session-create', { title: 'UI 独立布局 A', projectId: codeProject.id }), viewB = await rpc('session-create', { title: 'UI 独立布局 B', projectId: codeProject.id });
   await rpc('session-focus', { sessionId: viewA.id });
   await page.getByRole('button', { name: '展开工具面板', exact: true }).click();
-  await page.getByRole('tab', { name: '工作区文件', exact: true }).click();
+  await showTool(page, 'files');
   await page.getByRole('button', { name: '收起工具面板', exact: true }).click();
   await rpc('session-focus', { sessionId: viewB.id });
   await page.getByRole('button', { name: '展开工具面板', exact: true }).click();
-  await page.getByRole('tab', { name: '浏览器', exact: true }).click();
+  await showTool(page, 'browser');
   const resizeBar = await page.locator('.resize-handle').boundingBox();
   await page.mouse.move(resizeBar.x + resizeBar.width / 2, resizeBar.y + 120); await page.mouse.down(); await page.mouse.move(resizeBar.x + 100, resizeBar.y + 120); await page.mouse.up();
   const viewBWidth = (await page.locator('.dock').boundingBox()).width;
@@ -792,6 +1061,8 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await rpc('session-focus', { sessionId: viewA.id });
   await page.getByRole('textbox', { name: '任务指令' }).fill('UI_THINKING_CHECK_' + scheme);
   await page.getByRole('button', { name: '发送（Enter）', exact: true }).click();
+  await page.locator('.reason-head').first().waitFor();
+  await page.locator('.reason-head').first().click();
   await page.locator('.reasoning-body').filter({ hasText: 'UI_THINKING_LIVE' }).waitFor();
   ok(await page.getByRole('button', { name: '停止响应', exact: true }).count() === 1 && await page.getByRole('button', { name: '发送（Enter）', exact: true }).count() === 0, '[' + scheme + '] 运行中应仅显示一个停止按钮');
   ok(await page.locator('.composer').evaluate(el => !el.classList.contains('rt-Card') && ['borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomLeftRadius', 'borderBottomRightRadius'].every(k => getComputedStyle(el)[k] === '22px')), '[' + scheme + '] 输入框应使用完整且一致的四角圆角');
@@ -799,32 +1070,122 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   ok(await page.locator('.reasoning-body script').count() === 0 && !await page.evaluate(() => window.__thinkingScriptExecuted), '[' + scheme + '] 思考内容被当作脚本执行');
   const thoughtSnapshot = await rpc('session-snapshot', { sessionId: viewA.id });
   ok(thoughtSnapshot.partialReasoning.includes('UI_THINKING_LIVE') && !thoughtSnapshot.partial, '[' + scheme + '] 思考流没有独立保存');
+  await page.setViewportSize({ width: 1080, height: 680 });
+  await checkProcessRow(page, '[' + scheme + '] 窄窗口实时思考');
+  await page.screenshot({ path: path.join(SHOTS, scheme + '-reasoning-1080.png') });
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.screenshot({ path: path.join(SHOTS, scheme + '-reasoning-live.png') });
-  await page.reload(); await page.locator('.reasoning-body').filter({ hasText: 'UI_THINKING_LIVE' }).waitFor();
+  await page.reload(); await page.locator('.reason-head').first().waitFor();
+  ok(await page.locator('.reasoning-body').count() === 0, '[' + scheme + '] 刷新后思考应默认收起');
+  await page.locator('.reason-head').first().click();
+  await page.locator('.reasoning-body').filter({ hasText: 'UI_THINKING_LIVE' }).waitFor();
   await rpc('session-focus', { sessionId: viewB.id }); await page.locator('.browser-bar').waitFor();
-  ok(await page.locator('.reasoning-body').count() === 0, '[' + scheme + '] 思考内容泄漏到另一会话');
-  await rpc('session-focus', { sessionId: viewA.id }); await page.locator('.reasoning-body').waitFor();
+  ok(await page.locator('.reason-row').count() === 0, '[' + scheme + '] 思考内容泄漏到另一会话');
+  await rpc('session-focus', { sessionId: viewA.id }); await page.locator('.reason-head').first().waitFor();
   pendingReasoning.get(scheme)();
   await page.locator('.msg.assistant').filter({ hasText: '思考展示验证完成。' }).waitFor();
-  // A final message can arrive before the run-complete event closes the process.
-  await page.locator('.turn-process:not([open]) > summary').click();
+  // 与 DSH 一致：完成后的思考默认收起，执行过程收成一行摘要。
+  await page.reload(); await page.locator('.turn-process > summary:not([hidden])').first().waitFor();
+  ok(await page.locator('.reason-row.is-open').count() === 0, '[' + scheme + '] 完成后思考应默认收起');
+  // 完成后执行过程默认折叠，先展开再检查思考内容。
+  await page.locator('.turn-process > summary:not([hidden])').first().click();
+  await page.locator('.reason-head').first().click();
   await page.locator('.reasoning-body').filter({ hasText: 'UI_THINKING_FINAL' }).waitFor();
-  await page.locator('.reasoning > summary').click(); await page.locator('.reasoning-body').waitFor({ state: 'hidden' });
-  await page.locator('.reasoning > summary').click(); await page.locator('.reasoning-body').waitFor();
+  await page.locator('.reason-head').click(); await page.locator('.reasoning-body').waitFor({ state: 'hidden' });
+  await page.locator('.reason-head').click(); await page.locator('.reasoning-body').waitFor();
   await page.screenshot({ path: path.join(SHOTS, scheme + '-reasoning-saved.png') });
-  await page.reload(); await page.locator('.turn-process > summary').filter({ hasText: '思考过程' }).click();
+  await page.reload();
+  await page.locator('.turn-process > summary:not([hidden])').first().click();
+  await page.locator('.reason-head').first().click();
   await page.locator('.reasoning-body').filter({ hasText: 'UI_THINKING_FINAL' }).waitFor();
-  const retryChat = await rpc('session-create', { title: '模型恢复验证', managed: true }); await rpc('session-focus', { sessionId: retryChat.id });
+  const retryChat = await rpc('session-create', { title: '模型恢复验证', projectId: codeProject.id }); await rpc('session-focus', { sessionId: retryChat.id });
   await page.getByRole('textbox', { name: '任务指令' }).fill('UI_RETRY_CHECK_' + scheme);
   await page.getByRole('button', { name: '发送（Enter）', exact: true }).click();
   await page.getByText(/模型连接重试 1\/10/).waitFor();
+  await checkProcessRow(page, '[' + scheme + '] 模型重试长状态');
   await page.screenshot({ path: path.join(SHOTS, scheme + '-model-retry.png') });
   await page.reload(); await page.getByText(/模型连接重试 [12]\/10/).waitFor();
   releasedRetry.add(scheme); pendingRetry.get(scheme)?.();
   await page.locator('.msg.assistant').filter({ hasText: '模型重试验证完成。' }).waitFor();
   ok(modelRetries.get(scheme) === 3, '[' + scheme + '] 模型恢复请求次数错误');
   ok(await page.getByText(/模型连接重试 [12]\/10/).count() === 0, '[' + scheme + '] 模型恢复后仍残留重试状态');
-  const disposable = await rpc('session-create', { title: '仅删除这个测试对话', managed: true });
+  // Work tabs exercise the real document, browser-page and PTY contracts.
+  const tabRoot = path.join(DATA, 'ui-tabs-' + scheme); fs.mkdirSync(tabRoot);
+  const tabProject = await rpc('project-save', { scope, project: { name: 'UI tabs ' + scheme, folders: [folder(tabRoot, 'tabs')], primaryKey: 'tabs' } });
+  const workChat = await rpc('session-create', { title: '多标签工作验证 ' + scheme, projectId: tabProject.id });
+  await rpc('session-focus', { sessionId: workChat.id }); await showTool(page, 'files');
+  fs.mkdirSync(path.join(workChat.workspace.root, 'nested'), { recursive: true });
+  fs.writeFileSync(path.join(workChat.workspace.root, 'report.md'), '# 工作报告\n\n[继续阅读](nested/next.md)\n\n[不应执行](javascript:alert(1))');
+  fs.writeFileSync(path.join(workChat.workspace.root, 'nested/next.md'), '# 后续文档\n\nDOC_TAB_VERIFIED');
+  await page.getByRole('button', { name: '刷新文件目录', exact: true }).click();
+  await page.getByRole('button', { name: '复制工作目录路径', exact: true }).click();
+  ok(await page.evaluate(() => navigator.clipboard.readText()) === workChat.workspace.root, '[' + scheme + '] 工作区文件应能复制目录路径');
+  await page.locator('.workspace-tree [data-path="report.md"]').click();
+  await page.locator('.document-panel').getByRole('heading', { name: '工作报告', exact: true }).waitFor();
+  ok(await page.locator('.document-panel a[href^="javascript:"]').count() === 0, '[' + scheme + '] 文档不能渲染危险协议链接');
+  const beforeReuse = await page.locator('.dock-tabs [role="tab"]').count();
+  await showTool(page, 'files'); await page.locator('.workspace-tree [data-path="report.md"]').click();
+  ok(await page.locator('.dock-tabs [role="tab"]').count() === beforeReuse, '[' + scheme + '] 同一文档应复用标签页');
+  await page.locator('.dock-body[data-state="active"]').getByRole('tab', { name: '源码', exact: true }).click();
+  ok((await page.locator('.dock-body[data-state="active"] .document-content').innerText()).startsWith('# 工作报告'), '[' + scheme + '] Markdown 源码视图不可用');
+  await page.locator('.dock-body[data-state="active"]').getByRole('tab', { name: '预览', exact: true }).click();
+  await page.locator('.dock-body[data-state="active"]').getByRole('link', { name: '继续阅读', exact: true }).click();
+  await page.locator('.document-panel').getByRole('heading', { name: '后续文档', exact: true }).waitFor();
+  await page.screenshot({ path: path.join(SHOTS, scheme + '-document-tabs.png') });
+  await page.getByRole('button', { name: '新建标签页', exact: true }).click();
+  await page.getByRole('menuitem', { name: '工作区文件标签页', exact: true }).click();
+  ok(await page.locator('.dock-tab-wrap[data-tab-kind="files"]').count() === 2, '[' + scheme + '] 应支持多个目录浏览标签');
+  const secondFiles = page.locator('.dock-tab-wrap[data-tab-kind="files"]').last(); await secondFiles.hover(); await secondFiles.getByRole('button').click();
+  ok(await page.locator('.dock-tab-wrap[data-tab-kind="files"]').count() === 1 && fs.existsSync(path.join(workChat.workspace.root, 'report.md')), '[' + scheme + '] 关闭文件标签不应删除文件');
+  await showTool(page, 'browser');
+  const firstBrowserId = await page.locator('.dock-tab-wrap[data-tab-kind="browser"]').first().getAttribute('data-tab-id');
+  const browserA = 'http://127.0.0.1:' + PORT + '/__ui-fixture?tab=A', browserB = 'http://127.0.0.1:' + PORT + '/__ui-fixture?tab=B';
+  await page.getByRole('textbox', { name: '目标网址' }).fill(browserA); await page.getByRole('textbox', { name: '目标网址' }).press('Enter');
+  await page.locator('.screen-canvas').waitFor({ timeout: 90000 });
+  await page.getByRole('button', { name: '新建标签页', exact: true }).click(); await page.getByRole('menuitem', { name: '浏览器标签页', exact: true }).click();
+  ok(await page.getByRole('textbox', { name: '目标网址' }).inputValue() === '', '[' + scheme + '] 新浏览器标签不应继承另一页面网址');
+  await page.getByRole('textbox', { name: '目标网址' }).fill(browserB); await page.getByRole('textbox', { name: '目标网址' }).press('Enter');
+  await page.waitForFunction(url => document.querySelector('[aria-label="目标网址"]')?.value === url && !!document.querySelector('.screen-canvas'), browserB);
+  const secondBrowser = page.locator('.dock-tab-wrap[data-tab-kind="browser"]').last(); const secondBrowserId = await secondBrowser.getAttribute('data-tab-id');
+  await page.locator('.dock-tab-wrap[data-tab-id="' + firstBrowserId + '"]').getByRole('tab').click();
+  await page.waitForFunction(url => document.querySelector('[aria-label="目标网址"]')?.value === url && !!document.querySelector('.screen-canvas'), browserA);
+  const selectedPage = await rpc('tool-run', { sessionId: workChat.id, name: 'browser_snapshot', args: {} });
+  ok(selectedPage.text.includes(browserA), '[' + scheme + '] 浏览器标签必须切换真实CDP页面');
+  await page.getByRole('button', { name: '显示网络请求', exact: true }).click();
+  await page.getByPlaceholder('过滤 URL / 参数名').fill('api');
+  await showTool(page, 'files');
+  await page.locator('.dock-tab-wrap[data-tab-id="' + firstBrowserId + '"]').getByRole('tab').click();
+  ok(await page.getByPlaceholder('过滤 URL / 参数名').inputValue() === 'api', '[' + scheme + '] 浏览器标签应保留网络筛选');
+  await page.locator('.dock-tab-wrap[data-tab-id="' + secondBrowserId + '"]').hover();
+  await page.locator('.dock-tab-wrap[data-tab-id="' + secondBrowserId + '"]').getByRole('button').click();
+  await page.locator('.dock-tab-wrap[data-tab-id="' + secondBrowserId + '"]').waitFor({ state: 'detached' });
+  ok(JSON.parse((await rpc('tool-run', { sessionId: workChat.id, name: 'browser_tabs', args: {} })).text).length === 1, '[' + scheme + '] 关闭浏览器标签应关闭真实页面');
+  await rpc('session-set-mode', { sessionId: workChat.id, mode: 'full-access' });
+  await page.getByRole('button', { name: '新建标签页', exact: true }).click(); await page.getByRole('menuitem', { name: '终端标签页', exact: true }).click();
+  await page.locator('.terminal-panel').getByText('当前用户权限', { exact: true }).waitFor();
+  const terminalId = await page.locator('.dock-tab-wrap[data-tab-kind="terminal"]').getAttribute('data-tab-id');
+  await page.getByRole('menu').waitFor({ state: 'detached' });
+  await page.waitForFunction(() => document.activeElement?.matches('.terminal-screen .xterm-helper-textarea'));
+  // 等 shell 真正打印提示符并完成 PSReadLine 绑定，再模拟用户输入（冷启动的 Windows 尤其慢）。
+  const promptRe = process.platform === 'win32' ? /PS [^>\r\n]*>/ : /[$#] /;
+  const promptDeadline = Date.now() + 15000;
+  while (!promptRe.test((await rpc('terminal-snapshot', { sessionId: workChat.id, id: terminalId })).output)) { if (Date.now() > promptDeadline) throw Error('Terminal prompt not ready'); await page.waitForTimeout(100); }
+  await page.waitForTimeout(800);
+  await page.keyboard.type(process.platform === 'win32' ? "Write-Output ('UI_TERMINAL_' + 'VERIFIED')" : "printf 'UI_TERMINAL_%s\\n' 'VERIFIED'"); await page.keyboard.press('Enter');
+  const terminalDeadline = Date.now() + 12000;
+  while (!(await rpc('terminal-snapshot', { sessionId: workChat.id, id: terminalId })).output.includes('UI_TERMINAL_VERIFIED')) { if (Date.now() > terminalDeadline) throw Error('Terminal UI input failed'); await page.waitForTimeout(50); }
+  ok(await page.getByRole('menu').count() === 0, '[' + scheme + '] 终端输入回车不能重新打开新建标签菜单');
+  await page.screenshot({ path: path.join(SHOTS, scheme + '-terminal-tabs.png') });
+  const tabCount = await page.locator('.dock-tabs [role="tab"]').count();
+  await page.reload(); await page.locator('.terminal-panel').getByText('当前用户权限', { exact: true }).waitFor();
+  ok(await page.locator('.dock-tabs [role="tab"]').count() === tabCount, '[' + scheme + '] 重载丢失工作标签页');
+  await page.locator('.dock-tab-wrap[data-tab-id="' + terminalId + '"]').hover(); await page.locator('.dock-tab-wrap[data-tab-id="' + terminalId + '"]').getByRole('button').click();
+  await page.locator('.dock-tab-wrap[data-tab-id="' + terminalId + '"]').waitFor({ state: 'detached' });
+  let closedTerminal = false; try { await rpc('terminal-snapshot', { sessionId: workChat.id, id: terminalId }); } catch { closedTerminal = true; } ok(closedTerminal, '[' + scheme + '] 关闭终端标签应释放进程');
+  await rpc('project-attach', { sessionId: workChat.id, projectId: codeProject.id });
+  await page.locator('.dock-tabs').getByRole('tab', { name: 'report.md', exact: true }).click();
+  await page.locator('.dock-body[data-state="active"]').getByRole('alert').filter({ hasText: '之前的工作目录' }).waitFor();
+  const disposable = await rpc('session-create', { title: '仅删除这个测试对话', projectId: codeProject.id });
   await rpc('session-focus', { sessionId: disposable.id });
   const openRail = page.getByRole('button', { name: '展开会话列表', exact: true });
   if (await openRail.count()) await openRail.click();
