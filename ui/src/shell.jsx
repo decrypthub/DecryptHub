@@ -14,6 +14,7 @@ import { readSidebarOpen, saveSidebarOpen } from './sidebar-state.js';
 import { SidebarBrowser } from './sidebar-browser.jsx';
 import { SidebarResize, useSidebarWidth } from './sidebar-width.jsx';
 import { AccountProvider, SidebarAccount } from './account.jsx';
+import { OnboardingDialog } from './onboarding.jsx';
 
 let win = null;
 async function getWin() {
@@ -153,30 +154,6 @@ function WorkbenchShell() {
       </div>
       <ProjectDialogs />
     </>}
-    {firstRun && <FirstRunDialog />}
+    {firstRun && <OnboardingDialog />}
   </div>;
-}
-
-function FirstRunDialog() {
-  const { settings, setFirstRun, setView, api } = useWorkbench();
-  const [doc, setDoc] = useState(null);
-  const refresh = () => api.invoke('doctor').then(setDoc).catch(() => setDoc({ runtime: { error: '检查失败，请在设置中重试' } }));
-  useEffect(() => { refresh(); return api.on('download-progress', p => { if (p.phase === 'done') refresh(); }); }, []);
-  const c = settings?.provider === 'anthropic' ? 'anthropic' : 'openai';
-  const active = settings?.providers?.find(p => p.id === settings.activeProviderId);
-  const keyOk = !!(active?.apiKey || active?.hasKey || settings?.[c]?.apiKey) && !!(active?.baseUrl || settings?.[c]?.baseUrl) && !!(settings?.activeModel || settings?.[c]?.model);
-  const ready = keyOk && !doc?.runtime?.error;
-  return <Dialog.Root open onOpenChange={v => { if (!v) setFirstRun(false); }}>
-    <Dialog.Content className="setup-dialog" maxWidth="520px">
-      <div className="setup-brand"><LogoMark size={38} /><span>开始你的第一次任务</span></div>
-      <Dialog.Title size="6">让工作区准备就绪。</Dialog.Title>
-      <Dialog.Description size="2" color="gray" mb="5">连接一个模型、按需接入 MCP 工具；需要网页证据时再打开目标网站。</Dialog.Description>
-      <div className="setup-checks">{[
-        ['layers', '运行组件', doc ? !doc.runtime?.error : null, doc?.runtime?.error || '运行环境已准备好'],
-        ['globe', '浏览器（可选）', doc ? !!doc.chromeOk : null, doc?.chromeOk ? 'WDH 组件已安装' : '可在设置中安装 WDH；未安装也能先对话和处理文件'],
-        ['sparkles', 'AI 模型', keyOk, keyOk ? '已连接模型渠道' : '添加 API Key 以启用 AI 分析'],
-      ].map(([icon, title, ok, desc]) => <div className="setup-check" key={title}><span className="setup-check-icon"><Icon n={icon} size={19} /></span><div><strong>{title}</strong><span>{ok === null ? '正在检查…' : desc}</span></div><span className={'setup-state' + (ok ? ' ready' : '')}><Icon n={ok ? 'check' : 'minus'} size={16} /></span></div>)}</div>
-      <Flex justify="end" gap="3" mt="5"><Button variant="soft" color="gray" onClick={() => setFirstRun(false)}>稍后</Button><Button onClick={() => { setFirstRun(false); if (!ready) setView('settings'); }}>{ready ? '开始对话' : '前往设置'}<Icon n="go" size={16} /></Button></Flex>
-    </Dialog.Content>
-  </Dialog.Root>;
 }

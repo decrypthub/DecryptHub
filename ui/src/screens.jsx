@@ -125,7 +125,7 @@ function AiTab({ s, setS }) {
 
   return <>
     <Section title="模型渠道" desc="支持 OpenAI 兼容接口与 Claude 原生接口。"
-      actions={<Button size="2" onClick={openNew}><Icon n="plus" size={16} />添加</Button>}>
+      actions={<Flex gap="2"><Button size="2" variant="soft" color="gray" onClick={async () => { await w.saveSettings({ ...s, onboarding: null }, true); w.setFirstRun(true); }}>重新运行引导</Button><Button size="2" onClick={openNew}><Icon n="plus" size={16} />添加</Button></Flex>}>
       <Card size="2" style={{ padding: 0 }}>
         {!list.length && <EmptyState icon="sparkles" title="连接第一个模型" description="添加 OpenAI 兼容端点或 Claude 原生渠道，开启 AI 辅助分析。"><Button size="2" onClick={openNew}><Icon n="plus" size={16} />添加模型渠道</Button></EmptyState>}
         {list.map((p, i) => <div key={p.id} className={'prov-row' + (activeId === p.id ? ' on' : '')}>

@@ -15,6 +15,7 @@ import { validateArgs } from './contract.mjs';
 import { decideTool, toolRisk, HOST_EXEC, WORKER_TOOLS } from './policy.mjs';
 import { formatTodos } from './todos.mjs';
 import { workspacePath } from './workspaces.mjs';
+import { profilePrompt } from './profile.mjs';
 
 const REF_TOOL = { name: 'context_ref_read', description: '读取被截断的长工具输出（截断提示里的 ctx_ref）。offset/length 分页（默认 6000 字符）。', schema: { type: 'object', properties: { ref: { type: 'string' }, offset: { type: 'number' }, length: { type: 'number' } }, required: ['ref'] } };
 const MAX_AUTO_FAILURES = 2; // Stop repeated failed compactions, not a long-running task's successful compactions.
@@ -49,7 +50,7 @@ class Agent {
     this.getToolContext = getToolContext || (() => ({})); this.getWorkspace = getWorkspace || (() => null); this.record = record || (() => {});
     this.getGoal = getGoal || (() => this.getToolContext().getGoal?.());
     this.groups = new Set(['core']);
-    this.hist = new History({ system: SYSTEM });
+    this.hist = new History({ system: SYSTEM + profilePrompt(this.getSettings()) });
     this.hist.ctxDir = this.ctxDir();
     this.running = false; this.abort = null; this.wrapUp = false;
     this.calib = 1; this.compressing = false; this.lastCompressAfter = null;
@@ -131,12 +132,12 @@ class Agent {
   // 对话上下文落盘，重启应用后恢复（系统提示总用最新版本）
   histFile() { return this.projectDir ? this.projectDir + '/.agent-history.json' : null; }
   persist() { const f = this.histFile(); if (f && !this.hist.save(f)) throw new Error('无法保存对话状态，已停止以免丢失执行记录'); }
-  restore() { const f = this.histFile(); if (!f) return; const h = History.load(f, SYSTEM); h.ctxDir = this.ctxDir(); if (h.events.length) this.hist = h; this.hist.onAppend = () => this.persist(); }
+  restore() { const f = this.histFile(); if (!f) return; const h = History.load(f, SYSTEM + profilePrompt(this.getSettings())); h.ctxDir = this.ctxDir(); if (h.events.length) this.hist = h; this.hist.onAppend = () => this.persist(); }
 
 
   allTools() {
     if (this.browser?.running) this.groups.add('browser');
-    this.hist.system = SYSTEM;
+    this.hist.system = SYSTEM + profilePrompt(this.getSettings());
     const mcpTools = this.groups.has('debugger') ? (this.mcp.tools || []).map(t => ({ name: t.name, description: t.description, schema: t.inputSchema })) : [];
     // 用户接入的 MCP 服务：工具名已带「服务名__」前缀
     const ext = this.groups.has('mcp') ? (this.mcpHost?.tools?.() || []).map(t => ({ name: t.name, description: t.description, schema: t.inputSchema })) : [];

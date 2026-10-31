@@ -179,9 +179,8 @@ export function Workbench({ children }) {
       const restoredSessions = await api.invoke('session-list'); setSessions(restoredSessions);
       setProjects(await api.invoke('projects-list'));
       const doc = await api.invoke('doctor');
-      const activeKey = s.providers.find(p => p.id === s.activeProviderId)?.hasKey;
-      const keyMissing = !(activeKey || (s.provider === 'anthropic' ? s.anthropic.hasKey : s.openai.hasKey));
-      if (keyMissing && !window.__JSRA_SKIP_ONBOARD) setFirstRun(true);
+      const profileDone = !!(s.onboarding?.completedAt || s.onboarding?.skippedAt);
+      if (!profileDone && !window.__JSRA_SKIP_ONBOARD) setFirstRun(true);
       const shot = window.__JSRA_SHOT;
       if (['settings', 'automations'].includes(shot)) setView(shot);
       else if (['browser', 'evidence', 'code'].includes(shot)) { setSide(shot, restoredSessions.focused); setSideOpen(true, restoredSessions.focused); }
