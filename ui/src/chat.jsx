@@ -14,7 +14,7 @@ import { SubagentButton, TurnSubagents } from './subagents.jsx';
 import { TurnNavigator } from './turn-navigator.jsx';
 import { handleWindowDrag } from './window-drag.js';
 import { PlanButton } from './plan.jsx';
-import { GoalDetails } from './goal-details.jsx';
+import { GoalDetails, GoalResumeBanner } from './goal-details.jsx';
 import { Reasoning } from './reasoning.jsx';
 import { processPresentation } from './process-presentation.js';
 import { QueuedMessages } from './queue-strip.jsx';
@@ -75,6 +75,7 @@ export function ChatStage({ railOpen, onExpandRail }) {
     </div>}
     {cur.run?.status === 'interrupted' && <div className="banner amber"><Icon n="info" /><Text size="1">上次任务已中断。已有改动已保留，可以检查后继续。</Text></div>}
     {cur.run?.status === 'needs_attention' && <div className="banner amber"><Icon n="info" /><Text size="1">自动化需要权限或补充信息，请在此对话中继续处理。</Text></div>}
+    <GoalResumeBanner />
     {session?.workspace?.availability !== 'ready' && <div className="banner amber"><Icon n="info" size={13} /><Text size="1">项目目录不可用，执行已停止。聊天记录保留。</Text><Button size="1" variant="ghost" onClick={() => w.api.invoke('projects-check').catch(e => w.toast(e.message, 'err'))}>重新检查</Button><Button size="1" onClick={() => w.setProjectEditor({ ...(w.projects.find(p => p.id === session?.projectId) || {}), relink: true })}>重新选择目录</Button></div>}
 
     <div className="transcript" key={'transcript-' + w.sid}>

@@ -3,6 +3,36 @@ import { Badge, Flex, Popover, Text } from '@radix-ui/themes';
 import { ActionIcon, Button, Icon, Markdown } from './kit.jsx';
 import { useWorkbench } from './bus.jsx';
 
+const STOP_REASONS = {
+  budget: '已到预算上限',
+  'max-steps': '达到步数上限',
+  'time-limit': '达到时间上限',
+  'no-progress': '自动接续没有产生新进展',
+  'app-restarted': '应用重启后暂停',
+  'dispatch-failed': '自动接续启动失败',
+  'model-blocked': '模型报告目标受阻',
+  interrupted: '任务被中断',
+  error: '执行出错',
+};
+export function goalStopText(goal) {
+  const reason = STOP_REASONS[goal?.stopReason] || '目标已暂停';
+  return goal?.resumeNote ? `${reason}：${goal.resumeNote}` : reason;
+}
+// 目标暂停后用户需要一眼看到原因和继续入口，而不是自己去翻目标弹层。
+export function GoalResumeBanner() {
+  const w = useWorkbench(), goal = w.cur?.goal, [busy, setBusy] = useState(false), [error, setError] = useState('');
+  if (!goal || goal.status === 'active' || goal.status === 'complete' || w.cur?.agentRunning) return null;
+  async function resume() {
+    const sid = w.sid; if (busy) return;
+    setBusy(true); setError('');
+    try {
+      const result = await w.api.invoke('goal-action', { sessionId: sid, action: 'resume' });
+      if (!result.ok && w.isCurrentSession(sid)) setError(result.error || '继续目标失败');
+    } catch (e) { if (w.isCurrentSession(sid)) setError(e.message); }
+    finally { if (w.isCurrentSession(sid)) setBusy(false); }
+  }
+  return <div className="banner amber"><Icon n="target" size={13} /><Text size="1">目标已暂停：{goalStopText(goal)}</Text><Button size="1" disabled={busy} onClick={resume}>{busy ? '继续中…' : '继续目标'}</Button>{error && <Text size="1" color="red">{error}</Text>}</div>;
+}
 export function GoalDetails({ goal }) {
   const w = useWorkbench(), titleId = useId(), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const label = { active: '进行中', paused: '已暂停', complete: '已完成', needs_attention: '需要处理' }[goal.status] || goal.status;
@@ -25,7 +55,7 @@ export function GoalDetails({ goal }) {
       {goal.summary && <section><h4>当前进展</h4><Markdown text={goal.summary} /></section>}
       {!!goal.evidence?.length && <section><h4>模型记录的验证证据</h4><ul>{goal.evidence.map((item, i) => <li key={i}>{item}</li>)}</ul></section>}
       {goal.nextAction && <section><h4>下一步</h4><p>{goal.nextAction}</p></section>}
-      {goal.resumeNote && <p className="goal-resume-note">{goal.resumeNote}</p>}
+      {goal.status !== 'active' && goal.status !== 'complete' && <p className="goal-resume-note">{goalStopText(goal)}</p>}
       {!!goal.checkpoints?.length && <details className="goal-checkpoints"><summary>进展记录（{goal.checkpoints.length}）</summary>{goal.checkpoints.slice().reverse().map((c, i) => <article key={i}><time>{new Date(c.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time><p>{c.summary}</p></article>)}</details>}
       <Text size="1" color="gray">已执行 {goal.turns || 0} 轮{goal.usedTokens ? ` · 累计 ${(goal.usedTokens / 1000).toFixed(1)}k tokens` : ''} · 可随时暂停或补充要求</Text>
       </div>

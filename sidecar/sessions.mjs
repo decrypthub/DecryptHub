@@ -240,6 +240,14 @@ class Session {
     const url = live || this.lastUrl;
     return { id: this.id, title: this.title, primary: this.primary, pinned: !!this.pinned, running: this.browser.running, embed: this.browser.embedActive, chromePid: this.browser.embedActive ? this.browser.chromePid : null, agentRunning: !!this.agent?.running, url, projectDir: this.projectDir, mode: this.mode, review: this.review, workspace: { ...this.workspace, ...this.mgr.workspaces.availability(this.workspace) }, projectId: this.projectId, run: this.runs.latest(), queued: this.queue.length, queuedItems: this.queue.map(q => ({ id: q.id, text: String(q.text || '').slice(0, 160), attachments: (q.attachments || []).length })), updatedAt: this.updatedAt };
   }
+  contextForSubagent(limit = 6000) {
+    const parts = [];
+    if (this.goal) parts.push(`当前目标：${this.goal.objective}\n已记录进展：${this.goal.summary || '暂无'}\n下一步：${this.goal.nextAction || '未记录'}`);
+    const recent = (this.agent?.hist?.events || []).filter(e => (e.t === 'user' && e.content) || (e.t === 'assistant' && e.content && !e.calls?.length)).slice(-8);
+    for (const e of recent) parts.push(`${e.t === 'user' ? '用户' : '助手'}：${String(e.content).replace(/\s+/g, ' ').slice(0, 700)}`);
+    if (this.workspace?.root) parts.push(`工作目录：${this.workspace.root}`);
+    return parts.join('\n').slice(0, limit);
+  }
   toolCtx() {
     if (this.mgr.projectsBusy) throw new Error('正在更新项目目录，请稍候');
     this.mgr.workspaces.verify(this.workspace);
@@ -247,7 +255,7 @@ class Session {
       components: this.mgr.components, plugins:this.mgr.plugins, extensions: this.mgr.extensions, sessionId: this.id, projectId: this.projectId, projectRoots: this.workspace.roots || [], projectDir: this.projectDir, browser: this.browser, mcp: this.mcp, relaunch: o => this.relaunch(o),
       openBrowser: opts => this.browser.running ? this.browser.navigate(opts.url).then(() => ({ ok: true })) : this.launch(opts),
       ensureDebugger: () => this.ensureDebugger(),
-      subagents: this.subagents, getGoal: () => this.goal, updateGoal: value => this.updateGoal(value),
+      subagents: this.subagents, getGoal: () => this.goal, updateGoal: value => this.updateGoal(value), parentContext: () => this.contextForSubagent(),
       goalBudget: this.activeRun?.source === 'goal' && this.goal ? { key: this.goal.id + ':' + this.goal.batchId, ...(this.goal.tokenBudget > 0 ? { remaining: Math.max(0, this.goal.tokenBudget - (this.goal.usedTokens || 0)) } : {}) } : null,
       workRoot: this.workspace.root, workspaceId: this.workspace.id, workspaceKind: this.workspace.kind, mode: this.mode, protectedRoot: this.mgr.userDataDir,
       changes: this.changes, readHashes: this.readHashes, runId: this.activeRun?.id,
