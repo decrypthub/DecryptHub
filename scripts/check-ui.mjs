@@ -104,6 +104,8 @@ const sidecar = spawn(process.execPath, [path.join(ROOT, 'sidecar', 'index.mjs')
 });
 sidecar.stderr?.on('data', d => process.stderr.write('[sidecar] ' + String(d)));
 await new Promise((res, rej) => { const t = setTimeout(() => rej(new Error('sidecar 未就绪')), 20000); sidecar.stdout.on('data', d => { if (/JSRA_PORT=/.test(String(d))) { clearTimeout(t); res(); } }); }).catch(e => { console.error(e.message); process.exit(2); });
+// UI 回归不需要首次引导：直接写入已完成偏好，避免弹层和布局检查抢时序。
+await rpc('save-settings', { onboarding: { version: 1, completedAt: new Date().toISOString() } }).catch(error => console.error('save onboarding:', error.message));
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png' };
 const srv = http.createServer((req, res) => {
@@ -194,9 +196,7 @@ await new Promise(r => srv.listen(PORT, '127.0.0.1', r));
 
 const { chromium } = await import('../node_modules/@zhizhuodemao/patchright/index.mjs');
 const browser = await chromium.launch({ headless: true, executablePath: CHROME });
-// 首次引导在真实用户那里只出现一次；UI 回归里统一跳过，避免它和布局检查抢时序。
-const newContext = browser.newContext.bind(browser);
-browser.newContext = async (...args) => { const context = await newContext(...args); await context.addInitScript(() => { window.__JSRA_SKIP_ONBOARD = 1; }); return context; };
+
 fs.mkdirSync(SHOTS, { recursive: true });
 
 async function checkWindowChrome(scheme) {
