@@ -1084,12 +1084,15 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   // 与 DSH 一致：完成后的思考默认收起，执行过程收成一行摘要。
   await page.reload(); await page.locator('.turn-process > summary:not([hidden])').first().waitFor();
   ok(await page.locator('.reason-row.is-open').count() === 0, '[' + scheme + '] 完成后思考应默认收起');
+  // 完成后执行过程默认折叠，先展开再检查思考内容。
+  await page.locator('.turn-process > summary:not([hidden])').first().click();
   await page.locator('.reason-head').first().click();
   await page.locator('.reasoning-body').filter({ hasText: 'UI_THINKING_FINAL' }).waitFor();
   await page.locator('.reason-head').click(); await page.locator('.reasoning-body').waitFor({ state: 'hidden' });
   await page.locator('.reason-head').click(); await page.locator('.reasoning-body').waitFor();
   await page.screenshot({ path: path.join(SHOTS, scheme + '-reasoning-saved.png') });
   await page.reload();
+  await page.locator('.turn-process > summary:not([hidden])').first().click();
   await page.locator('.reason-head').first().click();
   await page.locator('.reasoning-body').filter({ hasText: 'UI_THINKING_FINAL' }).waitFor();
   const retryChat = await rpc('session-create', { title: '模型恢复验证', projectId: codeProject.id }); await rpc('session-focus', { sessionId: retryChat.id });

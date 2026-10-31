@@ -75,7 +75,12 @@ export async function checkAccountMenu({ browser, baseUrl, wsPort, scheme, shots
     await evalMain('window.__accountLogoutFailure = true');
     await page.getByRole('menuitem', { name: '退出登录', exact: true }).click();
     await page.getByText('UI退出失败', { exact: true }).first().waitFor();
-    ok(await account.isVisible(), `[${scheme}] 凭据删除失败时不能假装退出登录`);
+    // 失败后仍应保持已登录状态：以侧栏入口的标签和昵称为准（设置页覆盖时 isVisible 不可靠）。
+    await page.keyboard.press('Escape');
+    const rail = page.locator('.rail-account').first();
+    const labelOk = await rail.getAttribute('aria-label') === '账号菜单';
+    const nicknameOk = (await rail.innerText()).includes('UI账号测试');
+    ok(labelOk && nicknameOk, `[${scheme}] 凭据删除失败时不能假装退出登录`);
     await evalMain('window.__accountLogoutFailure = false');
     await account.click(); await page.getByRole('menuitem', { name: '退出登录', exact: true }).click();
     await page.getByRole('button', { name: '更多', exact: true }).waitFor();

@@ -19,7 +19,7 @@ function fixture(t) {
 const wait = async (check, message = 'Terminal verification timed out') => { const end = Date.now() + 20000; while (!check()) { if (Date.now() > end) throw Error(message); await new Promise(r => setTimeout(r, 25)); } };
 const waitPrompt = async (s, id) => { if (process.platform === 'win32') await wait(() => /PS [^>\r\n]*>/.test(s.terminals.snapshot(id).output), 'PowerShell prompt timed out'); };
 const expectOutput = async (check, s, id) => { try { await wait(check); } catch (error) { const tail = s.terminals.snapshot(id).output.slice(-600); throw Error(error.message + '; output tail=' + JSON.stringify(tail)); } };
-const runCommand = async (s, id, command) => { s.terminals.input(id, command); await new Promise(r => setTimeout(r, 150)); s.terminals.input(id, '\r'); };
+const runCommand = async (s, id, command) => { s.terminals.input(id, command); await new Promise(r => setTimeout(r, 300)); s.terminals.input(id, '\r'); if (process.platform === 'win32') { await new Promise(r => setTimeout(r, 300)); s.terminals.input(id, '\r'); } };
 test('work tabs preserve stable IDs and choose a neighbour on close; v1 migrates network into browser', () => {
   let dock = addDockTab(emptyDock(), 'files'), original = dock.activeId; dock = addDockTab(dock, 'document', { path: 'report.md', workspace: 'test' });
   dock = addDockTab(dock, 'terminal'); dock = closeDockTab(dock, dock.activeId); assert.equal(dock.tabs.length, 2); assert.equal(dock.tabs[0].id, original); assert.equal(dock.activeId, dock.tabs[1].id);
