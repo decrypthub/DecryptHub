@@ -243,6 +243,9 @@ function RuntimeTab({ s, up }) {
       <Row label="Token 预算" desc="0 表示不限；按每次请求的输入和输出用量累加，与模型上下文容量分别计算">
         <TextField.Root aria-label="Token 预算" size="2" type="number" style={{ width: 120 }} min="0" step="1000" value={s.tokenBudget ?? 0} onChange={e => up('tokenBudget', Math.max(0, Math.floor(+e.target.value)))} />
       </Row>
+      <Row label="研究子代理并发" desc="同时运行的研究子代理数量，1–8；主代理和用户都可随时追加要求">
+        <TextField.Root aria-label="研究子代理并发" size="2" type="number" style={{ width: 120 }} min="1" max="8" step="1" value={s.subagentMaxActive ?? 3} onChange={e => up('subagentMaxActive', Math.min(8, Math.max(1, Math.floor(+e.target.value) || 1)))} />
+      </Row>
       <Row label="温度" desc="越小越稳定，分析类任务建议 0.2 以下">
         <TextField.Root size="2" type="number" style={{ width: 120 }} step="0.1" min="0" max="1" value={s.temperature} onChange={e => up('temperature', +e.target.value)} />
       </Row>

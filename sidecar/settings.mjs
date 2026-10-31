@@ -19,6 +19,7 @@ const DEFAULTS = {
   compactAt: 0.85, // 自动压缩阈值（占上下文窗口比例）；窗口本身随模型保存在 openai/anthropic.contextWindow，未设置则按模型名推断
   // 用户接入的 MCP 服务（Claude Desktop 的 mcpServers 格式 + enabled/transport 扩展）
   mcpServers: {},
+  subagentMaxActive: 3, // 研究子代理并发上限（1–8）
 };
 
 export function userDataDir() {
@@ -66,6 +67,7 @@ export function load() {
   s.chromePath = '';
   if (process.env.JSRA_EMBED_MODE) s.embedMode = process.env.JSRA_EMBED_MODE;
   if (!s.mcpServers || typeof s.mcpServers !== 'object' || Array.isArray(s.mcpServers)) s.mcpServers = {};
+  s.subagentMaxActive = Math.min(8, Math.max(1, Math.floor(Number(s.subagentMaxActive) || 3)));
   return s;
 }
 // 是否以原生子窗口嵌入（仅 Windows + 有头）。纯函数，便于单元测试
