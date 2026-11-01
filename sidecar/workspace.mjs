@@ -71,7 +71,9 @@ async function wsRead(a, ctx) {
   const rel = a.path || a.file; if (!rel) throw new Error('需要 path');
   const file = workspacePath(ctx, rel), size = fs.statSync(file).size; if (size > 8 * 1024 * 1024) throw new Error('文件超过 8MB，请用搜索或分段读取');
   const buf = fs.readFileSync(file); ctx.readHashes?.set(file, contentHash(buf));
-  const max = Math.min(300000, Math.max(1, Number(a.max) || 30000)), text = a.binary ? buf.toString('base64') : buf.toString('utf8');
+  const max = Math.min(300000, Math.max(1, Number(a.max) || 30000));
+  // PowerShell 5.1 的 -Encoding utf8 会写 BOM，这里剥掉，否则正文开头会多出一个不可见字符。
+  const text = a.binary ? buf.toString('base64') : buf.toString('utf8').replace(/^\uFEFF/, '');
   return { text: `文件 ${rel}（${size} 字节，sha256=${contentHash(buf)}）：\n` + text.slice(0, max) + (text.length > max ? '\n…(已截断)' : '') };
 }
 async function wsList(a, ctx) {
