@@ -182,6 +182,8 @@ try {
   if (await rail.count()) await rail.first().click();
   await page.locator('.rail-nav').getByRole('button', { name: '插件', exact: true }).click();
   await page.locator('[data-plugin-id="wdh"]').waitFor();
+  if ((await page.getByRole('tab').allInnerTexts()).join('|') !== '官方插件|自定义 MCP')
+    throw Error('插件页应分为「官方插件」和「自定义 MCP」两个页签');
   let available = await invoke('plugins-refresh', { force: true });
   for (const plugin of available.official)
     if (!plugin.latest) throw Error(plugin.id + ': missing release ' + plugin.catalogError);
@@ -212,6 +214,9 @@ try {
     await until(() => allReady(['decrypthub_' + id]), id + ' MCP connected');
     await row.getByRole('button', { name: '收起', exact: true }).click();
   }
+  // 官方插件在「官方插件」页签里，自定义 MCP 在另一个页签；不切过去按钮处于隐藏面板中。
+  await page.getByRole('tab', { name: '自定义 MCP', exact: true }).click();
+  await page.getByRole('tabpanel').filter({ hasText: '添加服务' }).waitFor();
   await page.getByRole('button', { name: '添加服务', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await dialog.locator('input').nth(0).fill('custom-demo');
