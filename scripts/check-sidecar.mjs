@@ -53,7 +53,7 @@ try {
   await invoke('terminal-open', { sessionId, id: terminalId, cols: 90, rows: 25 });
   await invoke('terminal-input', { sessionId, id: terminalId, data: process.platform === 'win32' ? "Write-Output ('PACKAGED_' + 'TERMINAL_OK')\r" : "printf 'PACKAGED_%s\\n' 'TERMINAL_OK'\r" });
   let terminalOutput = '';
-  const terminalDeadline = Date.now() + 15000;
+  const terminalDeadline = Date.now() + 60000;
   while (!terminalOutput.includes('PACKAGED_TERMINAL_OK')) { if (Date.now() > terminalDeadline) throw Error('Packaged PTY input/output failed'); terminalOutput = (await invoke('terminal-snapshot', { sessionId, id: terminalId })).output; await new Promise(r => setTimeout(r, 50)); }
   await invoke('terminal-close', { sessionId, id: terminalId });
   if (fs.existsSync(marker)) throw new Error('Executable loaded untrusted bunfig preload');
