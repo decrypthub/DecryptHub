@@ -45,12 +45,12 @@
 |---|---|---|---|---|
 | 1 | 暂停后 snapshot/resume/evaluate 全堵 | 是，**状态权威分裂** | 未修 | **P0** |
 | 2 | 没有 new_tab | 是（旧版） | `c42f471` 已加工具；缺 capability 与返回结构 | P1（降级） |
-| 3 | 审批横跳 / 拒绝不解释 / networkDomains | 是，**五处独立机制** | 仅"拒绝文案"部分修 | **P0** |
+| 3 | 审批横跳 / 拒绝不解释 / networkDomains | 是，**五处独立机制** | 拒绝文案已修；探针改为真实隔离自检（本轮） | **P0** |
 | 4 | 后台任务无心跳、offset 错位 | 是 | `c42f471` 加了心跳字段；offset 仍不稳定 | P1 |
 | 5 | PowerShell `�?` | 是（编码） | `c42f471` 加了 UTF-8 前缀；仍有分块/文件编码坑 | P1 |
 | 6 | blocked/等用户仍被接续 | **部分**：`blocked` 已被阻断，"自然语言提问"没被阻断 | 未修 | P1 |
 | 7 | 子代理不能验证、结论截断 | 是，**5/5 limited** | 未修 | P1 |
-| 8 | 没有 upload_file、截图无路径 | 是；**新加的 upload 运行时报错** | 半修 + 引入新 bug | **P0** |
+| 8 | 没有 upload_file、截图无路径 | 是；曾加的 upload 运行时报错 | upload 已移除；截图路径仍缺 | **P0** |
 | 9 | skill/memory 索引为空 | 是（无自动沉淀） | 未修 | P2 |
 | 10 | 无结构化状态、goal_update 报错不符 | 部分（报错已修，状态仍缺） | 半修 | P1 |
 
@@ -214,6 +214,8 @@ const isolated = this.mode !== 'full-access' && capability.available;
 
 - 结果：**standard 模式下 `workspace_shell` / `workspace_run` 基本不可用**；用户切到 full-access 才能跑；重启又回 standard。这就是"同一脚本时好时坏"的完整闭环。
 - 更糟的是失败信息 `[执行隔离失败，未降级运行]` 是给开发者看的，模型拿到后只会重试或换命令，不会想到"该切权限"。
+
+**修复（本轮，Lead）**：`Executor.probe()` 现在在依赖检查通过后，用同一个 `sandbox-entry` 真正跑一次隔离 echo；失败即 `available=false`，standard 会走"未隔离执行"的审批路径，而不是先用假的 available 进入隔离再硬失败。本机自检通过；Windows 真机仍需验证 `listen EINVAL` 是否因此被正确识别。
 
 #### 3.3 拒绝为什么不解释（B）
 
