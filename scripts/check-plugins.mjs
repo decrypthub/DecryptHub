@@ -10,8 +10,12 @@ import { folderProof } from '../sidecar/grants.mjs';
 const root = process.cwd(),
   parent = path.resolve('.tmp');
 fs.mkdirSync(parent, { recursive: true });
-const data = fs.mkdtempSync(path.join(parent, 'plugins-ui-')),
-  token = crypto.randomBytes(20).toString('hex'),
+// CI 在 JSRA_UI_DATA_DIR 下已经装好 CloakBrowser 内核；复用同一个目录，不要每次开新的临时目录。
+const data = process.env.JSRA_UI_DATA_DIR
+  ? path.join(path.resolve(process.env.JSRA_UI_DATA_DIR), 'WebDecryptHub')
+  : path.join(fs.mkdtempSync(path.join(parent, 'plugins-ui-')), 'WebDecryptHub');
+fs.mkdirSync(data, { recursive: true });
+const token = crypto.randomBytes(20).toString('hex'),
   pending = new Map();
 let socket,
   sequence = 0,
