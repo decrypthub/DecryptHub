@@ -20,6 +20,9 @@ export const HISTORY_VERSION = 2;
 
 const stripPrefix = s => String(s || '').replace(/^【[^】]*】\n?/, '');
 
+// 补齐缺失响应时的占位正文：明确告诉模型「这条没有产生结果」，而不是让它以为工具返回了空内容。
+const MISSING_TOOL_RESULT = '[未执行：这一轮在此结果返回前结束，没有产生输出]';
+
 export class History {
   /** @param {{system:string, events?:object[]}} */
   constructor({ system, events }) {
@@ -77,7 +80,33 @@ export class History {
         msgs.push({ role: 'tool', tool_call_id: e.id, name: e.name, content, ...(prunable?.has(i) ? { _pruned: true } : {}) });
       }
     }
-    return msgs;
+    return this._pairToolResults(msgs);
+  }
+
+  /**
+   * 补齐 wire 里缺失的工具响应。OpenAI 兼容协议要求每条 assistant.tool_calls 都被紧随其后的
+   * tool 消息逐条应答，少一条整轮被拒（DeepSeek/AI SDK：insufficient tool messages following
+   * tool_calls message）。进程在批次中途退出、旧数据残缺、fork 种子被裁剪都会留下这种空洞。
+   *
+   * 只影响派生视图，不改事件：补齐的响应按 tool_calls 顺序插入，多余的、重复的一律丢弃，
+   * 保证同一批 call 的响应连续且唯一。
+   */
+  _pairToolResults(msgs) {
+    const out = [];
+    for (let i = 0; i < msgs.length; i++) {
+      const m = msgs[i];
+      if (m.role !== 'assistant' || !m.tool_calls?.length) { out.push(m); continue; }
+      out.push(m);
+      const batch = [];
+      let j = i + 1;
+      while (j < msgs.length && msgs[j].role === 'tool') batch.push(msgs[j++]);
+      for (const tc of m.tool_calls) {
+        const hit = batch.find(t => t.tool_call_id === tc.id);
+        out.push(hit || { role: 'tool', tool_call_id: tc.id, name: tc.function?.name, content: MISSING_TOOL_RESULT, _synth: true });
+      }
+      i = j - 1;
+    }
+    return out;
   }
 
   /** 需要裁成引用的工具结果下标 → 新内容（纯计算，不修改事件） */
