@@ -12,10 +12,11 @@ export async function checkAccountMenu({ browser, baseUrl, wsPort, scheme, shots
       window.__JSRA_NATIVE_TITLEBAR = true;
       window.__JSRA_DEBUG = true;
       window.__accountCalls = [];
+      window.__accountPages = [];
       window.__accountPort = wsPort;
       window.__nativeCalls = [];
       window.__accountFixture = { available: true, phase: 'signed-out', profile: null, error: null };
-      window.__TAURI_INTERNALS__ = { metadata: { currentWindow: { label: 'main' } }, transformCallback: () => 0, unregisterCallback: () => {}, invoke: async command => {
+      window.__TAURI_INTERNALS__ = { metadata: { currentWindow: { label: 'main' } }, transformCallback: () => 0, unregisterCallback: () => {}, invoke: async (command, args) => {
         window.__nativeCalls.push(command);
         if (command === 'get_ws_port') return wsPort;
         if (command === 'get_ws_token') return 'ui-check';
@@ -23,6 +24,7 @@ export async function checkAccountMenu({ browser, baseUrl, wsPort, scheme, shots
         if (command === 'account_avatar') return null;
         if (command.startsWith('account_')) {
           window.__accountCalls.push(command);
+          if (command === 'account_open_page') { window.__accountPages.push(args?.page); return null; }
           if (command === 'account_login') window.__accountFixture.phase = 'waiting-browser';
           if (command === 'account_logout' && window.__accountLogoutFailure) throw 'UI退出失败';
           if (command === 'account_cancel' || command === 'account_logout') window.__accountFixture = { available: true, phase: 'signed-out', profile: null, error: null };
@@ -65,13 +67,38 @@ export async function checkAccountMenu({ browser, baseUrl, wsPort, scheme, shots
     await page.getByRole('button', { name: '更多', exact: true }).click();
     await page.getByRole('menuitem', { name: '继续登录', exact: true }).click();
     ok(await evalMain("window.__accountCalls.filter(c => c === 'account_login').length === 1"), `[${scheme}] 等待期间不能重复创建授权请求`);
-    await evalMain("window.__accountFixture.phase = 'signed-in'; window.__accountFixture.profile = { id: 'ui-account', nickname: 'UI账号测试', handle: 'ui-account', avatarUrl: null };");
+    await evalMain("window.__accountFixture.phase = 'signed-in'; window.__accountFixture.profile = { id: 'ui-account', nickname: 'UI账号测试', handle: 'ui-account', avatarUrl: null, points: 1280 };");
     const account = page.getByRole('button', { name: '账号菜单', exact: true }); await account.waitFor();
     ok((await account.innerText()).includes('UI账号测试'), `[${scheme}] 已登录入口应显示昵称`);
     await account.click();
     await page.getByRole('menuitem', { name: '退出登录', exact: true }).waitFor();
     ok(await page.getByRole('menuitem').count() === 3, `[${scheme}] 已登录菜单应保持相同的三个入口`);
     await page.screenshot({ path: path.join(shots, scheme + '-account-signed-in.png') });
+    await page.keyboard.press('Escape');
+
+    // 设置 → 账号：成长分余额来自原生快照，必须真的显示出来。
+    await account.click();
+    await page.getByRole('menuitem', { name: /^设置/ }).click();
+    await page.locator('.settings-nav').getByRole('button', { name: '账号', exact: true }).click();
+    const points = page.locator('.account-points');
+    await points.waitFor();
+    ok((await points.innerText()).replace(/\s+/g, ' ').includes('1,280'), `[${scheme}] 设置页未显示成长分余额：${await points.innerText()}`);
+    await page.screenshot({ path: path.join(shots, scheme + '-account-points.png') });
+
+    // 积分中心只能交给系统浏览器打开，不能在桌面内嵌网页。
+    await evalMain("window.__accountPages.length = 0");
+    await page.getByRole('button', { name: '积分中心', exact: true }).click();
+    ok(await evalMain("JSON.stringify(window.__accountPages) === JSON.stringify(['points'])"), `[${scheme}] 积分中心入口应打开社区积分页：${await evalMain('JSON.stringify(window.__accountPages)')}`);
+
+    // 余额未知（旧凭据升级）时不能伪造 0 分。
+    await evalMain("window.__accountFixture.profile = { id: 'ui-account', nickname: 'UI账号测试', handle: 'ui-account', avatarUrl: null };");
+    await page.getByRole('button', { name: '刷新', exact: true }).click();
+    await page.waitForTimeout(300);
+    ok((await points.innerText()).includes('—'), `[${scheme}] 余额未知时应显示占位符：${await points.innerText()}`);
+
+    await page.locator('.screen-head').getByRole('button', { name: '返回对话', exact: true }).click();
+    await evalMain("window.__accountFixture.profile = { id: 'ui-account', nickname: 'UI账号测试', handle: 'ui-account', avatarUrl: null, points: 1280 };");
+    await account.click();
     await evalMain('window.__accountLogoutFailure = true');
     await page.getByRole('menuitem', { name: '退出登录', exact: true }).click();
     await page.getByText('UI退出失败', { exact: true }).first().waitFor();

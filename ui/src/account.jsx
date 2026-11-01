@@ -81,6 +81,14 @@ export function AccountTab() {
         <Text as="div" size="4" weight="bold">{a.profile?.nickname || (a.phase === 'loading' ? '正在读取账号…' : '登录 DecryptHub')}</Text>
         <Text as="div" size="2" color="gray" mt="1">{signedIn ? '@' + a.profile.handle : '使用你的社区账号，管理个人资料。'}</Text>
       </div></div>
+      {signedIn && <div className="account-stats">
+        <span className="account-points" title="社区积分，来自签到与任务奖励">
+          <Icon n="bolt" size={14} />
+          <span>积分</span>
+          <strong className={a.profile.points == null ? 'unknown' : undefined}>{a.profile.points == null ? '—' : Number(a.profile.points).toLocaleString()}</strong>
+        </span>
+        <Button size="1" variant="ghost" color="gray" disabled={disabled} onClick={() => a.openPage('points')} title="在浏览器中查看积分中心"><Icon n="external" size={12} />积分中心</Button>
+      </div>}
       {a.error && <Text as="p" size="2" color="red" role="alert" className="account-message">{a.error}</Text>}
       {pending ? <div className="account-wait" role="status"><Spinner size="2" /><div><Text as="div" size="2" weight="medium">{a.phase === 'exchanging' ? '正在完成登录…' : '请在浏览器中确认登录'}</Text><Text as="div" size="1" color="gray" mt="1">完成后会自动返回账号状态。</Text></div></div> : !signedIn && <Text as="p" size="2" color="gray" className="account-message">登录不会上传本地项目或对话，模型渠道继续使用你配置的 API Key。</Text>}
       <Flex gap="3" wrap="wrap" mt="5">

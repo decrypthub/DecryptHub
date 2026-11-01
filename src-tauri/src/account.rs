@@ -26,6 +26,10 @@ pub struct Profile {
     handle: String,
     nickname: String,
     avatar_url: Option<String>,
+    /// 成长分余额。旧版凭据记录里没有这个字段，缺省为 `None`（未知），
+    /// 这样升级后不会把用户踢出登录态，也不会把 0 分当成真实余额显示。
+    #[serde(default)]
+    points: Option<i64>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -227,7 +231,12 @@ fn profile(origin: &str, token: &str) -> Result<Profile, RequestError> {
     let value = request(origin, "/auth/desktop/me", Some(token), None)?;
     let p: Profile = serde_json::from_value(value)
         .map_err(|_| RequestError::Other("社区账号资料无效".into()))?;
-    if p.id.is_empty() || p.id.len() > 191 || p.handle.len() > 191 || p.nickname.len() > 1000 {
+    if p.id.is_empty()
+        || p.id.len() > 191
+        || p.handle.len() > 191
+        || p.nickname.len() > 1000
+        || p.points.is_some_and(|v| v < 0)
+    {
         return Err(RequestError::Other("社区账号资料无效".into()));
     }
     Ok(p)
@@ -631,6 +640,7 @@ impl AccountManager {
                 handle: String::new(),
                 nickname: String::new(),
                 avatar_url: None,
+                points: None,
             },
         };
         let result = profile(origin, &c.token).map_err(error_text).and_then(|p| {
@@ -793,6 +803,7 @@ pub async fn account_open_page(
     let path = match page.as_str() {
         "profile" => "/settings/profile",
         "security" => "/settings/security",
+        "points" => "/points",
         "home" => "/",
         _ => return Err("无效的社区页面".into()),
     };
@@ -1009,6 +1020,7 @@ mod tests {
                 handle: "alice".into(),
                 nickname: "Alice".into(),
                 avatar_url: None,
+                points: Some(42),
             },
         }
     }
@@ -1104,6 +1116,26 @@ mod tests {
         let raw = serde_json::to_string(&m.snapshot()).unwrap();
         assert!(!raw.contains(&c.token));
         assert!(!raw.contains("code_verifier"));
+        // 余额是设置页要显示的账号信息，但不是凭据，随快照一起出去。
+        assert!(raw.contains("\"points\":42"));
+    }
+    #[test]
+    fn legacy_credential_without_points_still_restores_signed_in() {
+        // 1.4.0 之前写入的凭据没有 points 字段；升级后必须继续登录，
+        // 且余额显示为未知而不是伪造的 0 分。
+        let (m, v) = fixture();
+        let legacy = format!(
+            r#"{{"origin":"{COMMUNITY}","token":"dhd_{}","expires_at":{},"profile":{{"id":"u1","handle":"alice","nickname":"Alice","avatarUrl":null}}}}"#,
+            "a".repeat(43),
+            now() + 3600
+        );
+        v.record.lock().unwrap().replace(
+            serde_json::from_str(&legacy).expect("legacy record must deserialize"),
+        );
+        m.initialize().unwrap();
+        let snapshot = m.snapshot();
+        assert_eq!(snapshot.phase, "signed-in");
+        assert_eq!(snapshot.profile.unwrap().points, None);
     }
     #[test]
     fn development_endpoint_is_loopback_only() {
