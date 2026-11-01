@@ -261,6 +261,8 @@ try {
     'downloaded WDH capture',
   );
   await invoke('browser-close', { sessionId: session });
+  // 前面的自定义 MCP 步骤停在另一个页签，操作官方插件前要切回来。
+  await page.getByRole('tab', { name: '官方插件', exact: true }).click();
   const wdh = page.locator('[data-plugin-id="wdh"]');
   await wdh.getByRole('switch', { name: '启用 WDH', exact: true }).click();
   await until(
