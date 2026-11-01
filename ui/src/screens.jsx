@@ -8,6 +8,7 @@ import { native } from './transport.js';
 import { checkForUpdate, installAndRelaunch } from './updater.js';
 import { PluginCenter } from './plugins.jsx';
 import { Section, Row } from './settings-kit.jsx';
+import { MemoryPanel } from './memory-panel.jsx';
 import { handleWindowDrag } from './window-drag.js';
 import { AccountTab, useAccount } from './account.jsx';
 
@@ -26,6 +27,7 @@ export function Screens() {
 const TABS = [
   ['account', '账号', 'user'],
   ['ai', 'AI 模型', 'sparkles'],
+  ['memory', '记忆与技能', 'layers'],
   ['runtime', '运行参数', 'layers'],
   ['look', '外观', 'sun'],
   ['about', '关于与更新', 'info'],
@@ -60,6 +62,7 @@ function Settings() {
         <div className="page-intro"><h1>{TABS.find(([k]) => k === tab)?.[1]}</h1></div>
         {tab === 'account' && <AccountTab />}
         {tab === 'ai' && <AiTab s={s} setS={setS} />}
+        {tab === 'memory' && <MemoryPanel />}
         {tab === 'runtime' && <RuntimeTab s={s} up={up} />}
         {tab === 'look' && <LookTab theme={localStorage.getItem('jsra_theme') || 'system'} onTheme={w.setTheme} />}
         {tab === 'about' && <AboutTab info={info} />}

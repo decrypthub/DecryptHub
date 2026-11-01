@@ -816,6 +816,15 @@ kbd { font-family: var(--default-font-family); font-size: 10px; font-weight: 400
 .command-feedback.error { color:var(--red-11); }
 .extension-list { margin:18px 0; max-height:240px; overflow:auto; }
 .extension-preview { max-height:380px; overflow:auto; padding:16px; background:var(--inset); border-radius: var(--corner-card); }
+/* 记忆与技能管理：整行可点区域是「查看」，右侧两个按钮各自独立可点。 */
+.ext-row { display:flex; align-items:center; gap:8px; padding:6px 12px 6px 4px; border-top:1px solid var(--line); }
+.ext-row:first-child { border-top:0; }
+.ext-open { display:flex; align-items:flex-start; gap:10px; flex:1; min-width:0; padding:8px; border:0; border-radius: var(--corner-row); background:transparent; color:var(--ink); text-align:left; font:inherit; cursor:pointer; }
+.ext-open:hover,.ext-open:focus-visible { background:var(--inset); }
+.ext-open > span { flex:1; min-width:0; }
+.ext-open strong { display:block; font-size:13px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ext-open small { display:block; color:var(--muted); font-size:11px; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ext-text { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; line-height:1.7; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .project-file-root { padding:8px 12px; }
 
 

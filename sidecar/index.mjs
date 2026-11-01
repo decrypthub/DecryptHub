@@ -35,6 +35,7 @@ async function startServer() {
   const { selectReadRoot } = await import('./workspaces.mjs');
   const { ProjectService } = await import('./project-service.mjs');
   const { ExtensionStore } = await import('./extensions.mjs');
+  const { SYSTEM_MEMORY_SOURCES } = await import('./system-memory.mjs');
   const { publicSettings, decryptSecrets, mirrorProvider } = await import('./secrets.mjs');
   const { registerAttachment, attachmentPreview } = await import('./attachments.mjs');
   const { conversationMarkdown } = await import('./transcript.mjs');
@@ -130,6 +131,56 @@ async function startServer() {
     'project-move': a => projects.move(a.id, a.beforeId),
     'extensions-list': a => { const s = S(a); return extensions.list(a.kind, { sessionId: s.id, projectId: s.projectId }); },
     'extension-read': a => { const s = S(a); return extensions.read(a.kind, a, { sessionId: s.id, projectId: s.projectId }); },
+    // 设置页的「记忆与技能」：跨项目、跨会话的只读清点 + 删除。
+    // 与工具通道分开：这里没有当前会话，必须由调用方明确 scope 和 scopeId，不做猜测。
+    // 系统记忆不在此列——它是产品内置与插件声明的事实，设置页不展示也不可编辑。
+    'extensions-admin': a => {
+      const kind = a?.kind;
+      if (!['skill', 'memory'].includes(kind)) throw Error('未知扩展类型');
+      const scope = a?.scope, scopeId = a?.scopeId;
+      // 条目必须带回 scopeId：设置页后续的 read/remove 要靠它定位到同一个作用域，
+      // 缺了它就只能拿到 undefined，被下面的校验拒绝。
+      const at = id => ({ admin: true, scopeId: String(id), sessionId: String(id), projectId: scope === 'project' ? String(id) : null });
+      if (scope === 'user') return extensions.list(kind, at('global')).map(x => ({ ...x, scope: 'user', scopeId: 'global' }));
+      if (scope && scopeId) return extensions.list(kind, at(scopeId)).map(x => ({ ...x, scope, scopeId: String(scopeId) }));
+      // 未指定作用域：把所有用户级、项目级、会话级的目录合并清点
+      const roots = [];
+      try {
+        const base = path.join(settingsMod.userDataDir(), 'extensions');
+        for (const s of ['user', 'project', 'session']) {
+          const dir = path.join(base, s);
+          if (!fs.existsSync(dir)) continue;
+          for (const entry of fs.readdirSync(dir, { withFileTypes: true }).slice(0, 200)) {
+            if (!entry.isDirectory() || !/^[a-zA-Z0-9-]+$/.test(entry.name)) continue;
+            roots.push({ scope: s, id: entry.name });
+          }
+        }
+      } catch { /* 目录不可读时返回已发现的条目，不抛出 */ }
+      const merged = [];
+      for (const r of roots) {
+        try {
+          for (const item of extensions.list(kind, { admin: true, scopeId: r.id, sessionId: r.id, projectId: r.scope === 'project' ? r.id : null }))
+            merged.push({ ...item, scope: r.scope, scopeId: r.id });
+        } catch { /* 单个作用域失败不影响其他条目 */ }
+      }
+      return merged;
+    },
+    'extension-admin-read': a => {
+      if (!['skill', 'memory'].includes(a?.kind)) throw Error('未知扩展类型');
+      if (!a?.scope || !a?.scopeId) throw Error('读取需要明确 scope 和 scopeId');
+      return extensions.read(a.kind, a, { admin: true, scopeId: String(a.scopeId), sessionId: String(a.scopeId), projectId: a.scope === 'project' ? String(a.scopeId) : null });
+    },
+    'extension-admin-remove': a => {
+      if (!['skill', 'memory'].includes(a?.kind)) throw Error('未知扩展类型');
+      if (!a?.scope || !a?.scopeId) throw Error('删除需要明确 scope 和 scopeId');
+      const ctx = { admin: true, scopeId: String(a.scopeId), sessionId: String(a.scopeId), projectId: a.scope === 'project' ? String(a.scopeId) : null };
+      return extensions.remove(a.kind, { ...a, scope: a.scope }, ctx);
+    },
+    'system-memory-sources': () => ({
+      // 只报告来源与容量，不返回正文：系统记忆由产品与插件拥有，界面不提供查看或编辑。
+      sources: SYSTEM_MEMORY_SOURCES.map(label => ({ label, editable: false })),
+      pluginInstructions: (mcpHost.status() || []).filter(x => x.instructions).map(({ name, version }) => ({ name, version, editable: false })),
+    }),
     'component-info': () => sessions.components.info(),
     'doctor': async () => ({runtime:runtimeInfo,hostIntegrity:await windowsRuntime.hostIntegrity(),component:sessions.components.info(),chrome:[],chromeOk:sessions.components.info().installed,downloading:!!downloading,version:process.env.JSRA_APP_VERSION||''}),
     'kernel-info': async () => {

@@ -8,6 +8,7 @@
     "dev:ui": "vite",
     "dev:desktop": "powershell -ExecutionPolicy Bypass -File scripts/dev-desktop.ps1",
     "check:ui": "node scripts/check-ui.mjs",
+    "check:memory": "node scripts/check-memory-panel.mjs",
     "check:desktop-browser": "node scripts/check-desktop-browser.mjs",
     "check:powershell": "node scripts/check-powershell.mjs",
     "audit:ui": "node scripts/audit-ui.mjs",

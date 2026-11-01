@@ -10,13 +10,16 @@ export class ExtensionStore {
   constructor({ directory, getSettings, saveSettings, plugins, mcpHost, tasks, changed = () => {} }) {
     Object.assign(this, { directory, getSettings, saveSettings, plugins, mcpHost, tasks, changed });
   }
+  // ctx.scopeId 只在管理面（设置页）传入：模型路径永远按当前会话/项目解析，
+  // 避免一次工具调用写进别的项目或别的会话的扩展目录。
   location(kind, scope, ctx) {
     if (!['skill', 'memory'].includes(kind)) throw Error('未知扩展类型');
     scope ||= ctx.projectId ? 'project' : 'user';
     if (!['session', 'project', 'user'].includes(scope)) throw Error('未知保存范围');
-    const id = scope === 'project' ? ctx.projectId : scope === 'session' ? ctx.sessionId : 'global';
+    const explicit = ctx.admin && ctx.scopeId ? String(ctx.scopeId) : '';
+    const id = explicit || (scope === 'project' ? ctx.projectId : scope === 'session' ? ctx.sessionId : 'global');
     if (!id || !/^[a-zA-Z0-9-]+$/.test(id)) throw Error('当前没有可用的项目或会话');
-    return { scope, root: resolveIn(this.directory, `extensions/${scope}/${id}/${kind}`) };
+    return { scope, id, root: resolveIn(this.directory, `extensions/${scope}/${id}/${kind}`) };
   }
   file(kind, scope, name, ctx) {
     const loc = this.location(kind, scope, ctx);
@@ -37,7 +40,7 @@ export class ExtensionStore {
           try { const bytes = fs.readSync(fd, buffer); preview = buffer.subarray(0, bytes).toString('utf8'); }
           finally { fs.closeSync(fd); }
           const description = kind === 'skill' ? preview.match(/^description:[ \t]*(.+)$/m)?.[1] : preview.split('\n').find(x => x.trim());
-          result.push({ name, scope, description: (description || name).slice(0, 160) });
+          result.push({ name, scope, description: (description || name).slice(0, 160), updatedAt: stat.mtimeMs });
         } catch { /* Ignore unrelated files, symlinks and invalid names. */ }
       }
     }
@@ -47,7 +50,7 @@ export class ExtensionStore {
     const { file, scope } = this.file(kind, input.scope, input.name, ctx), st = fs.lstatSync(file);
     if (!st.isFile() || st.nlink > 1 || st.size > 65536) throw Error('扩展文件不是普通文件或超过 64KB');
     const content = fs.readFileSync(file, 'utf8');
-    return { name: input.name, scope, content, hash: digest(content) };
+    return { name: input.name, scope, content, hash: digest(content), updatedAt: st.mtimeMs };
   }
   write(kind, input, ctx) {
     const { file, scope } = this.file(kind, input.scope, input.name, ctx);
@@ -64,6 +67,27 @@ export class ExtensionStore {
     fs.writeFileSync(temporary, content + '\n', { flag: 'wx', mode: 0o600 });
     fs.renameSync(temporary, file);
     this.changed(); return this.read(kind, input, ctx);
+  }
+  // 删除只作用于单个作用域内的一个条目：不带 scope 时不去猜，避免误删用户级长期记忆。
+  // 技能按目录删除（SKILL.md 所在目录），记忆删除单个 .md。
+  remove(kind, input, ctx) {
+    if (!input?.scope) throw Error('删除需要明确 scope（session/project/user）');
+    const { file, scope } = this.file(kind, input.scope, input.name, ctx);
+    let stat; try { stat = fs.lstatSync(file); } catch { throw Error('没有找到：' + input.name + '（' + scope + '）'); }
+    if (!stat.isFile() || stat.nlink > 1) throw Error('扩展文件不是普通文件，已拒绝删除');
+    const content = fs.readFileSync(file, 'utf8');
+    if (input.expectedHash && digest(content) !== input.expectedHash) throw Error('内容已变化，请重新读取后再删除');
+    if (kind === 'skill') {
+      const dir = path.dirname(file), parent = path.dirname(dir);
+      // 只删自己这一层：父目录必须正好是本次作用域的 skill 根。
+      if (path.dirname(parent) !== '' && !parent.endsWith(path.sep + 'skill')) throw Error('技能目录不在预期位置，已拒绝删除');
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const child = path.join(dir, entry.name);
+        if (!entry.isFile() || fs.lstatSync(child).nlink > 1) throw Error('技能目录含非普通文件，请手动清理：' + dir);
+      }
+      fs.rmSync(dir, { recursive: true });
+    } else fs.rmSync(file);
+    this.changed(); return { name: input.name, scope, removed: true };
   }
   index(ctx) {
     const skills = this.list('skill', ctx), memories = this.list('memory', ctx);
@@ -82,6 +106,7 @@ export class ExtensionStore {
       if (action === 'list') return this.list(kind, ctx);
       if (action === 'read') return this.read(kind, input, ctx);
       if (action === 'write') return this.write(kind, input, ctx);
+      if (action === 'remove') return this.remove(kind, input, ctx);
     }
     if (kind === 'automation') {
       if (action === 'list') return this.tasks.list().filter(t => t.sessionId === ctx.sessionId);
