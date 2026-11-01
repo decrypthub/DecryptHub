@@ -870,6 +870,22 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.getByRole('button', { name: '结束并收起目标', exact: true }).click();
   await goalTrigger.waitFor({ state: 'detached' });
   await page.locator('.goal-details').waitFor({ state: 'detached' });
+  // 目标自动接续：首轮没有工具/进展时驱动会接续一轮，再接续无可进展后暂停；对话里必须留下“继续执行目标”提示。
+  const goalRound = await rpc('session-create', { title: '目标接续提示', projectId: codeProject.id });
+  await rpc('session-focus', { sessionId: goalRound.id }); await page.waitForTimeout(300);
+  await rpc('goal-start', { sessionId: goalRound.id, objective: '验证自动接续提示：只观察，不调用工具' });
+  const roundDeadline = Date.now() + 20000;
+  for (;;) { const snap = await rpc('session-snapshot', { sessionId: goalRound.id }); if (snap.state?.goal && snap.state.goal.status !== 'active') break; if (Date.now() > roundDeadline) throw Error('goal round did not settle'); await page.waitForTimeout(200); }
+  const turnTrigger = page.locator('.turn-trigger[data-turn-trigger="goal"]').first();
+  await turnTrigger.waitFor();
+  ok(await turnTrigger.getByText('继续执行目标', { exact: true }).count() === 1, '[' + scheme + '] 自动接续轮必须显示继续执行目标');
+  ok(/^\d{2}:\d{2}$/.test(await turnTrigger.locator('.turn-trigger-time').innerText()), '[' + scheme + '] 目标接续提示必须显示时间');
+  await turnTrigger.locator('.turn-trigger-head').click();
+  await turnTrigger.getByText('这条通知触发了本轮回复。', { exact: true }).waitFor();
+  await turnTrigger.getByText('验证自动接续提示：只观察，不调用工具', { exact: true }).waitFor();
+  await turnTrigger.screenshot({ path: path.join(SHOTS, scheme + '-goal-trigger.png') });
+  await rpc('session-delete', { sessionId: goalRound.id });
+  await rpc('session-focus', { sessionId: goalSession }); await page.waitForTimeout(300);
   await taskInput.fill('/goal UI_THINKING_CHECK_' + scheme); await taskInput.press('Enter');
   await page.locator('.reason-head').first().waitFor();
   await page.locator('.reason-head').first().click();

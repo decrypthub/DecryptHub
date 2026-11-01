@@ -213,6 +213,7 @@ export function Workbench({ children }) {
       on('log', (v, s) => s && dispatch({ t: 'log', sid: s, v: String(v) })),
       on('frame', (f, s) => { if (s === sidRef.current) drawFrame(f); }),
       on('agent-user', (c, s) => dispatch({ t: 'ev', sid: s, v: { type: 'user', ...(typeof c === 'string' ? { content: c } : c) } })),
+      on('agent-continuation', (v, s) => dispatch({ t: 'ev', sid: s, v: { type: 'continuation', ...v } })),
       on('agent-context', (v, s) => {
         dispatch({ t: 'patch', sid: s, patch: { ctx: v } });
         if (v?.event === 'compressed' || v?.event === 'pruned') {

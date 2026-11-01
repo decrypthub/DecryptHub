@@ -40,6 +40,9 @@ test('goal continues only within its bound, persists as paused, and requires exp
   assert.equal(s.goal.usedTokens, 42, 'resume must not reset token accounting');
   assert.equal((await s.goalAction('pause', { revision: 999 })).ok, false, 'stale revision must be rejected'); await until(() => s.goal.status === 'complete' && !s.agent.running);
   assert.equal(s.goal.summary, '测试已验证，目标完成。'); assert.equal(s.goal.turns, 1);
+  const continuation = s.agent.hist.events.find(e => e.t === 'continuation' && e.source?.kind === 'goal');
+  assert.ok(continuation, 'goal continuation must record its source');
+  assert.equal(continuation.notice.objective, '验证长期目标');
   await s.goalAction('clear'); assert.equal(s.goal, null);
 });
 test('goal interruption cancels future continuation and never replays on startup', async t => {

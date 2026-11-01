@@ -395,7 +395,7 @@ class Agent {
     return outcomes;
   }
 
-  async send(userText, { auto, maxSteps: stepsOverride, tokenBudget, attachments, runId, continuation = false } = {}) {
+  async send(userText, { auto, maxSteps: stepsOverride, tokenBudget, attachments, runId, continuation = false, continuationSource = null, continuationNotice = null } = {}) {
     if (this.running) throw new Error('Agent 正在运行');
     this.running = true; this.acceptingSteer = true; this.abort = new AbortController();
     const usage = { prompt: 0, completion: 0, reasoning: 0, cached: 0, calls: 0, ms: 0 };
@@ -407,9 +407,10 @@ class Agent {
     const note = this.stateNote();
     const att = attachments?.length ? await resolveAttachments(attachments, { browser: this.browser, projectDir: this.projectDir, workRoot: this.getWorkspace()?.root, vision: !!((settings.provider === 'anthropic' ? settings.anthropic : settings.openai) || {}).vision }).catch(e => '附件解析失败: ' + e.message) : '';
     const images = attachments.filter(a => a.kind === 'attachment' && a.image).map(a => a.id), userId = crypto.randomUUID();
-    this.hist.append({ t: continuation ? 'continuation' : 'user', id: userId, turnId: this.turnId, displayContent: content, attachments, images, content: [continuation ? '【Harness 内部接续事件】上一轮已经结束。根据当前目标状态、计划和工具结果选择下一项必要工作；先核对已有证据。' : content || (attachments.length ? '请查看附件，并根据其内容回答。' : ''), att, note].filter(Boolean).join('\n\n'), ...(att ? { att: estimateTokens(att) + images.length * 2048 } : {}) });
+    this.hist.append({ t: continuation ? 'continuation' : 'user', id: userId, turnId: this.turnId, displayContent: content, attachments, images, content: [continuation ? '【Harness 内部接续事件】上一轮已经结束。根据当前目标状态、计划和工具结果选择下一项必要工作；先核对已有证据。' : content || (attachments.length ? '请查看附件，并根据其内容回答。' : ''), att, note].filter(Boolean).join('\n\n'), ...(att ? { att: estimateTokens(att) + images.length * 2048 } : {}), ...(continuation && continuationSource ? { source: continuationSource } : {}), ...(continuation && continuationNotice ? { notice: continuationNotice } : {}) });
     let autoTries = 0;
     if (!continuation) this.emit('user', { id: userId, turnId: this.turnId, content, attachments, at: startedAt });
+    else this.emit('continuation', { id: userId, turnId: this.turnId, source: continuationSource, notice: continuationNotice, at: startedAt });
     const budget = Math.max(0, Number(tokenBudget ?? settings.tokenBudget) || 0);
       let steps = 0, repeatedFailures = 0, previousFailure = '';
       const maxSteps = Math.max(0, Math.floor(Number(stepsOverride ?? settings.maxSteps) || 0));

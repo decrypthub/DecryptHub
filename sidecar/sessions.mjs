@@ -390,7 +390,7 @@ class Session {
     this.updatedAt = Date.now(); this.mgr.emitList();
     const goalTimer = goalId && this.goal.deadline ? setTimeout(() => agent.finishSoon(), Math.max(1, this.goal.deadline - Date.now())) : null;
     if (this.subagentNotices.length) { for (const notice of this.subagentNotices.splice(0)) agent.queueNotice(notice); this.saveState(); }
-    this.completion = agent.send(text, { auto, maxSteps, tokenBudget, attachments, runId: run.id, continuation }).then(result => {
+    this.completion = agent.send(text, { auto, maxSteps, tokenBudget, attachments, runId: run.id, continuation, ...(continuation ? { continuationSource: { kind: 'goal' }, continuationNotice: { objective: this.goal.objective, turns: this.goal.turns || 0, summary: this.goal.summary || '', nextAction: this.goal.nextAction || '', status: this.goal.status } } : {}) }).then(result => {
       if (goalId && this.goal?.id === goalId) {
         const hasWork = (this.goal.revision || 0) !== goalRevision || agent.hist.events.some(e => e.t === 'tool' && e.turnId === run.id && !e.isError && !['goal_update', 'goal_get', 'todo_write', 'agent_list'].includes(e.name));
         this.goal = finishGoalRound(this.goal, result, { automatic: continuation, hasWork });

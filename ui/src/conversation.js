@@ -12,11 +12,23 @@ export function historyEvents(history, partial = '', partialItem = null, partial
     } else if (e.t === 'tool') {
       const item = [...events].reverse().find(t => t.type === 'tool' && (e.itemId ? t.itemId === e.itemId : t.id === e.id && t.result === undefined));
       if (item) Object.assign(item, { result: e.content, isError: !!e.isError, ms: e.ms });
-    } else if (e.t === 'turn-end') events.push({ ...e, type: 'turn-end' });
+    } else if (e.t === 'continuation') events.push({ ...meta, type: 'continuation', content: String(e.content || ''), source: e.source || null, notice: e.notice || null });
+    else if (e.t === 'turn-end') events.push({ ...e, type: 'turn-end' });
     else if (e.t === 'summary') events.push({ ...meta, type: 'compact', stage: 'compressed', summary: e.content, ...e.meta });
   }
   if ((partial || partialReasoning) && !events.some(e => e.id === partialItem?.id)) events.push({ ...partialItem, type: 'assistant', phase: 'streaming', content: partial, reasoning: partialReasoning });
   return events;
+}
+
+// 与 DSH 的 TurnTriggerNodeView 一致：自动接续的一轮在对话里要有一条可展开的来源提示，
+// 让用户看见“这一轮不是用户发的，而是目标继续执行”。历史事件没有 source 时按内容前缀兼容。
+export function turnTriggerFor(event) {
+  if (!event || event.type !== 'continuation') return null;
+  const content = String(event.content || '');
+  const kind = event.source?.kind || (content.startsWith('【Harness 内部接续事件】') ? 'goal' : '');
+  if (kind !== 'goal') return null;
+  const notice = event.notice && typeof event.notice === 'object' && !Array.isArray(event.notice) ? event.notice : null;
+  return { kind: 'goal', at: event.at || 0, notice };
 }
 
 export function conversationTurns(events, run = null, running = false, subagents = []) {
@@ -27,6 +39,10 @@ export function conversationTurns(events, run = null, running = false, subagents
     let turn = byId.get(id);
     if (!turn) { turn = { id, items: [], user: null, startedAt: e.at || 0 }; byId.set(id, turn); turns.push(turn); }
     current = turn;
+    if (e.type === 'continuation') {
+      const trigger = turnTriggerFor(e);
+      if (trigger && !turn.trigger) { turn.trigger = trigger; continue; }
+    }
     if (e.type === 'user') turn.user = e;
     else if (e.type === 'turn-end') { turn.end = e; turn.endedAt = e.endedAt; turn.usage = e.usage || null; }
     else turn.items.push(e);

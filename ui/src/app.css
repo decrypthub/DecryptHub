@@ -640,6 +640,23 @@ kbd { font-family: var(--default-font-family); font-size: 10px; font-weight: 400
 /* Conversation turns: user input, compact activity, then the answer. */
 .chat { container-type: inline-size; }
 .conversation-turn { display: flex; flex-direction: column; gap: 18px; padding-bottom: 34px; min-width: 0; }
+.turn-trigger { border: 1px solid var(--line); border-radius: 12px; background: var(--inset); overflow: hidden; }
+.turn-trigger-head { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 14px; border: 0; background: transparent; color: var(--muted); font: inherit; text-align: left; cursor: pointer; }
+.turn-trigger-head:hover { background: var(--hover); color: var(--ink); }
+.turn-trigger-icon { display: inline-flex; flex: 0 0 auto; color: inherit; }
+.turn-trigger-title { flex: 0 0 auto; color: var(--ink); font-size: 13.5px; line-height: 20px; }
+.turn-trigger-time { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.turn-trigger-chev { flex: 0 0 auto; }
+.turn-trigger-body { padding: 0 14px 12px 38px; color: var(--muted); font-size: 12.5px; }
+.turn-trigger-note { margin: 0 0 8px; color: var(--muted); }
+.turn-trigger-state { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; color: var(--muted); }
+.turn-trigger-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gray-a8); flex: 0 0 auto; }
+.turn-trigger-dot.run { background: var(--accent-9); }
+.turn-trigger-dot.completed { background: var(--green-9); }
+.turn-trigger-dot.failed, .turn-trigger-dot.needs_attention { background: var(--red-9); }
+.turn-trigger-field { display: flex; gap: 8px; margin-top: 6px; }
+.turn-trigger-field > span { flex: 0 0 auto; color: var(--muted); }
+.turn-trigger-field > p { margin: 0; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg .bubble, .msg .md { font-size: 15px; line-height: 1.8; }
 .msg .md code, .msg .md pre code { font-size: 12px; }
 .conversation-date { text-align: center; color: var(--muted); font-size: 11px; margin: 0 0 4px; }

@@ -8,6 +8,7 @@ import { native } from './transport.js';
 import { PermissionPicker, PendingActions } from './workspace.jsx';
 import { AttachmentTiles } from './attachments.jsx';
 import { conversationTurns, toolPresentation, elapsedLabel } from './conversation.js';
+import { TurnTrigger } from './turn-trigger.jsx';
 import { commandMatches } from './commands.js';
 import { CommandMenu, CommandFeedback, CommandDialogs } from './harness.jsx';
 import { SubagentButton, TurnSubagents } from './subagents.jsx';
@@ -139,6 +140,7 @@ function MessageStream({ turns }) {
     return <section className="conversation-turn" key={turn.id} data-turn-id={turn.id} aria-label={`第 ${index + 1} 轮对话`}>
       {showDate && <div className="conversation-date">{date === new Date().toLocaleDateString('zh-CN') ? '今天' : date}</div>}
       {turn.user && <Event e={turn.user} turn={turn} canEdit={index === turns.length - 1 && !turn.tools.length && !turn.failures && !turn.user.attachments?.length} />}
+      {turn.trigger && <TurnTrigger trigger={turn.trigger} turn={turn} />}
       <TurnProcess turn={turn} />
       {turn.answers.map((e, i) => <Event key={e.id || i} e={e} turn={turn} />)}
       <TurnFiles turn={turn} />
