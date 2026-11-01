@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { withModelRetries } from './model-retry.mjs';
 import { goalContext } from './goals.mjs';
 import { imageContent, validateAttachments } from './attachments.mjs';
+import { normalizeReplyImages } from './reply-image.mjs';
 import { contentHash } from './changes.mjs';
 import { resolveIn, containsPath } from './paths.mjs';
 import { contextTokens, limitInfo, compactTrigger, breakdown, buildSummaryRequest, trimToolOutput, readRef, resolveAttachments, estimateTokens } from './context.mjs';
@@ -391,8 +392,10 @@ class Agent {
         catch (e) { r = { text: '[工具错误] ' + (e.message || e), isError: true }; }
       }
       const text = typeof r?.text === 'string' ? r.text : JSON.stringify(r ?? '(空)');
+      // 图片只以附件引用（id + 元信息）随事件流动：base64 既不进历史，也不进工具输出文本。
+      const images = normalizeReplyImages(this.projectDir, r?.images);
       outcomes.push({ name: tc.name, args: tc.args, text, isError: !!r?.isError });
-      this.emit('tool-end', { id: tc.id, itemId: tc.itemId, turnId: this.turnId, name: tc.name, text, isError: !!r?.isError, ms: Date.now() - tt });
+      this.emit('tool-end', { id: tc.id, itemId: tc.itemId, turnId: this.turnId, name: tc.name, text, isError: !!r?.isError, ms: Date.now() - tt, ...(images.length ? { images } : {}) });
       // 工具声明「写了哪些文件」（绝对或项目内相对路径）→ 记到事件上，供「AI 写的」视图索引
       const wrote = Array.isArray(r?.wrote)
         ? r.wrote.map(abs => {
@@ -404,7 +407,7 @@ class Agent {
           } catch { return null; }
         }).filter(Boolean)
         : [];
-      this.hist.append({ t: 'tool', id: tc.id, itemId: tc.itemId, turnId: this.turnId, name: tc.name, ms: Date.now() - tt, workspaceId: this.getWorkspace()?.id, content: trimToolOutput(text || '(空)', { dir: this.ctxDir(), name: tc.name }), ...(r?.isError ? { isError: true } : {}), ...(wrote.length ? { wrote } : {}) });
+      this.hist.append({ t: 'tool', id: tc.id, itemId: tc.itemId, turnId: this.turnId, name: tc.name, ms: Date.now() - tt, workspaceId: this.getWorkspace()?.id, content: trimToolOutput(text || '(空)', { dir: this.ctxDir(), name: tc.name }), ...(r?.isError ? { isError: true } : {}), ...(wrote.length ? { wrote } : {}), ...(images.length ? { images } : {}) });
       this.record('tool-completed', { callId: tc.id, name: tc.name, isError: !!r?.isError, wrote });
     }
     // 中断时补齐未执行的工具结果，避免下一轮出现缺失 tool_call_id 的 400

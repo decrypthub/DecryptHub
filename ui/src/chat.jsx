@@ -6,7 +6,8 @@ import { Button, ActionIcon, Icon, Markdown, Dropdown } from './kit.jsx';
 import { fmtK, sessionLabel } from './state.js';
 import { native } from './transport.js';
 import { PermissionPicker, PendingActions } from './workspace.jsx';
-import { AttachmentTiles } from './attachments.jsx';
+import { AttachmentTiles, ReplyImages } from './attachments.jsx';
+import { ReplyMarkdown } from './reply-markdown.jsx';
 import { conversationTurns, toolPresentation, elapsedLabel } from './conversation.js';
 import { TurnTrigger } from './turn-trigger.jsx';
 import { commandMatches } from './commands.js';
@@ -194,6 +195,7 @@ function TurnProcess({ turn }) {
 
 function ToolEvent({ e }) {
   const [open, setOpen] = useState(false);
+  const w = useWorkbench();
   const st = e.result === undefined ? 'run' : e.isError ? 'err' : e.cancelled ? 'cancelled' : 'ok';
   const format = value => typeof value === 'string' ? value : JSON.stringify(value, null, 2);
   const duration = e.ms == null ? '' : e.ms < 1000 ? `${e.ms} ms` : `${(e.ms / 1000).toFixed(1)} s`;
@@ -207,6 +209,8 @@ function ToolEvent({ e }) {
       <Icon n={open ? 'chevup' : 'chevdown'} size={11} />
     </button>
     {open && <div className="tool-body"><div className="tool-section-label">{e.name}<span>{duration}</span></div><ToolPayload label="输入" text={format(e.args || {})} /><ToolPayload label="输出" text={e.result === undefined ? '执行中…' : format(e.result)} /></div>}
+    {/* 截图等工具产出的图片：折叠状态下也贴在工具条下方，用户和模型都不用再转述。 */}
+    {!!e.images?.length && <div className="tool-images"><ReplyImages items={e.images} sessionId={w.sid} invoke={w.api.invoke} /></div>}
   </div>;
 }
 
@@ -221,8 +225,11 @@ function AssistantMessage({ e, turn, copy }) {
   const complete = e.phase === 'final_answer' && !!turn?.endedAt;
   const time = complete ? new Date(turn.endedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '';
   const final = e.phase === 'final_answer';
+  // 本轮所有工具产出的图片（截图、reply_image）。正文里用 image:<id> 指过位置的会被排除，
+  // 剩下的附在回复末尾——否则模型把图发在中间步骤时，用户只看得到一句「已发送图片」。
+  const images = useMemo(() => final ? (turn?.tools || []).flatMap(t => t.images || []) : [], [final, turn]);
   return <article aria-label="模型回复" className={'msg assistant' + (final ? '' : ' commentary') + (e.phase === 'streaming' ? ' is-streaming' : '')}>
-    <div className="bubble"><Markdown text={e.content} streaming={e.phase === 'streaming'} /></div>
+    <div className="bubble"><ReplyMarkdown text={e.content} images={images} sessionId={w.sid} invoke={w.api.invoke} streaming={e.phase === 'streaming'} /></div>
     {final && <div className="message-foot">
       <ActionIcon icon="copy" size="1" variant="ghost" color="gray" onClick={copy} title="复制回复" aria-label="复制回复" />
       <ActionIcon icon="thumbup" size="1" variant="ghost" color={rating === 'up' ? 'tomato' : 'gray'} onClick={() => w.rate(e.id, 'up')} title={rating === 'up' ? '取消“有帮助”' : '标记为有帮助'} aria-label="有帮助" aria-pressed={rating === 'up'} />

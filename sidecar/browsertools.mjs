@@ -45,6 +45,10 @@ export const BROWSER_TOOLS = descriptors.map((tool) => ({
         text: `已重建调试上下文（销毁并重新绑定 CDP target）。当前页面：${page || '未知'}；Cookie、已填表单与已捕获请求均保留。旧的 scriptId、断点与 reqid 视为失效，请重新 list_scripts / list_network_requests。`,
       };
     }
-    return ctx.browser.callTool(tool.name, args, ctx.signal);
+    const result = await ctx.browser.callTool(tool.name, args, ctx.signal);
+    // take_screenshot 默认把画面作为 image block 回传（不落盘时）。原样透传 images，
+    // 由 Agent 统一登记成附件，用户才能在对话里看到截图本身，而不是只看到一句「已截图」。
+    if (result?.images?.length) return { ...result, images: result.images };
+    return result;
   },
 }));

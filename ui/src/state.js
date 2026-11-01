@@ -64,7 +64,7 @@ export function sessionReducer(state, action) {
       const events = cur.events.slice();
       for (let i = events.length - 1; i >= 0; i--) {
         const e = events[i];
-        if (e.type === 'tool' && (action.v.itemId ? e.itemId === action.v.itemId : e.id === action.v.id) && e.result === undefined) { events[i] = { ...e, result: action.v.text, isError: action.v.isError, ms: action.v.ms }; break; }
+        if (e.type === 'tool' && (action.v.itemId ? e.itemId === action.v.itemId : e.id === action.v.id) && e.result === undefined) { events[i] = { ...e, result: action.v.text, isError: action.v.isError, ms: action.v.ms, ...(action.v.images?.length ? { images: action.v.images } : {}) }; break; }
       }
       return set({ events });
     }

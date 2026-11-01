@@ -65,3 +65,19 @@ export function AttachmentTiles({ items = [], sessionId, invoke, onRemove }) {
   if (!items.length) return null;
   return <div className="attachment-tiles">{items.map((item, i) => <AttachmentTile key={item.key || item.id || i} item={item} sessionId={sessionId} invoke={invoke} onRemove={onRemove ? () => onRemove(item.key) : undefined} />)}</div>;
 }
+
+// 回复里的图片：AI 主动给用户看的截图/图表。
+// 复用同一个 AttachmentTile（懒加载、缩略图缓存、点击看大图），只额外标注来源，
+// 避免和用户自己上传的附件混淆——模型能决定屏幕上出现什么，这个标记是防伪的一部分。
+// image:true 由这里强制给出：本组件只收图片，调用方（工具事件 / 正文 image:<id>）
+// 传进来的元信息不一定带这个字段，缺了就会退化成「文件卡片」。
+export function ReplyImages({ items = [], sessionId, invoke }) {
+  if (!items.length) return null;
+  return <div className="attachment-tiles reply-images" data-reply-images>
+    {items.map((item, i) => <div className="reply-image" key={item.id || i}>
+      <AttachmentTile item={{ ...item, image: true }} sessionId={sessionId} invoke={invoke} />
+      <span className="reply-image-source" title="这张图由 AI 提供，不是你自己添加的附件">AI 提供</span>
+      {item.caption && <span className="reply-image-caption">{item.caption}</span>}
+    </div>)}
+  </div>;
+}
