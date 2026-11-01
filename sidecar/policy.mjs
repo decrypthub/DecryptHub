@@ -51,7 +51,7 @@ const DESTRUCTIVE = new Set([
 // 「要不要弹确认」是另一个判断：只有碰得到宿主进程/文件的几个才进 approvalCategory。
 const EXEC = new Set([
   'skill_manage', 'memory_manage', 'automation_manage', 'mcp_manage',
-  'browser_click', 'browser_fill', 'browser_press', 'browser_upload',
+  'browser_click', 'browser_fill', 'browser_press',
   'evaluate_script', 'set_breakpoint_on_text', 'break_on_xhr', 'remove_breakpoint', 'pause_or_resume', 'step',
   'workspace_shell', 'workspace_run', 'workspace_npm', 'workspace_job_kill', 'run_node',
   // 以下都只在页面/沙箱里执行，碰不到宿主进程与文件，因此不需要确认
@@ -108,7 +108,7 @@ export function approvalCategory(name, args = {}, extra = {}) {
   if (name === 'get_cookies') return 'sensitive';
   if (name === 'page_call') return 'external';
   if (name === 'evaluate_script') return 'external';
-  if (['browser_click', 'browser_fill', 'browser_press', 'browser_upload'].includes(name)) return 'external';
+  if (['browser_click', 'browser_fill', 'browser_press'].includes(name)) return 'external';
   if (!CLASSIFIED.has(name) && !['discover_tools'].includes(name) && !extra.trustedRisk) return 'external';
   return null;
 }
