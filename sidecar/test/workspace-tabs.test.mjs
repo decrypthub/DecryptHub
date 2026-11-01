@@ -21,7 +21,9 @@ const wait = async (check, message = 'Terminal verification timed out', budget =
 // CI runner 上 PowerShell 冷启动要 20s 以上，提示符窗口必须单独放宽，否则内层比用例的 timeout 还短。
 const waitPrompt = async (s, id) => { if (process.platform !== 'win32') return; await wait(() => /PS [^>\r\n]*>/.test(s.terminals.snapshot(id).output), 'PowerShell prompt timed out', 45000); await new Promise(r => setTimeout(r, 800)); };
 const expectOutput = async (check, s, id) => { try { await wait(check, 'Terminal verification timed out', 40000); } catch (error) { const tail = s.terminals.snapshot(id).output.slice(-600); throw Error(error.message + '; output tail=' + JSON.stringify(tail)); } };
-const runCommand = async (s, id, command) => { s.terminals.input(id, command); await new Promise(r => setTimeout(r, 500)); s.terminals.input(id, '\r'); };
+// 命令与回车分两次写入时，慢的 runner 上回车可能先到，命令被拦腰截断（实测出现过
+// `ISOLATED_'` 后换行再补 `('FIRST')`）。一次写完，由终端自己按 UTF-8 字符顺序处理。
+const runCommand = async (s, id, command) => { s.terminals.input(id, command + '\r'); };
 test('work tabs preserve stable IDs and choose a neighbour on close; v1 migrates network into browser', () => {
   let dock = addDockTab(emptyDock(), 'files'), original = dock.activeId; dock = addDockTab(dock, 'document', { path: 'report.md', workspace: 'test' });
   dock = addDockTab(dock, 'terminal'); dock = closeDockTab(dock, dock.activeId); assert.equal(dock.tabs.length, 2); assert.equal(dock.tabs[0].id, original); assert.equal(dock.activeId, dock.tabs[1].id);
