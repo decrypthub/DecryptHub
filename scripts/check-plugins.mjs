@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import WebSocket from 'ws';
 import { chromium } from '@zhizhuodemao/patchright';
+import { folderProof } from '../sidecar/grants.mjs';
 const root = process.cwd(),
   parent = path.resolve('.tmp');
 fs.mkdirSync(parent, { recursive: true });
@@ -243,7 +244,16 @@ try {
     headless: true,
     embedMode: 'screencast',
   });
-  const session = (await invoke('session-list')).focused;
+  // 插件页本身不依赖会话，但验证已下载的 WDH 浏览器需要一个真实会话。
+  // 项目必须挂已授权目录：用和 UI 同一套 folderProof 给自己签一个单次凭证。
+  const grant = { sessionId: 'plugin-check', path: process.cwd(), expiresAt: Date.now() + 60000 };
+  grant.signature = folderProof(token, grant);
+  const project = await invoke('project-save', {
+    scope: 'plugin-check',
+    project: { name: 'plugin-check-' + Date.now(), folders: [{ key: 'main', grant }], primaryKey: 'main' },
+  });
+  const created = await invoke('session-create', { projectId: project.id, title: 'plugin check' });
+  const session = created.id;
   const opened = await invoke('browser-launch', {
     sessionId: session,
     url: 'http://127.0.0.1:' + site.address().port + '/browser-fixture',
@@ -268,7 +278,7 @@ try {
     async () => (await invoke('plugins-list')).official.find((p) => p.id === 'wdh').enabled === false,
     'disabled WDH',
   );
-  const sid = (await invoke('session-list')).focused;
+  const sid = session;
   if ((await invoke('list-tools', { sessionId: sid })).some((t) => t.name === 'browser_open'))
     throw Error('Disabled WDH tools still registered');
   if (pageErrors.length) throw Error(pageErrors.join('\n'));
