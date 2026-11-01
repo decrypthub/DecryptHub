@@ -502,7 +502,10 @@ class Session {
   updateGoal(value, { revision } = {}) {
     // 三种失败原因差别很大，分开报：否则模型会把「目标已 blocked」误读成「你不是 /goal 启动的」。
     if (!this.goal) throw new Error('当前没有长期目标。目标只能由用户用 /goal 启动，我不能自行创建。可以直接继续做当前任务，或用 goal_update 之外的普通回复汇报进展。');
-    if (this.goal.status !== 'active') throw new Error(`当前目标状态是 ${this.goal.status}${this.goal.stopReason ? '（' + this.goal.stopReason + '）' : ''}，不能更新。需要用户在界面上继续/恢复目标后，再记录进展或完成。`);
+    if (this.goal.status !== 'active') {
+      const label = { paused: '已暂停', needs_attention: '需要你处理', complete: '已完成' }[this.goal.status] || this.goal.status;
+      throw new Error(`当前目标状态是 ${label}，不在执行中；请先点「继续目标」再更新进展${this.goal.stopReason ? '（' + this.goal.stopReason + '）' : ''}`);
+    }
     if (this.activeRun?.source !== 'goal') throw new Error('当前这一轮不是目标续跑轮次，不能更新目标。等本轮结束后目标会自动接续，届时再记录进展。');
     if (revision !== undefined && revision !== null && Number(revision) !== (Number(this.goal.revision) || 0)) throw new Error('目标已在别处更新，请刷新后重试');
     if (value.status === 'complete' && this.subagents.jobs.size) throw new Error('请先等待或取消研究子代理，并核验其结果，再完成目标');

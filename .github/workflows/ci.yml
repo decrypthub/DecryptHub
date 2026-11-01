@@ -78,6 +78,8 @@ jobs:
         env:
           JSRA_UI_DATA_DIR: ${{ runner.temp }}\ui-data
       - run: npm run check:plugins
+        env:
+          JSRA_UI_DATA_DIR: ${{ runner.temp }}\ui-data
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

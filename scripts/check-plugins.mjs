@@ -6,11 +6,16 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import WebSocket from 'ws';
 import { chromium } from '@zhizhuodemao/patchright';
+import { folderProof } from '../sidecar/grants.mjs';
 const root = process.cwd(),
   parent = path.resolve('.tmp');
 fs.mkdirSync(parent, { recursive: true });
-const data = fs.mkdtempSync(path.join(parent, 'plugins-ui-')),
-  token = crypto.randomBytes(20).toString('hex'),
+// CI 在 JSRA_UI_DATA_DIR 下已经装好 CloakBrowser 内核；复用同一个目录，不要每次开新的临时目录。
+const data = process.env.JSRA_UI_DATA_DIR
+  ? path.join(path.resolve(process.env.JSRA_UI_DATA_DIR), 'WebDecryptHub')
+  : path.join(fs.mkdtempSync(path.join(parent, 'plugins-ui-')), 'WebDecryptHub');
+fs.mkdirSync(data, { recursive: true });
+const token = crypto.randomBytes(20).toString('hex'),
   pending = new Map();
 let socket,
   sequence = 0,
@@ -174,10 +179,12 @@ try {
     pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
   await page.goto(`http://127.0.0.1:${site.address().port}/?port=${port}&token=${token}`);
+  // 首次引导只在全新数据目录出现；复用已有目录时它不会弹，不能硬等。
   const skip = page.getByRole('button', { name: '稍后', exact: true });
-  await skip.waitFor({ state: 'visible', timeout: 15000 });
-  await skip.click();
-  await page.locator('.setup-dialog').waitFor({ state: 'detached' });
+  if (await skip.count()) {
+    await skip.click();
+    await page.locator('.setup-dialog').waitFor({ state: 'detached' });
+  }
   const rail = page.getByRole('button', { name: '展开会话列表' });
   if (await rail.count()) await rail.first().click();
   await page.locator('.rail-nav').getByRole('button', { name: '插件', exact: true }).click();
@@ -216,7 +223,9 @@ try {
     await until(() => allReady(['decrypthub_' + id]), id + ' MCP connected');
     await row.getByRole('button', { name: '收起', exact: true }).click();
   }
+  // 官方插件在「官方插件」页签里，自定义 MCP 在另一个页签；不切过去按钮处于隐藏面板中。
   await page.getByRole('tab', { name: '自定义 MCP', exact: true }).click();
+  await page.getByRole('tabpanel').filter({ hasText: '添加服务' }).waitFor();
   await page.getByRole('button', { name: '添加服务', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await dialog.locator('input').nth(0).fill('custom-demo');
@@ -251,8 +260,16 @@ try {
     headless: true,
     embedMode: 'screencast',
   });
-  const session = (await invoke('session-list')).focused;
-  await invoke('workspace-set', { sessionId: session, managed: true });
+  // 插件页本身不依赖会话，但验证已下载的 WDH 浏览器需要一个真实会话。
+  // 项目必须挂已授权目录：用和 UI 同一套 folderProof 给自己签一个单次凭证。
+  const grant = { sessionId: 'plugin-check', path: process.cwd(), expiresAt: Date.now() + 60000 };
+  grant.signature = folderProof(token, grant);
+  const project = await invoke('project-save', {
+    scope: 'plugin-check',
+    project: { name: 'plugin-check-' + Date.now(), folders: [{ key: 'main', grant }], primaryKey: 'main' },
+  });
+  const created = await invoke('session-create', { projectId: project.id, title: 'plugin check' });
+  const session = created.id;
   const opened = await invoke('browser-launch', {
     sessionId: session,
     url: 'http://127.0.0.1:' + site.address().port + '/browser-fixture',
@@ -269,13 +286,15 @@ try {
     'downloaded WDH capture',
   );
   await invoke('browser-close', { sessionId: session });
+  // 前面的自定义 MCP 步骤停在另一个页签，操作官方插件前要切回来。
+  await page.getByRole('tab', { name: '官方插件', exact: true }).click();
   const wdh = page.locator('[data-plugin-id="wdh"]');
   await wdh.getByRole('switch', { name: '启用 WDH', exact: true }).click();
   await until(
     async () => (await invoke('plugins-list')).official.find((p) => p.id === 'wdh').enabled === false,
     'disabled WDH',
   );
-  const sid = (await invoke('session-list')).focused;
+  const sid = session;
   if ((await invoke('list-tools', { sessionId: sid })).some((t) => t.name === 'browser_open'))
     throw Error('Disabled WDH tools still registered');
   if (pageErrors.length) throw Error(pageErrors.join('\n'));

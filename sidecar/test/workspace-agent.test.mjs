@@ -89,6 +89,11 @@ test('workspace_shell background job can be polled and killed', { timeout: 40000
     }
     assert.match(seen, /READY/);
     assert.match(seen, /running/);
+    assert.match(seen, /time=\d+s/);
+    assert.match(seen, /out=\d+B/);
+    const tail = jobOutput(dir, { id, tail: true }).text;
+    assert.match(tail, /^tail=\d+ total=\d+/);
+    assert.match(tail, /READY/);
     const killed = jobKill(dir, { id });
     assert.equal(killed.isError, undefined);
     let after = '';
@@ -106,10 +111,10 @@ test('workspace_shell does not pass WDH_LLM_API_KEY to the child', async () => {
   const prev = process.env.WDH_LLM_API_KEY;
   process.env.WDH_LLM_API_KEY = 'wdh-secret-value';
   try {
-    const script = "process.stdout.write(process.env.WDH_LLM_API_KEY||'EMPTY')";
+    const script = "process.stdout.write((process.env.WDH_LLM_API_KEY||'EMPTY') + ' ' + (process.env.PYTHONUNBUFFERED||'') + ' ' + (process.env.PYTHONIOENCODING||''))";
     const r = await shellWorkspace(dir, { cmd: `node -e ${JSON.stringify(script)}`, timeoutMs: 15000 });
     assert.equal(String(r.text).includes('wdh-secret-value'), false);
-    assert.match(r.text, /EMPTY/);
+    assert.match(r.text, /EMPTY 1 utf-8/);
     assert.equal(r.isError, false);
   } finally {
     if (prev == null) delete process.env.WDH_LLM_API_KEY; else process.env.WDH_LLM_API_KEY = prev;
