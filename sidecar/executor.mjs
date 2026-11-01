@@ -30,7 +30,11 @@ export function findExecutable(name) {
   throw new Error('未找到运行程序：' + name);
 }
 export function shellSpec(command) {
-  if (process.platform === 'win32') return { file: path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command] };
+  if (process.platform === 'win32') {
+    // PowerShell 默认用控制台代码页输出，Tee/Select-String 会变成 �?；先切到 UTF-8 再执行原命令。
+    const prefix = '[Console]::OutputEncoding=[Text.Encoding]::UTF8; $OutputEncoding=[Text.Encoding]::UTF8; ';
+    return { file: path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', prefix + command] };
+  }
   return { file: '/bin/sh', args: ['-c', command] };
 }
 function sandboxEntry() {
@@ -84,6 +88,8 @@ export class Executor {
   start(spec, { signal, isolated = false, workspace, dataDir, protectedRoot, network = [] } = {}) {
     const temp = path.join(dataDir || os.tmpdir(), '.exec', crypto.randomUUID()); fs.mkdirSync(temp, { recursive: true });
     const env = childEnv(process.env, { HOME: temp, USERPROFILE: temp, TMP: temp, TEMP: temp, TMPDIR: temp,
+      // 长任务日志要可观测：Python/Node 不块缓冲，统一 UTF-8，避免进度行迟迟不出现。
+      PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1', NO_COLOR: '1', FORCE_COLOR: '0',
       npm_config_cache: path.join(temp, 'npm-cache'), npm_config_userconfig: path.join(temp, 'npmrc'), ...spec.env });
     let target = { ...spec };
     if (isolated) {

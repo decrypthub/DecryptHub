@@ -45,6 +45,19 @@ test('goal continues only within its bound, persists as paused, and requires exp
   assert.equal(continuation.notice.objective, '验证长期目标');
   await s.goalAction('clear'); assert.equal(s.goal, null);
 });
+test('goal blocked by the model stops automatic continuation and explains paused updates', async t => {
+  const dir = root(t), mgr = manager(dir), s = mgr.get('main'); t.after(() => mgr.closeAll());
+  let calls = 0;
+  s.ensureAgent().chat = async () => { calls++; return calls === 1 ? { content: '', toolCalls: [{ id: 'block', name: 'goal_update', args: { status: 'blocked', summary: '等待用户授权 payload' } }] } : result('等待用户。'); };
+  assert.equal((await s.startGoal('验证阻塞后不再自动接续')).ok, true);
+  await until(() => s.goal?.status === 'needs_attention' && !s.agent.running);
+  const settled = calls;
+  await new Promise(r => setTimeout(r, 700));
+  assert.equal(calls, settled, 'blocked goal must not wake itself');
+  assert.equal(s.goal.stopReason, 'model-blocked');
+  assert.throws(() => s.updateGoal({ status: 'progress', summary: '不应在暂停状态更新' }), /不在执行中/);
+});
+
 test('goal interruption cancels future continuation and never replays on startup', async t => {
   const dir = root(t), mgr = manager(dir), s = mgr.get('main'); t.after(() => mgr.closeAll());
   s.ensureAgent().chat = async (_s, _m, _t, { signal }) => { await new Promise(r => { if (signal?.aborted) r(); else signal?.addEventListener('abort', r, { once: true }); }); return result('stopped'); };

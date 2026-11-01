@@ -18,7 +18,7 @@ export function normalizeMode(mode) {
 }
 
 const READ = new Set([
-  'component_list', 'browser_open', 'browser_tabs', 'browser_select', 'browser_snapshot',
+  'component_list', 'browser_open', 'browser_new_tab', 'browser_tabs', 'browser_select', 'browser_snapshot',
   'browser_requests', 'browser_request_detail', 'browser_capture',
   'context_ref_read',
   'agent_spawn', 'agent_message', 'agent_wait', 'agent_list', 'agent_cancel', 'goal_update',

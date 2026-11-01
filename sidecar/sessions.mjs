@@ -168,7 +168,7 @@ class Session {
         summary: isolated ? '此命令申请访问以下网络目的地。' : '执行隔离不可用。允许后，此命令将以当前系统用户权限运行，可访问工作文件夹以外的文件和网络。',
         command: [spec.file, ...(spec.args || [])].join('\n'), cwd: spec.cwd, isolated, network,
         code: spec.preview || spec.input || '', trustedPurpose: spec.trustedPurpose }, signal);
-      if (!ok) throw new Error('用户未批准执行，命令没有启动');
+      if (!ok) throw new Error('用户未批准执行，命令没有启动。需要批准的是：' + (isolated ? '网络访问 ' + network.join(', ') : '未隔离的系统进程执行') + '。请说明原因、改用只读步骤，或让用户切换权限后重试。');
     }
     if (signal?.aborted) throw new Error('任务已取消');
     this.mgr.workspaces.verify(this.workspace);
@@ -433,7 +433,12 @@ class Session {
     this.saveState(); this.emit('goal', this.goal); return { ok: true };
   }
   updateGoal(value, { revision } = {}) {
-    if (!this.goal || this.goal.status !== 'active' || this.activeRun?.source !== 'goal') throw new Error('只有用户通过 /goal 启动的当前目标可以更新');
+    if (!this.goal) throw new Error('当前没有目标；请先用 /goal 建立目标');
+    if (this.goal.status !== 'active') {
+      const label = { paused: '已暂停', needs_attention: '需要你处理', complete: '已完成' }[this.goal.status] || this.goal.status;
+      throw new Error(`目标当前${label}，不在执行中；请先点「继续目标」再更新进展`);
+    }
+    if (!this.activeRun) throw new Error('目标更新只能发生在目标执行轮次中；当前没有正在运行的目标轮次');
     if (revision !== undefined && revision !== null && Number(revision) !== (Number(this.goal.revision) || 0)) throw new Error('目标已在别处更新，请刷新后重试');
     if (value.status === 'complete' && this.subagents.jobs.size) throw new Error('请先等待或取消研究子代理，并核验其结果，再完成目标');
     this.goal = updateGoal(this.goal, value, { runId: this.activeRun.id });

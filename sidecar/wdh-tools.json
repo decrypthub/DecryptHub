@@ -17,6 +17,23 @@
     "group": "core"
   },
   {
+    "name": "browser_new_tab",
+    "description": "新建浏览器标签页并切换过去；原标签页保留当前页面和表单状态。用于同时保留提交页与探测页。",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false
+    },
+    "group": "core"
+  },
+  {
     "name": "browser_tabs",
     "description": "列出当前会话的浏览器标签页。",
     "schema": {
