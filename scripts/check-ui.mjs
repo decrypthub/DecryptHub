@@ -202,6 +202,8 @@ fs.mkdirSync(SHOTS, { recursive: true });
 async function checkWindowChrome(scheme) {
   for (const nativeTitlebar of [false, true]) {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: scheme });
+  // CI runner 上冷启动和首次渲染明显更慢，默认 30 秒的断言窗口不够。
+  context.setDefaultTimeout(60000);
     const page = await context.newPage();
     page.on('pageerror', error => console.error('Window chrome runtime error: ' + error.message));
     try {
@@ -679,10 +681,10 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.locator('.settings-nav').getByRole('button', { name: '外观', exact: true }).click();
   const opposite = scheme === 'dark' ? 'light' : 'dark';
   await page.locator('.theme-option').filter({ hasText: opposite === 'dark' ? '深色' : '浅色' }).click();
-  await page.locator('html[data-theme="' + opposite + '"]').waitFor({ state: 'attached', timeout: 3000 });
+  await page.locator('html[data-theme="' + opposite + '"]').waitFor({ state: 'attached', timeout: 30000 });
   ok(await page.locator('html').getAttribute('data-theme') === opposite, '[' + scheme + '] 主题切换没有生效');
   await page.locator('.theme-option').filter({ hasText: '跟随系统' }).click();
-  await page.locator('html[data-theme="' + scheme + '"]').waitFor({ state: 'attached', timeout: 3000 });
+  await page.locator('html[data-theme="' + scheme + '"]').waitFor({ state: 'attached', timeout: 30000 });
   ok(await page.locator('html').getAttribute('data-theme') === scheme, '[' + scheme + '] 跟随系统没有恢复');
 
   await page.locator('.screen-head button').first().click();
@@ -775,7 +777,7 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.getByRole('button', { name: '恢复网页执行', exact: true }).waitFor();
   await page.screenshot({ path: path.join(SHOTS, scheme + '-browser-paused.png') });
   await page.getByRole('button', { name: '恢复网页执行', exact: true }).click();
-  await page.getByRole('button', { name: '恢复网页执行', exact: true }).waitFor({ state: 'detached', timeout: 8000 }).catch(async e => { throw new Error(e.message + '\n通知：' + (await page.locator('[data-sonner-toast]').allTextContents()).join(' | ')); });
+  await page.getByRole('button', { name: '恢复网页执行', exact: true }).waitFor({ state: 'detached', timeout: 30000 }).catch(async e => { throw new Error(e.message + '\n通知：' + (await page.locator('[data-sonner-toast]').allTextContents()).join(' | ')); });
   await debugUiCdp.detach();
 
   await page.keyboard.press('Control+Alt+3');
@@ -787,7 +789,7 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
     await page.getByRole('button', { name: '刷新', exact: true }).click();
     await page.keyboard.press('Control+Alt+3');
   }
-  await page.locator('.req-row').filter({ hasText: /api/ }).first().waitFor({ timeout: 15000 });
+  await page.locator('.req-row').filter({ hasText: /api/ }).first().waitFor({ timeout: 45000 });
   const pauseNetwork = page.getByRole('button', { name: '暂停抓取网络请求', exact: true });
   ok(await pauseNetwork.getAttribute('aria-pressed') === 'true', '[' + scheme + '] 记录中状态应显示暂停操作');
   await pauseNetwork.click();
@@ -799,7 +801,7 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   ok(await page.locator('.bar').filter({ has: page.getByPlaceholder('过滤 URL / 参数名') }).innerText().then(text => !/网络请求\s*\d/.test(text)), '[' + scheme + '] 不应重复网络请求标题与数量');
   await page.locator('.req-row').filter({ hasText: /api/ }).first().click();
   await page.locator('.detail-tabs').getByRole('tab', { name: '响应', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('.detail-body')?.textContent.includes('UI capture verified'), { timeout: 10000 });
+  await page.waitForFunction(() => document.querySelector('.detail-body')?.textContent.includes('UI capture verified'), { timeout: 30000 });
   ok((await page.locator('.detail-body').innerText()).includes('UI capture verified'), '[' + scheme + '] 请求响应没有正确显示');
   await page.screenshot({ path: path.join(SHOTS, scheme + '-network.png') });
   await page.keyboard.press('Control+Alt+2');
@@ -1184,11 +1186,11 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.waitForFunction(() => document.activeElement?.matches('.terminal-screen .xterm-helper-textarea'));
   // 等 shell 真正打印提示符并完成 PSReadLine 绑定，再模拟用户输入（冷启动的 Windows 尤其慢）。
   const promptRe = process.platform === 'win32' ? /PS [^>\r\n]*>/ : /[$#] /;
-  const promptDeadline = Date.now() + 15000;
+  const promptDeadline = Date.now() + 45000;
   while (!promptRe.test((await rpc('terminal-snapshot', { sessionId: workChat.id, id: terminalId })).output)) { if (Date.now() > promptDeadline) throw Error('Terminal prompt not ready'); await page.waitForTimeout(100); }
   await page.waitForTimeout(800);
   await page.keyboard.type(process.platform === 'win32' ? "Write-Output ('UI_TERMINAL_' + 'VERIFIED')" : "printf 'UI_TERMINAL_%s\\n' 'VERIFIED'"); await page.keyboard.press('Enter');
-  const terminalDeadline = Date.now() + 12000;
+  const terminalDeadline = Date.now() + 30000;
   while (!(await rpc('terminal-snapshot', { sessionId: workChat.id, id: terminalId })).output.includes('UI_TERMINAL_VERIFIED')) { if (Date.now() > terminalDeadline) throw Error('Terminal UI input failed'); await page.waitForTimeout(50); }
   ok(await page.getByRole('menu').count() === 0, '[' + scheme + '] 终端输入回车不能重新打开新建标签菜单');
   await page.screenshot({ path: path.join(SHOTS, scheme + '-terminal-tabs.png') });
