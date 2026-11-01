@@ -179,10 +179,12 @@ try {
     pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
   await page.goto(`http://127.0.0.1:${site.address().port}/?port=${port}&token=${token}`);
+  // 首次引导只在全新数据目录出现；复用已有目录时它不会弹，不能硬等。
   const skip = page.getByRole('button', { name: '稍后', exact: true });
-  await skip.waitFor({ state: 'visible', timeout: 15000 });
-  await skip.click();
-  await page.locator('.setup-dialog').waitFor({ state: 'detached' });
+  if (await skip.count()) {
+    await skip.click();
+    await page.locator('.setup-dialog').waitFor({ state: 'detached' });
+  }
   const rail = page.getByRole('button', { name: '展开会话列表' });
   if (await rail.count()) await rail.first().click();
   await page.locator('.rail-nav').getByRole('button', { name: '插件', exact: true }).click();
