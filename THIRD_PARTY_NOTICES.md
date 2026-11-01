@@ -4,6 +4,8 @@ DecryptHub is MIT licensed. Dependencies retain their own licenses; inspect inst
 
 - Tauri and plugins: MIT / Apache-2.0; desktop shell, dialogs and updates.
 - React, Vite, Radix UI: MIT; user interface.
+- xterm.js and its fit addon: MIT; terminal rendering.
+- node-pty: MIT; terminal PTY worker. Its LICENSE and the bundled winpty LICENSE are retained in terminal resources. Windows ConPTY code and binaries retain their upstream terms.
 - @modelcontextprotocol/sdk, ws, zod, yauzl: MIT; MCP, transport, schemas and archive parsing.
 - @anthropic-ai/sandbox-runtime: Apache-2.0; optional execution isolation backend.
 - Node.js / npm: their upstream licenses, included in the official downloaded Node runtime distribution.

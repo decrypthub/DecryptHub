@@ -6,10 +6,12 @@ use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
 mod embed;
 mod activity_overlay;
 mod shutdown;
+mod account;
 
 const KEYRING_SERVICE: &str = "com.webdecrypthub.app";
 const LEGACY_KEYRING_SERVICE: &str = "com.niying.jsra";
 const KEYRING_USER: &str = "llm-api-key";
+const NATIVE_TITLEBAR: bool = cfg!(target_os = "macos");
 
 struct AppState {
     port: Arc<Mutex<u16>>,
@@ -202,7 +204,7 @@ async fn pick_open_paths(app: tauri::AppHandle) -> Option<Vec<String>> {
 fn get_ws_port(state: State<AppState>) -> u16 { *state.port.lock().unwrap() }
 
 /// Only the native app UI can mint a folder-selection proof. It is short-lived,
-/// bound to one chat, and consumed once by the sidecar.
+/// bound to one directory-selection scope, and consumed once by the sidecar.
 #[tauri::command]
 async fn pick_work_folder(app: tauri::AppHandle, state: State<'_, AppState>, session_id: String, recent_path: Option<String>) -> Result<Option<serde_json::Value>, String> {
     use tauri_plugin_dialog::DialogExt;
@@ -310,8 +312,9 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .manage(account::AccountManager::default())
         .manage(AppState { port: port.clone(), token: token.clone(), native_key: native_key.clone(), sidecar: sidecar.clone(), running: running.clone() })
-        .invoke_handler(tauri::generate_handler![secret_set, secret_sync, secret_clear, get_ws_port, get_ws_token, app_info, restart_sidecar, prepare_for_update, pick_save_path, pick_open_paths, pick_work_folder, embed_show, embed_hide, embed_release, embed_supported, open_devtools])
+        .invoke_handler(tauri::generate_handler![secret_set, secret_sync, secret_clear, get_ws_port, get_ws_token, app_info, restart_sidecar, prepare_for_update, pick_save_path, pick_open_paths, pick_work_folder, embed_show, embed_hide, embed_release, embed_supported, open_devtools, account::account_status, account::account_login, account::account_cancel, account::account_logout, account::account_open_page, account::account_reopen_login, account::account_avatar])
         .setup(move |app| {
             match spawn_sidecar(&port, &token, &native_key) {
                 Ok(c) => { *sidecar.lock().unwrap() = Some(c); }
@@ -354,7 +357,7 @@ fn main() {
             let pulse = if shot.is_empty() { String::new() } else { "try{setInterval(function(){var b=document.body;if(b){b.style.outline=b.style.outline?'':'1px solid transparent';window.dispatchEvent(new Event('resize'));}},300);}catch(e){}".to_string() };
             // F12 / Ctrl+Shift+I 打开 DevTools（debug 构建有效）：挂到初始化脚本，任何页面（含 Vite dev server）都可用
             let devkeys = "window.addEventListener('keydown',function(e){if(e.key==='F12'||((e.ctrlKey||e.metaKey)&&e.shiftKey&&(e.key==='I'||e.key==='i'))){e.preventDefault();try{window.__TAURI_INTERNALS__.invoke('open_devtools');}catch(err){}}},true);";
-            let init = format!("window.__JSRA_WS_PORT = 0; window.__JSRA_NATIVE = true; window.__JSRA_SHOT = {:?}; window.__JSRA_SKIP_ONBOARD = {}; window.__JSRA_DEBUG = {}; window.__JSRA_SHOT_URL = {:?};{}{}", shot, skip, if std::env::var("JSRA_DEBUG").is_ok() { "true" } else { "false" }, shoturl, pulse, devkeys);
+            let init = format!("window.__JSRA_WS_PORT = 0; window.__JSRA_NATIVE = true; window.__JSRA_NATIVE_TITLEBAR = {}; window.__JSRA_SHOT = {:?}; window.__JSRA_SKIP_ONBOARD = {}; window.__JSRA_DEBUG = {}; window.__JSRA_SHOT_URL = {:?};{}{}", NATIVE_TITLEBAR, shot, skip, if std::env::var("JSRA_DEBUG").is_ok() { "true" } else { "false" }, shoturl, pulse, devkeys);
             // 默认小窗口，够用即可；用户拖动调整后不记忆（保持可预期的启动尺寸）
             let (mut want_w, mut want_h) = (1160.0_f64, 760.0_f64);
             if let Ok(Some(mon)) = app.primary_monitor() {
@@ -378,12 +381,18 @@ fn main() {
                 .title("DecryptHub")
                 .inner_size(want_w, want_h)
                 .min_inner_size(1080.0, 680.0)
-                .decorations(false)
+                .decorations(NATIVE_TITLEBAR)
                 .shadow(true)
                 .center()
                 .initialization_script(&init)
                 // WebView2 新版 Chromium 的“本地网络访问”检查会拦截页面到 127.0.0.1 sidecar 的 WebSocket；保留 Tauri 默认禁用项并追加关闭
                 .additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,LocalNetworkAccessChecks,BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights");
+            #[cfg(target_os = "macos")]
+            {
+                b = b.title_bar_style(tauri::TitleBarStyle::Overlay)
+                    .hidden_title(true)
+                    .traffic_light_position(tauri::LogicalPosition::new(20.0, 24.0));
+            }
             if std::env::var("JSRA_MAXIMIZE").is_ok() { b = b.maximized(true); }
             // Local builds may use different WebView2 environment options than the
             // installed app. WebView2 requires a separate profile for those options.

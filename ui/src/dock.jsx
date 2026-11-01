@@ -1,6 +1,6 @@
 // 右侧停靠栏：浏览器 / 请求 / 产出。
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Flex, Text, Badge, TextField, SegmentedControl, Separator, Spinner, Code, TextArea, Tabs } from '@radix-ui/themes';
+import { Box, Flex, Text, Badge, TextField, SegmentedControl, Separator, Spinner, Code, TextArea, Tabs, DropdownMenu } from '@radix-ui/themes';
 import { useWorkbench } from './bus.jsx';
 import { Button, ActionIcon, Icon, Markdown, EmptyState } from './kit.jsx';
 import { fmtSize, fmtMs, isApi, shortPath, hostOf } from './state.js';
@@ -9,23 +9,25 @@ import { native } from './transport.js';
 import { WorkspaceFiles } from './files.jsx';
 import { handleWindowDrag } from './window-drag.js';
 import { BrowserPanel } from './browser-panel.jsx';
+import { DocumentPanel } from './document-panel.jsx';
+import { TerminalPanel } from './terminal-panel.jsx';
 
-const TABS = [['browser', '浏览器', 'globe'], ['evidence', '网络请求', 'network'], ['code', '工作区文件', 'folder']];
-
+const TOOL_KINDS = [['files', '工作区文件', 'folder'], ['browser', '浏览器', 'globe'], ['terminal', '终端', 'terminal']];
 export function Dock() {
-  const { side, setSide, cur } = useWorkbench();
-  const requestCount = cur.requests.length;
-  return <Tabs.Root className="dock-layout" value={side} onValueChange={setSide}>
+  const { tabs: manager, cur } = useWorkbench(), { dock, activeTab } = manager;
+  const tabBar = useRef(null);
+  const openingTerminal = useRef(false);
+  useEffect(() => { const frame = requestAnimationFrame(() => tabBar.current?.querySelector('[data-tab-id="' + dock.activeId + '"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })); return () => cancelAnimationFrame(frame); }, [dock.activeId, activeTab?.title]);
+  return <Tabs.Root className="dock-layout" value={dock.activeId || ''} onValueChange={manager.selectTab}>
     <div className="dock-head" data-window-drag-region onMouseDown={e => handleWindowDrag(e, native)}>
-      <Tabs.List className="dock-tabs" size="2" aria-label="分析工具">
-        {TABS.map(([k, l, icon]) => <Tabs.Trigger key={k} value={k} className="dock-tab" aria-label={l} title={l}><Flex as="span" align="center" gap="2"><Icon n={icon} /><span className="dock-tab-label">{l}</span>{k === 'evidence' && requestCount > 0 && <Badge size="1" color="gray">{requestCount}</Badge>}</Flex></Tabs.Trigger>)}
+      <Tabs.List ref={tabBar} className="dock-tabs" size="2" aria-label="工作标签页">
+        {dock.tabs.map(tab => <div className="dock-tab-wrap" key={tab.id} data-tab-id={tab.id} data-tab-kind={tab.kind}><Tabs.Trigger value={tab.id} className="dock-tab" aria-label={tab.kind === 'document' ? tab.title : TOOL_KINDS.find(k => k[0] === tab.kind)?.[1]} title={tab.title}><Icon n={tab.kind === 'browser' ? 'globe' : tab.kind === 'files' ? 'folder' : tab.kind === 'terminal' ? 'terminal' : 'file'} /><span className="ellipsis">{tab.title}</span></Tabs.Trigger><ActionIcon icon="x" size="1" title={'关闭标签页 ' + tab.title} onClick={() => manager.closeTab(tab)} /></div>)}
       </Tabs.List>
+      <DropdownMenu.Root onOpenChange={open => { if (open) openingTerminal.current = false; }}><DropdownMenu.Trigger><ActionIcon icon="plus" title="新建标签页" /></DropdownMenu.Trigger><DropdownMenu.Content align="end" data-overlay onCloseAutoFocus={event => { if (openingTerminal.current) event.preventDefault(); openingTerminal.current = false; }}>{TOOL_KINDS.map(([kind, label, icon]) => <DropdownMenu.Item key={kind} onSelect={() => { openingTerminal.current = kind === 'terminal' && dock.tabs.length < 32; manager.newTab(kind); }}><Icon n={icon} />{label}标签页</DropdownMenu.Item>)}</DropdownMenu.Content></DropdownMenu.Root>
     </div>
-    <Tabs.Content className="dock-body" value={side}>
-      {side === 'browser' && <BrowserPanel />}
-      {side === 'evidence' && <RequestPanel />}
-      {side === 'code' && <WorkspaceFiles />}
-    </Tabs.Content>
+    {!dock.tabs.length && <div className="dock-launcher">{TOOL_KINDS.map(([kind, label, icon]) => <button key={kind} className="dock-launcher-item" onClick={() => manager.newTab(kind)}><Icon n={icon} size={22} /><span><strong>{label}</strong><small>{kind === 'files' ? '浏览当前工作区的文件' : kind === 'browser' ? '浏览网页、抓取请求和调试网站' : '在会话工作目录中运行命令'}</small></span><Icon n="plus" /></button>)}</div>}
+    {dock.tabs.map(tab => tab.kind !== 'browser' && <Tabs.Content forceMount className="dock-body dock-pane" hidden={tab.id !== dock.activeId} key={tab.id} value={tab.id}>{tab.kind === 'files' ? <WorkspaceFiles /> : tab.kind === 'document' ? <DocumentPanel tab={tab} /> : <TerminalPanel tab={tab} active={tab.id === dock.activeId} />}</Tabs.Content>)}
+    {activeTab?.kind === 'browser' && <Tabs.Content className="dock-body browser-workspace" value={activeTab.id}><BrowserPanel key={activeTab.id}>{activeTab.mode === 'network' && <RequestPanel key={activeTab.id} />}</BrowserPanel></Tabs.Content>}
   </Tabs.Root>;
 }
 
@@ -35,14 +37,15 @@ const groupOf = t => (t === 'xhr' || t === 'fetch') ? 'api' : t === 'script' ? '
 const statusClass = s => s === 'pending' ? 'pend' : s === 'failed' || s === 0 ? 'bad' : s >= 500 ? 'bad' : s >= 400 ? 'warn' : s >= 300 ? 'redir' : 'ok';
 
 function RequestPanel() {
-  const { cur, inv, toast, addAtt, setInput } = useWorkbench();
+  const { cur, inv, toast, addAtt, setInput, tabs } = useWorkbench();
   const mode = 'req';
-  const [q, setQ] = useState('');
-  const [type, setType] = useState('api');
+  const [q, setQ] = useState(tabs.activeTab?.network?.query || '');
+  const [type, setType] = useState(tabs.activeTab?.network?.type || 'api');
   const [sel, setSel] = useState(null);
   const [capturing, setCapturing] = useState(false);
   const paused = cur.status.capturePaused !== false;
   const all = cur.requests;
+  useEffect(() => { tabs.updateTab(tabs.activeTab.id, { network: { query: q, type } }); }, [q, type]);
   const list = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return all.filter(r => (type === 'all' || groupOf(r.type) === type) && (!needle || r.url.toLowerCase().includes(needle) || (r.sig || []).some(s => s.toLowerCase().includes(needle))));

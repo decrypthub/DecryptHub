@@ -9,6 +9,7 @@ import { checkForUpdate, installAndRelaunch } from './updater.js';
 import { PluginCenter } from './plugins.jsx';
 import { Section, Row } from './settings-kit.jsx';
 import { handleWindowDrag } from './window-drag.js';
+import { AccountTab, useAccount } from './account.jsx';
 
 export function Screens() {
   const { view, setView } = useWorkbench();
@@ -16,13 +17,14 @@ export function Screens() {
   return <div className="screen-wrap">
     <header className="screen-head" data-window-drag-region onMouseDown={e => handleWindowDrag(e, native)}>
       <ActionIcon icon="back" variant="soft" color="gray" onClick={() => setView('chat')} title="返回对话" />
-      <span className="screen-breadcrumb">工作区</span><Icon n="chevright" size={12} /><Text size="2" weight="medium">{title}</Text>
+      <span className="screen-breadcrumb">DecryptHub</span><Icon n="chevright" size={12} /><Text size="2" weight="medium">{title}</Text>
     </header>
     {view === 'plugins' ? <PluginCenter /> : view === 'settings' ? <Settings /> : view === 'automations' ? <Automations /> : null}
   </div>;
 }
 
 const TABS = [
+  ['account', '账号', 'user'],
   ['ai', 'AI 模型', 'sparkles'],
   ['runtime', '运行参数', 'layers'],
   ['look', '外观', 'sun'],
@@ -31,8 +33,10 @@ const TABS = [
 
 function Settings() {
   const w = useWorkbench();
+  const account = useAccount();
   const [s, setS] = useState(w.settings);
   const [tab, setTab] = useState('ai');
+  useEffect(() => { if (account.settingsRequest) setTab('account'); }, [account.settingsRequest]);
   const [info, setInfo] = useState(null);
   const dirty = JSON.stringify(s) !== JSON.stringify(w.settings);
   useEffect(() => { native.appInfo().then(setInfo); }, []);
@@ -54,6 +58,7 @@ function Settings() {
     <div className="settings-body">
       <div className="settings-col">
         <div className="page-intro"><h1>{TABS.find(([k]) => k === tab)?.[1]}</h1></div>
+        {tab === 'account' && <AccountTab />}
         {tab === 'ai' && <AiTab s={s} setS={setS} />}
         {tab === 'runtime' && <RuntimeTab s={s} up={up} />}
         {tab === 'look' && <LookTab theme={localStorage.getItem('jsra_theme') || 'system'} onTheme={w.setTheme} />}
@@ -120,7 +125,7 @@ function AiTab({ s, setS }) {
 
   return <>
     <Section title="模型渠道" desc="支持 OpenAI 兼容接口与 Claude 原生接口。"
-      actions={<Button size="2" onClick={openNew}><Icon n="plus" size={16} />添加</Button>}>
+      actions={<Flex gap="2"><Button size="2" variant="soft" color="gray" onClick={async () => { await w.saveSettings({ ...s, onboarding: null }, true); w.setFirstRun(true); }}>重新运行引导</Button><Button size="2" onClick={openNew}><Icon n="plus" size={16} />添加</Button></Flex>}>
       <Card size="2" style={{ padding: 0 }}>
         {!list.length && <EmptyState icon="sparkles" title="连接第一个模型" description="添加 OpenAI 兼容端点或 Claude 原生渠道，开启 AI 辅助分析。"><Button size="2" onClick={openNew}><Icon n="plus" size={16} />添加模型渠道</Button></EmptyState>}
         {list.map((p, i) => <div key={p.id} className={'prov-row' + (activeId === p.id ? ' on' : '')}>
@@ -238,6 +243,9 @@ function RuntimeTab({ s, up }) {
       <Row label="Token 预算" desc="0 表示不限；按每次请求的输入和输出用量累加，与模型上下文容量分别计算">
         <TextField.Root aria-label="Token 预算" size="2" type="number" style={{ width: 120 }} min="0" step="1000" value={s.tokenBudget ?? 0} onChange={e => up('tokenBudget', Math.max(0, Math.floor(+e.target.value)))} />
       </Row>
+      <Row label="研究子代理并发" desc="同时运行的研究子代理数量，1–8；主代理和用户都可随时追加要求">
+        <TextField.Root aria-label="研究子代理并发" size="2" type="number" style={{ width: 120 }} min="1" max="8" step="1" value={s.subagentMaxActive ?? 3} onChange={e => up('subagentMaxActive', Math.min(8, Math.max(1, Math.floor(+e.target.value) || 1)))} />
+      </Row>
       <Row label="温度" desc="越小越稳定，分析类任务建议 0.2 以下">
         <TextField.Root size="2" type="number" style={{ width: 120 }} step="0.1" min="0" max="1" value={s.temperature} onChange={e => up('temperature', +e.target.value)} />
       </Row>
@@ -350,7 +358,7 @@ function Automations() {
         </Flex>
         <Box mb="3"><Text as="div" size="1" color="gray" mb="1">要 AI 做什么</Text>
           <TextArea size="2" rows={4} value={form.prompt} onChange={e => setForm({ ...form, prompt: e.target.value })} placeholder="例如：打开 https://example.com，看它首页调了哪些接口，把新增的参数记到 findings.md" /></Box>
-        <Box mb="3"><Text as="div" size="1" color="gray" mb="1">执行会话</Text><Dropdown label="执行会话" value={form.sessionId || ''} options={[{ value: 'new-managed', label: '独立会话工作区' }, ...w.sessions.sessions.map(s => ({ value: s.id, label: s.title + ' · ' + (s.workspace?.label || '会话工作区') }))]} onChange={value => setForm({ ...form, sessionId: value === 'new-managed' ? '' : value })} placeholder="独立会话工作区" /><Text as="div" size="1" color="gray" mt="1">使用该会话的文件夹和权限；遇到新权限时标记为待处理。</Text></Box>
+        <Box mb="3"><Text as="div" size="1" color="gray" mb="1">执行会话</Text><Dropdown label="执行会话" value={form.sessionId || ''} options={w.sessions.sessions.map(s => ({ value: s.id, label: s.title + ' · ' + (w.projects.find(p => p.id === s.projectId)?.name || s.workspace?.label) }))} onChange={value => setForm({ ...form, sessionId: value })} placeholder="选择项目内的会话" /><Text as="div" size="1" color="gray" mt="1">使用该会话的项目目录和权限；目录不可用或遇到新权限时暂停处理。</Text></Box>
         <Flex align="center" gap="2" mb="3" wrap="wrap">
           <Text size="1" color="gray">星期</Text>
           {DAYS.map((d, i) => <Button key={i} size="2" variant={form.days.includes(i) ? 'solid' : 'soft'} color={form.days.includes(i) ? undefined : 'gray'}

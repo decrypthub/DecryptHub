@@ -41,10 +41,14 @@ test('real RPC: select folder, write, approve execution, restore history, review
     socket.on('message', raw => { const m = JSON.parse(raw); if (m.type === 'event') events.push(m); else { const p = waiting.get(m.id); if (p) { waiting.delete(m.id); m.error ? p.reject(new Error(m.error)) : p.resolve(m.result); } } });
     await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
     const settings = await invoke('get-settings'); assert.ok(!JSON.stringify(settings).includes('fixture-private-key')); assert.equal(settings.openai.hasKey, true);
-    const sessionId = (await invoke('session-list')).focused;
-    const grant = { sessionId, path: repo, expiresAt: Date.now() + 60000 }; grant.signature = folderProof(token, grant);
-    await invoke('workspace-set', { sessionId, grant });
-    await assert.rejects(invoke('workspace-set', { sessionId, grant }), /已使用/);
+    assert.equal((await invoke('session-list')).sessions.length, 0);
+    await assert.rejects(invoke('session-create', {}), /选择项目/);
+    const scope = 'rpc-project-fixture';
+    const grant = { sessionId: scope, path: repo, expiresAt: Date.now() + 60000 }; grant.signature = folderProof(token, grant);
+    const project = await invoke('project-save', { scope, project: { name: 'RPC fixture', folders: [{ key: 'root', grant }] } });
+    const sessionId = (await invoke('session-create', { projectId: project.id })).id;
+    assert.ok((await invoke('session-list')).sessions.find(s => s.id === sessionId).projectId);
+    await assert.rejects(invoke('project-save', { scope, project: { name: 'duplicate grant', folders: [{ key: 'root', grant }] } }), /已使用/);
     const started = await invoke('agent-send', { sessionId, text: '创建并运行脚本' }); assert.equal(started.ok, true);
     await until(() => events.find(e => e.channel === 'agent-approval'));
     const approval = events.find(e => e.channel === 'agent-approval').payload;

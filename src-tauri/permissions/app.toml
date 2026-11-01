@@ -1,10 +1,17 @@
 # 应用自身命令的权限集合。
-# 本地（tauri://）页面本来就允许调用；这里显式声明是为了让 Vite dev server 的
-# http://127.0.0.1:5173 来源（能力文件里的 remote.urls）也能走 IPC，用于调试模式。
+# 主窗口的本地页面与能力文件中显式允许的 Vite 调试来源均需按清单调用。
+# 新增桥接命令时须同步登记具名权限，不以 Rust 单测通过代替真实 IPC 验收。
 [[permission]]
 identifier = "allow-app-commands"
 description = "允许调用应用自身的命令（调试模式下的 Vite 来源需要）"
 commands.allow = [
+  "account_status",
+  "account_login",
+  "account_cancel",
+  "account_logout",
+  "account_open_page",
+  "account_reopen_login",
+  "account_avatar",
   "app_info",
   "get_ws_port",
   "get_ws_token",

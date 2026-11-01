@@ -76,20 +76,49 @@ function launch(spec, { signal, env, timeoutMs = 60000 } = {}) {
 }
 
 export class Executor {
-  constructor() { this.jobs = new Map(); this.capability = null; }
+  constructor() { this.jobs = new Map(); this.capability = null; this.terminals = new Set(); }
+  async startTerminal(spec, { signal, verify } = {}) {
+    const { spawnTerminal } = await import('./terminal-process.mjs');
+    signal?.throwIfAborted(); verify?.();
+    if (this.terminals.size >= 24) throw Error('当前最多同时运行24个终端');
+    const pty = spawnTerminal(spec);
+    this.terminals.add(pty);
+    pty.done.finally(() => this.terminals.delete(pty));
+    const abort = () => pty.kill(); signal?.addEventListener('abort', abort, { once: true });
+    try { await pty.ready; signal?.throwIfAborted(); verify?.(); return pty; }
+    catch (error) { pty.kill(); await pty.done; throw error; }
+    finally { signal?.removeEventListener('abort', abort); }
+  }
   async probe(force = false) {
     if (process.env.JSRA_TEST_FIXTURES === '1' && process.env.JSRA_TEST_NO_SANDBOX === '1') return { backend: 'test', available: false, errors: ['Test fixture'], warnings: [], platform: process.platform };
     if (this.capability && !force) return this.capability;
+    let value = { available: false, errors: [], warnings: [] };
     try {
       const result = await launch({ file: findNode(), args: [sandboxEntry(), '--probe'] }, { env: childEnv(process.env), timeoutMs: 15000 }).done;
-      const value = JSON.parse(result.out);
-      this.capability = { backend: 'srt', available: !!value.available, errors: value.errors || [], warnings: value.warnings || [], platform: process.platform };
-    } catch (e) { this.capability = { backend: 'srt', available: false, errors: [e.message], warnings: [], platform: process.platform }; }
+      value = JSON.parse(result.out);
+    } catch (e) { value = { available: false, errors: [e.message], warnings: [] }; }
+    // --probe 只检查依赖；真实会话里 initialize/wrap 仍可能失败（Windows 上曾出现 listen EINVAL）。
+    // 用同一个 sandbox-entry 跑一次真正的隔离 echo，probe 才能代表实际可用性。
+    if (value.available) {
+      const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'exec-probe-'));
+      try {
+        const spec = process.platform === 'win32'
+          ? { file: process.env.ComSpec || path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe'), args: ['/d', '/c', 'echo SANDBOX_SELFTEST'], cwd: temp, timeoutMs: 15000 }
+          : { file: '/bin/echo', args: ['SANDBOX_SELFTEST'], cwd: temp, timeoutMs: 15000 };
+        const job = this.start(spec, { isolated: true, workspace: { id: 'probe', root: temp }, dataDir: temp, protectedRoot: path.join(temp, 'protected'), network: [] });
+        const result = await job.done;
+        if (result.code !== 0 || !String(result.out).includes('SANDBOX_SELFTEST')) value = { ...value, available: false, errors: [String(result.err || result.reason || '隔离自检失败').split('\n')[0].slice(0, 500)] };
+      } catch (e) { value = { ...value, available: false, errors: [String(e.message).slice(0, 500)] }; }
+      finally { fs.rmSync(temp, { recursive: true, force: true }); }
+    }
+    this.capability = { backend: 'srt', available: !!value.available, errors: value.errors || [], warnings: value.warnings || [], platform: process.platform };
     return this.capability;
   }
   start(spec, { signal, isolated = false, workspace, dataDir, protectedRoot, network = [] } = {}) {
     const temp = path.join(dataDir || os.tmpdir(), '.exec', crypto.randomUUID()); fs.mkdirSync(temp, { recursive: true });
     const env = childEnv(process.env, { HOME: temp, USERPROFILE: temp, TMP: temp, TEMP: temp, TMPDIR: temp,
+      // 长任务日志要可观测：Python/Node 不块缓冲，统一 UTF-8，避免进度行迟迟不出现。
+      PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1', NO_COLOR: '1', FORCE_COLOR: '0',
       npm_config_cache: path.join(temp, 'npm-cache'), npm_config_userconfig: path.join(temp, 'npmrc'), ...spec.env });
     let target = { ...spec };
     if (isolated) {

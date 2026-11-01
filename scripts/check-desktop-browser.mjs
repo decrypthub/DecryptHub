@@ -31,10 +31,12 @@ try {
   console.log('Native -> Node integrity: ' + doctor.hostIntegrity.level);
   const sid = (await invoke('session-list')).focused;
   await invoke('workspace-set', { sessionId: sid, managed: true });
-  const kernels = [['system', '']]; if (process.env.JSRA_SMOKE_CLOAK) kernels.push(['cloak', '']);
-  for (const [kernel, chromePath] of kernels) {
-    const settings = await invoke('get-settings'); await invoke('save-settings', { ...settings, kernel, chromePath, headless: false, embedMode: 'auto' });
-    if (kernel === 'cloak') {
+  // 桌面版内核固定为 CloakBrowser，系统 Chrome / 自定义路径不再参与回归。
+  if (!process.env.JSRA_SMOKE_CLOAK) throw new Error('需要 JSRA_SMOKE_CLOAK 指向已验证的 CloakBrowser 可执行文件');
+  {
+    const kernel = 'cloak';
+    const settings = await invoke('get-settings'); await invoke('save-settings', { ...settings, headless: false, embedMode: 'auto' });
+    {
       const blocked = await invoke('browser-launch', { sessionId: sid }); if (blocked.ok || !blocked.error.includes('低完整性')) throw new Error('Legacy low-integrity kernel must fail with a clear diagnostic');
       const repaired = await invoke('kernel-repair', { kind: 'cloak' }); if (!repaired.ok) throw new Error(repaired.error);
       console.log('Legacy CloakBrowser repair: passed (code files only)');
@@ -49,7 +51,7 @@ try {
     const commandLine = execFileSync(path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', `[Console]::Write((Get-CimInstance Win32_Process -Filter "ProcessId=${Number(session.chromePid)}").CommandLine)`], { encoding: 'utf8', windowsHide: true });
     if (/--no-sandbox|--disable-gpu-sandbox|--in-process-gpu/.test(commandLine)) throw new Error('Browser isolation was weakened');
     evidence.push({ kernel, hostIntegrity: doctor.hostIntegrity.level, headed: true, snapshot: true, capture: true, debugger: true, chromiumSandbox: true });
-    await invoke('browser-close', { sessionId: sid }); console.log('Native browser passed: ' + (kernel === 'system' ? 'system Chrome/Edge' : 'CloakBrowser') + ' (headed, DOM, capture, debugger)');
+    await invoke('browser-close', { sessionId: sid }); console.log('Native browser passed: CloakBrowser (headed, DOM, capture, debugger)');
   }
   fs.writeFileSync(path.join(data, 'results.json'), JSON.stringify(evidence, null, 2));
 } finally {

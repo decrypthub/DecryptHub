@@ -119,7 +119,11 @@ export function grepWorkspace(v, a) {
   } catch (e) { return { text: e.message, isError: true }; }
 }
 function bucket(ctx) { const key = ctx.projectDir + ':' + workRoot(ctx); if (!buckets.has(key)) buckets.set(key, new Map()); return buckets.get(key); }
-function jobText(j) { return `job ${j.id} ${j.status === 'running' ? 'running' : j.reason === 'cancelled' ? 'killed' : 'exit ' + j.code} pid=${j.pid || '-'}\n${j.out}${j.err ? '\n[stderr]\n' + j.err : ''}${j.truncated ? '\n[输出已截断]' : ''}`; }
+function jobText(j) {
+  const elapsed = Math.max(0, Math.round((((j.endedAt || Date.now()) - j.startedAt) || 0) / 1000));
+  const state = j.status === 'running' ? 'running' : j.reason === 'cancelled' ? 'killed' : j.reason === 'timeout' ? 'timeout' : 'exit ' + j.code;
+  return `job ${j.id} ${state} pid=${j.pid || '-'} time=${elapsed}s out=${j.out.length}B${j.err ? ' err=' + j.err.length + 'B' : ''}\n${j.out}${j.err ? '\n[stderr]\n' + j.err : ''}${j.truncated ? '\n[输出已截断]' : ''}`;
+}
 async function start(ctx, spec) { return ctx.exec ? await ctx.exec(spec) : executor.start(spec, { signal: ctx.signal, dataDir: ctx.projectDir }); }
 export async function shellWorkspace(v, a, signal) {
   try {
@@ -131,7 +135,13 @@ export async function shellWorkspace(v, a, signal) {
     await job.done; return { text: jobText(job), isError: job.code !== 0 || !!job.reason };
   } catch (e) { return { text: e.message, isError: true }; }
 }
-export function jobOutput(v, a) { const j = bucket(ctxOf(v)).get(String(a.id)); if (!j) return { text: '没有这个后台任务：' + a.id, isError: true }; const body = jobText(j), offset = Math.max(0, Number(a.offset) || 0), slice = body.slice(offset, offset + 20000); return { text: `offset=${offset} next=${offset + slice.length} total=${body.length}\n${slice}` }; }
+export function jobOutput(v, a) {
+  const j = bucket(ctxOf(v)).get(String(a.id)); if (!j) return { text: '没有这个后台任务：' + a.id, isError: true };
+  const body = jobText(j);
+  if (a.tail) { const slice = body.slice(-20000); return { text: `tail=${slice.length} total=${body.length}\n${slice}` }; }
+  const offset = Math.max(0, Number(a.offset) || 0), slice = body.slice(offset, offset + 20000);
+  return { text: `offset=${offset} next=${offset + slice.length} total=${body.length}\n${slice}` };
+}
 export function jobKill(v, a) { const j = bucket(ctxOf(v)).get(String(a.id)); if (!j) return { text: '没有这个后台任务：' + a.id, isError: true }; j.kill(); return { text: '已请求结束任务 ' + j.id }; }
 export function killAllJobs(v) { const ctx = ctxOf(v); for (const [key, jobs] of buckets) if (key.startsWith(ctx.projectDir + ':')) for (const j of jobs.values()) if (j.status === 'running') j.kill(); }
 async function wsRun(a, ctx) {
@@ -159,9 +169,9 @@ export const WORKSPACE_TOOLS = [
   { name: 'workspace_write', description: '创建或覆盖文本文件。覆盖前先读取；修改已有代码优先 workspace_edit。改动可在界面审阅和撤销。', schema: S({ path: str, file: str, content: str, expectedHash: str }, ['content']), run: wsWrite },
   { name: 'workspace_edit', description: '精确替换已有文件，old_string 默认必须唯一；replace_all 可替换全部。', schema: S({ path: str, old_string: str, new_string: str, replace_all: bool }, ['path', 'old_string', 'new_string']), run: (a, ctx) => editWorkspace(ctx, a) },
   { name: 'workspace_grep', description: '检索代码，返回相对路径和行号。root 可选项目附加目录 ID；支持 glob、子目录和正则。', schema: S({ root: str, pattern: str, path: str, glob: str, literal: bool, ignoreCase: bool, max: num, includeModules: bool }, ['pattern']), run: (a, ctx) => grepWorkspace(ctx, a) },
-  { name: 'workspace_run', description: '用 Node 执行当前工作目录内的脚本或 eval，遵守执行隔离和审批。', schema: S({ file: str, path: str, eval: str, args: { type: 'array', items: str }, timeoutMs: num }), run: wsRun },
-  { name: 'workspace_npm', description: '在工作目录安装依赖或初始化 npm；默认禁用安装脚本，联网需授权。', schema: S({ packages: { type: 'array', items: str }, package: str, command: { type: 'string', enum: ['install', 'init'] }, registry: str, dev: bool, timeoutMs: num }), run: wsNpm },
-  { name: 'workspace_shell', description: '在当前工作目录执行命令。Windows 用 PowerShell，其他平台用 sh。支持后台任务；networkDomains 申请受限执行所需域名。未隔离执行会明确请求用户确认。', schema: S({ cmd: str, timeoutMs: num, background: bool, networkDomains: { type: 'array', items: str } }, ['cmd']), run: (a, ctx) => shellWorkspace(ctx, a) },
-  { name: 'workspace_job_output', description: '读取本对话后台任务输出，offset 支持分页。', schema: S({ id: str, offset: num }, ['id']), run: (a, ctx) => jobOutput(ctx, a) },
+  { name: 'workspace_run', description: '用 Node 执行当前工作目录内的脚本或 eval，遵守执行隔离和审批。timeoutMs 指定预计耗时：默认 60 秒、上限 300 秒；预计更久的脚本请拆分为可续跑的步骤。', schema: S({ file: str, path: str, eval: str, args: { type: 'array', items: str }, timeoutMs: num }), run: wsRun },
+  { name: 'workspace_npm', description: '在工作目录安装依赖或初始化 npm；默认禁用安装脚本，联网需授权。timeoutMs 默认 180 秒、上限 600 秒。', schema: S({ packages: { type: 'array', items: str }, package: str, command: { type: 'string', enum: ['install', 'init'] }, registry: str, dev: bool, timeoutMs: num }), run: wsNpm },
+  { name: 'workspace_shell', description: '在当前工作目录执行命令。Windows 用 PowerShell，其他平台用 sh。支持后台任务；networkDomains 申请受限执行所需域名。未隔离执行会明确请求用户确认。前台 timeoutMs 默认 60 秒、上限 300 秒；更久的命令用 background，再用 workspace_job_output 轮询。', schema: S({ cmd: str, timeoutMs: num, background: bool, networkDomains: { type: 'array', items: str } }, ['cmd']), run: (a, ctx) => shellWorkspace(ctx, a) },
+  { name: 'workspace_job_output', description: '读取本对话后台任务输出：返回状态、已运行时间、输出字节数；offset 分页，tail=true 读取最后 20KB。', schema: S({ id: str, offset: num, tail: bool }, ['id']), run: (a, ctx) => jobOutput(ctx, a) },
   { name: 'workspace_job_kill', description: '停止本对话后台任务及子进程，不能结束其他进程。', schema: S({ id: str }, ['id']), run: (a, ctx) => jobKill(ctx, a) },
 ].map(tool => ({ ...tool, strict: true }));

@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { resolveIn, containsPath } from './paths.mjs';
 const exec = promisify(execFile);
 const systemTool = name => path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', name);
-const processOptions = { windowsHide: true, timeout: 45000, maxBuffer: 1024 * 1024 };
+const processOptions = { windowsHide: true, timeout: 90000, maxBuffer: 1024 * 1024 };
 function helperEnv(extra = {}) { return { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(?:SystemRoot|WINDIR|PATH|PATHEXT|COMSPEC|TEMP|TMP|USERPROFILE|LOCALAPPDATA|APPDATA|ProgramFiles(?:\(x86\))?)$/i.test(key))), ...extra }; }
 let hostPromise;
 export async function hostIntegrity({ fresh = false } = {}) {

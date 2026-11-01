@@ -2,7 +2,8 @@
   "bundle": {
     "resources": {
       "../build/jsra-sidecar-linux": "jsra-sidecar-linux",
-      "../build/resources/executor/": "resources/executor/"
+      "../build/resources/executor/": "resources/executor/",
+      "../build/resources/terminal/": "resources/terminal/"
     }
   }
 }

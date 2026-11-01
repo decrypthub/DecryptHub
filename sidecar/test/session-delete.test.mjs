@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { SessionManager } from '../sessions.mjs';
+import { TestSessionManager as SessionManager, bindTestProject } from './project-fixture.mjs';
 import { TaskStore } from '../tasks.mjs';
 const answer = { content: 'fixture', toolCalls: [] };
 function setup(t) {
@@ -14,7 +14,7 @@ function setup(t) {
 }
 test('delete removes private chat data and preserves an external project and sibling chat', async t => {
   const { root, data, mgr } = setup(t), external = path.join(root, 'project'); fs.mkdirSync(external); fs.writeFileSync(path.join(external, 'keep.txt'), 'user project');
-  const s = mgr.create({}), sibling = mgr.create({ managed: true }); s.setWorkspace(mgr.workspaces.folder(external));
+  const s = mgr.create({}), sibling = mgr.create({}); bindTestProject(s, mgr.workspaces.folder(external));
   fs.mkdirSync(s.profileDir(), { recursive: true }); fs.writeFileSync(path.join(s.profileDir(), 'Cookies'), 'fixture');
   fs.mkdirSync(sibling.profileDir(), { recursive: true });
   s.ensureAgent().chat = async () => answer; s.send({ text: 'fixture' }); await s.completion;
@@ -25,14 +25,14 @@ test('delete removes private chat data and preserves an external project and sib
   assert.equal(fs.existsSync(s.profileDir()), false); assert.equal(fs.existsSync(sibling.profileDir()), true);
   const restored = new SessionManager({ userDataDir: data, getSettings: mgr.getSettings, broadcast() {}, chromeMod: {}, titleGenerator: async () => '' }); t.after(() => restored.closeAll()); assert.equal(restored.sessions.has(s.id), false);
 });
-test('deleting the last primary chat removes its managed workspace and creates a fresh unselected chat', async t => {
-  const { mgr } = setup(t), s = mgr.get('main'); s.setWorkspace(null); fs.mkdirSync(s.workspace.root, { recursive: true }); fs.writeFileSync(path.join(s.workspace.root, 'temporary.txt'), 'fixture');
+test('deleting the last chat keeps the source directory and does not create a phantom chat', async t => {
+  const { mgr } = setup(t), s = mgr.get('main'); fs.writeFileSync(path.join(s.workspace.root, 'temporary.txt'), 'fixture');
   fs.mkdirSync(s.profileDir(), { recursive: true }); fs.writeFileSync(path.join(s.profileDir(), 'Cookies'), 'fixture');
-  await mgr.delete('main'); assert.equal(fs.existsSync(s.projectDir), false); assert.equal(mgr.sessions.size, 1); assert.equal(mgr.focused().workspace.kind, 'unselected'); assert.notEqual(mgr.focusedId, 'main');
+  await mgr.delete('main'); assert.equal(fs.existsSync(s.projectDir), false); assert.equal(mgr.sessions.size, 0); assert.equal(mgr.focusedId, null); assert.equal(fs.readFileSync(path.join(s.workspace.root, 'temporary.txt'), 'utf8'), 'fixture');
   assert.equal(fs.existsSync(s.profileDir()), false);
 });
 test('deletion waits for cancellation writes and blocks new sends while disposing', async t => {
-  const { mgr } = setup(t), s = mgr.create({ managed: true }); let started;
+  const { mgr } = setup(t), s = mgr.create({}); let started;
   const ready = new Promise(resolve => started = resolve);
   s.ensureAgent().chat = async (_s, _m, _t, { signal }) => { started(); await new Promise(resolve => signal.addEventListener('abort', () => setTimeout(resolve, 30), { once: true })); return answer; };
   s.send({ text: 'long fixture' }); await ready; const removing = mgr.delete(s.id); assert.equal(s.send({ text: 'must not start' }).ok, false); await removing;
@@ -40,14 +40,14 @@ test('deletion waits for cancellation writes and blocks new sends while disposin
 });
 test('deletion rejects a replaced session root and never traverses a descendant junction', async t => {
   const { root, mgr } = setup(t), external = path.join(root, 'external'); fs.mkdirSync(external); fs.writeFileSync(path.join(external, 'sentinel'), 'keep');
-  const s = mgr.create({ managed: true }), saved = s.projectDir + '-saved'; fs.renameSync(s.projectDir, saved); fs.symlinkSync(external, s.projectDir, 'junction');
+  const s = mgr.create({}), saved = s.projectDir + '-saved'; fs.renameSync(s.projectDir, saved); fs.symlinkSync(external, s.projectDir, 'junction');
   await assert.rejects(mgr.delete(s.id), /链接/); assert.equal(fs.readFileSync(path.join(external, 'sentinel'), 'utf8'), 'keep'); assert.equal(mgr.sessions.has(s.id), true);
   assert.equal(fs.existsSync(path.join(external, '.agent-state.json')), false);
   fs.unlinkSync(s.projectDir); fs.renameSync(saved, s.projectDir); fs.symlinkSync(external, path.join(s.projectDir, 'profile-link'), 'junction');
   await mgr.delete(s.id); assert.equal(fs.existsSync(s.projectDir), false); assert.equal(fs.readFileSync(path.join(external, 'sentinel'), 'utf8'), 'keep');
 });
 test('deletion requires an explicit identity and pauses only associated automations', async t => {
-  const { data, mgr } = setup(t), s = mgr.create({ managed: true });
+  const { data, mgr } = setup(t), s = mgr.create({});
   const tasks = new TaskStore({ userDataDir: data, getSessions: () => mgr });
   tasks.upsert({ title: 'bound', prompt: 'fixture', sessionId: s.id }); tasks.upsert({ title: 'other', prompt: 'fixture', sessionId: 'main' });
   mgr.onDeleting = id => tasks.pauseForSession(id);
@@ -58,7 +58,7 @@ test('deletion requires an explicit identity and pauses only associated automati
 test('a linked legacy browser profile blocks deletion before any shutdown writes', async t => {
   const { root, mgr } = setup(t), external = path.join(root, 'external-profile');
   fs.mkdirSync(external); fs.writeFileSync(path.join(external, 'Cookies'), 'keep');
-  const s = mgr.create({ managed: true }); fs.mkdirSync(path.dirname(s.profileDir()), { recursive: true });
+  const s = mgr.create({}); fs.mkdirSync(path.dirname(s.profileDir()), { recursive: true });
   fs.symlinkSync(external, s.profileDir(), 'junction');
   await assert.rejects(mgr.delete(s.id), /链接/);
   assert.equal(s.closing, false); assert.equal(fs.existsSync(s.projectDir), true);

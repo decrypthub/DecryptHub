@@ -9,7 +9,7 @@ DecryptHub 是通用桌面 Agent Harness；WebDecryptHub、IOSDecryptHub、Andro
 | 产品 | 负责 | 首次安装要求 |
 |---|---|---|
 | DecryptHub | 模型、会话、工作区、权限、Executor、目标/子代理、MCP Host、组件管理和通用界面 | 可独立进行代码与文件任务，不加载平台组件 |
-| WebDecryptHub / WDH | Web 分析运行时、MCP/CLI、浏览器控制、抓包、调试、指纹访问追踪、分析产物 | 按需安装运行时；浏览器内核单独选择/下载，不要求配置移动设备 |
+| WebDecryptHub / WDH | Web 分析运行时、MCP/CLI、浏览器控制、抓包、调试、指纹访问追踪、分析产物 | 按需安装运行时；浏览器内核单独选择/下载，不要求配置移动设备。桌面版固定使用 WDH 自带的 CloakBrowser |
 | IOSDecryptHub / IDH | iOS 设备端分析能力，复用 idh-cli 连接/MCP 网关 | 用户自行完成设备插件安装/注入，再配置连接 |
 | AndroidDecryptHub / ADH | Android 设备端分析能力，复用 adh-cli 和 Host Daemon | 用户自行完成设备端插件配置，再配置 Host/设备连接 |
 

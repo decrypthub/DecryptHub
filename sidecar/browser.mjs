@@ -146,6 +146,7 @@ export class BrowserManager extends EventEmitter {
         if (generation !== this.generation) throw Error('WDH startup cancelled');
         this.client = client;
         const hello = await this.control('hello');
+        this.capabilities = hello.capabilities || {};
         if (hello.apiVersion !== 1) throw Error('WDH protocol mismatch');
         this.updateStatus(hello.status);
       } catch (error) {
@@ -209,8 +210,13 @@ export class BrowserManager extends EventEmitter {
     this.fit = { width, height, dpr };
     return this.client ? this.control('viewport', this.fit) : this.fit;
   }
-  async selectPage(index) {
-    return this.control('select', { index });
+  async selectPage(index, pageId) {
+    if (pageId && !this.capabilities?.pageTabs) throw Error('请更新 WebDecryptHub 组件以支持多个浏览器标签页');
+    return this.control('select', { index, ...(pageId ? { pageId } : {}) });
+  }
+  async closePage(pageId) {
+    if (!this.capabilities?.pageTabs) throw Error('请更新 WebDecryptHub 组件以关闭单个浏览器标签页');
+    return this.control('close-page', { pageId });
   }
   async newPage(url) {
     return this.control('new-page', { url });

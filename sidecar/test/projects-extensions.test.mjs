@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { SessionManager } from '../sessions.mjs';
+import { TestSessionManager as SessionManager, bindTestProject } from './project-fixture.mjs';
 import { ProjectService } from '../project-service.mjs';
 import { folderProof, consumeFolderGrant } from '../grants.mjs';
 import { WORKSPACE_TOOLS } from '../workspace.mjs';
@@ -28,19 +28,17 @@ async function project(f) {
   const a = f.grant(f.first), b = f.grant(f.second);
   return f.service.save({ name: 'Related code', folders: [{ key: 'a', grant: a }, { key: 'b', grant: b }], primaryKey: 'a' }, 'main');
 }
-test('new chats require an explicit directory decision and do not create the work directory', async t => {
+test('new chats require a project and no longer allow optional or managed directories', async t => {
   const f = fixture(t), s = f.mgr.get('main');
-  assert.equal(s.workspace.kind, 'unselected'); assert.equal(fs.existsSync(s.workspace.root), false);
-  s.ensureAgent().stats(); assert.equal(fs.existsSync(s.workspace.root), false);
-  assert.equal(s.send({ text: 'write code' }).code, 'workspace-required');
-  assert.equal((await s.launch()).code, 'workspace-required');
-  assert.equal(s.runs.latest(), null); assert.equal(fs.existsSync(s.workspace.root), false);
-  s.setWorkspace(null); assert.equal(s.workspace.kind, 'managed'); assert.equal(fs.existsSync(s.workspace.root), true);
+  assert.equal(s.workspace.kind, 'folder'); assert.ok(s.projectId);
+  assert.throws(() => f.mgr.create({ projectId: null }), /选择项目/);
+  assert.throws(() => s.setWorkspace(null), /必须使用项目/);
+  assert.throws(() => new TaskStore({ userDataDir: f.app, getSessions: () => f.mgr }).upsert({ title: 'unbound', prompt: 'must not create a session' }), /项目内的执行会话/);
   f.mgr.extensions = { index() { throw Error('unavailable auxiliary metadata'); } };
   assert.ok(s.ensureAgent().stateNote().includes(s.workspace.root));
   assert.match(s.ensureAgent().stateNote(), /【权限】standard/);
   const restore = new SessionManager({ userDataDir: f.app, getSettings: () => f.settings, broadcast() {}, chromeMod: {} });
-  assert.equal(restore.get('main').workspace.kind, 'managed'); await restore.closeAll();
+  assert.equal(restore.get('main').projectId, s.projectId); await restore.closeAll();
 });
 test('projects persist multiple authorized roots and keep additional roots read-only', async t => {
   const f = fixture(t), p = await project(f), s = f.mgr.get('main');
@@ -56,7 +54,7 @@ test('projects persist multiple authorized roots and keep additional roots read-
   await assert.rejects(() => read.run({ root: p.folders[1].id, path: '../first/main.js' }, s.toolCtx()), /越界/);
   fs.writeFileSync(path.join(f.second, '.env'), 'fixture secret');
   await assert.rejects(() => read.run({ root: p.folders[1].id, path: '.env' }, s.toolCtx()), /敏感/);
-  assert.equal(f.mgr.projects.list()[0].folders.length, 2);
+  assert.equal(f.mgr.projects.get(p.id).folders.length, 2);
 });
 test('project changes reject busy sessions, invalidate removed roots and preserve chat history', async t => {
   const f = fixture(t), p = await project(f), s = f.mgr.get('main');
@@ -67,15 +65,15 @@ test('project changes reject busy sessions, invalidate removed roots and preserv
   agent.running = false;
   await f.service.save({ id: p.id, name: 'changed', folders: [{ id: p.folders[0].id }] }, s.id);
   assert.throws(() => selectReadRoot(s.toolCtx(), p.folders[1].id), /未授权/);
-  await f.service.attach(s.id, null);
-  assert.equal(s.projectId, null); assert.equal(s.workspace.root, fs.realpathSync.native(f.first));
+  await assert.rejects(() => f.service.attach(s.id, null), /必须归属项目/);
+  assert.equal(s.projectId, p.id); assert.equal(s.workspace.root, fs.realpathSync.native(f.first));
   assert.ok(agent.hist.events.some(e => e.content === 'Keep this conversation'));
 });
 test('projects accept only signed folder grants and cannot borrow arbitrary paths or ids', async t => {
   const f = fixture(t);
   await assert.rejects(() => f.service.save({ name: 'bad', folders: [{ key: 'x', grant: { path: f.first, sessionId: 'main' } }] }, 'main'), /失效/);
   await assert.rejects(() => f.service.save({ name: 'bad', folders: [{ id: 'invented', root: f.first }] }, 'main'), /未授权/);
-  assert.equal(f.mgr.projects.list().length, 0);
+  assert.equal(f.mgr.projects.list().length, 1);
   const count = f.mgr.sessions.size;
   assert.throws(() => f.mgr.create({ projectId: 'removed-project' }), /项目不存在/);
   assert.equal(f.mgr.sessions.size, count, 'invalid projects must not leave a half-created chat');
@@ -86,20 +84,20 @@ test('project transactions cannot race session close, launch or research startup
   const closeBrowser = s.closeBrowser;
   let release;
   s.closeBrowser = () => new Promise(resolve => { release = resolve; });
-  const changing = f.service.choose(s.id, { managed: true });
+  const changing = f.service.save({ id: s.projectId, name: 'switch fixture', folders: [{ key: 'root', grant: f.grant(f.first) }] }, s.id);
   await assert.rejects(() => f.mgr.close(s.id), /更新项目目录/);
   assert.throws(() => s.subagents.spawn('read the new directory'), /更新项目目录/);
   assert.equal((await s.launch()).ok, false);
   release(); await changing; s.closeBrowser = closeBrowser;
-  assert.equal(s.workspace.kind, 'managed'); assert.equal(f.mgr.projectsBusy, false);
+  assert.equal(s.workspace.kind, 'folder'); assert.ok(s.projectId); assert.equal(f.mgr.projectsBusy, false);
   s.launching = Promise.resolve();
-  await assert.rejects(() => f.service.choose(s.id, { managed: true }), /浏览器正在切换/);
+  await assert.rejects(() => f.service.attach(s.id, s.projectId), /浏览器正在切换/);
   s.launching = null;
 });
 test('completed research does not permanently prevent choosing a new work directory', async t => {
   const f = fixture(t), s = f.mgr.get('main');
   s.subagents.records.push({ id: 'finished', status: 'completed' });
-  s.setWorkspace(f.mgr.workspaces.folder(f.first)); assert.equal(s.workspace.root, fs.realpathSync.native(f.first));
+  bindTestProject(s, f.mgr.workspaces.folder(f.first)); assert.equal(s.workspace.root, fs.realpathSync.native(f.first));
 });
 test('skill and memory stores enforce scope, names, checksums and ordinary files', t => {
   const f = fixture(t), store = new ExtensionStore({ directory: f.app, getSettings: () => f.settings });
@@ -137,7 +135,7 @@ test('invalid automation updates leave saved and in-memory state intact and inte
 });
 
 test('Agent extension tools enforce approval before persisting and can connect a real custom MCP', { timeout: 60000 }, async t => {
-  const f = fixture(t), s = f.mgr.get('main'); s.setWorkspace(null);
+  const f = fixture(t), s = f.mgr.get('main');
   const host = new McpHost({ getServers: () => f.settings.mcpServers, baseDir: f.app });
   f.mgr.mcpHost = host;
   const tasks = new TaskStore({ userDataDir: f.app, getSessions: () => f.mgr });
@@ -159,7 +157,7 @@ test('Agent extension tools enforce approval before persisting and can connect a
   assert.equal(store.list('memory', s.toolCtx()).length, 1);
 });
 test('automation tools require a schedule and cannot bind another chat', async t => {
-  const f = fixture(t), s = f.mgr.get('main'); s.setWorkspace(null);
+  const f = fixture(t), s = f.mgr.get('main');
   const tasks = new TaskStore({ userDataDir: f.app, getSessions: () => f.mgr });
   const store = new ExtensionStore({ directory: f.app, tasks });
   const other = f.mgr.create();
@@ -171,10 +169,12 @@ test('automation tools require a schedule and cannot bind another chat', async t
   await assert.rejects(() => store.manage('automation', { action: 'remove', id: list[0].id }, { sessionId: 'another' }), /当前会话/);
   assert.deepEqual(await store.manage('automation', { action: 'remove', id: list[0].id }, s.toolCtx()), []);
 });
-test('automation pending work directories become actionable and scheduling never overlaps a busy run', async t => {
-  const f = fixture(t), changes = [], tasks = new TaskStore({ userDataDir: f.app, getSessions: () => f.mgr, onChange: list => changes.push(list) });
+test('automation unavailable directories become actionable and scheduling never overlaps a busy run', async t => {
+  const f = fixture(t), s = f.mgr.get('main'), changes = [], tasks = new TaskStore({ userDataDir: f.app, getSessions: () => f.mgr, onChange: list => changes.push(list) });
   const task = tasks.upsert({ title: 'Bound task', prompt: 'read sources', sessionId: 'main', time: '09:00', days: [0,1,2,3,4,5,6] })[0];
+  fs.renameSync(s.workspace.root, s.workspace.root + '-offline');
   await assert.rejects(() => tasks.run(task.id), /选择目录/);
+  fs.renameSync(s.workspace.root + '-offline', s.workspace.root);
   assert.equal(tasks.list()[0].lastStatus, 'needs_attention'); assert.equal(tasks.list()[0].runs[0].status, 'needs_attention');
   assert.ok(changes.some(list => list[0].lastStatus === 'running'));
   const originalNow = Date.now;
