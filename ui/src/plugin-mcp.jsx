@@ -239,7 +239,7 @@ export function McpServices() {
   return (
     <>
       <Section
-        title="自定义 MCP"
+        title="已接入的服务"
         desc="接入外部工具服务：本地 stdio 服务以当前系统用户权限运行；只接入你信任的命令。保存并启用后连接，导入的服务默认关闭。"
         actions={
           <Flex gap="2">
