@@ -13,11 +13,12 @@ function MatchText({ text, query }) {
 
 export function SidebarBrowser({ searchRequest, onSearchHandled, renderSession }) {
   const w = useWorkbench(), input = useRef(null), searchButton = useRef(null), resultsRef = useRef(null), jumped = useRef(null), ids = useId();
+  const { settings } = w;
   const [expanded, setExpanded] = useState(false), [query, setQuery] = useState(''), [active, setActive] = useState(0);
   const [view, setView] = useState(() => readSidebarView(localStorage)), [reveal, setReveal] = useState(null), [foldRequest, setFoldRequest] = useState(null);
   const [remote, setRemote] = useState({ query: '', matches: [], state: 'idle', skipped: 0 });
   const normalizedQuery = query.trim();
-  const results = useMemo(() => normalizedQuery ? sidebarResults(w.projects, w.sessions.sessions, normalizedQuery, remote.query === normalizedQuery ? remote.matches : []) : [], [w.projects, w.sessions.sessions, normalizedQuery, remote]);
+  const results = useMemo(() => normalizedQuery ? sidebarResults(w.projects, w.sessions.sessions, normalizedQuery, remote.query === normalizedQuery ? remote.matches : [], settings?.titlePrefix) : [], [w.projects, w.sessions.sessions, normalizedQuery, remote, settings?.titlePrefix]);
   const selected = Math.min(active, Math.max(0, results.length - 1));
   const pending = !!normalizedQuery && (remote.query !== normalizedQuery || remote.state === 'loading');
   const changeView = patch => setView(current => { const next = { ...current, ...patch }; try { localStorage.setItem('wdh_sidebar_view', JSON.stringify(next)); } catch {} return next; });

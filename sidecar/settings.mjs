@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { atomicJson } from './paths.mjs';
+import { normalizeTitlePrefix } from './session-titles.mjs';
+import { normalizeThinking, ALL_LEVELS } from './thinking.mjs';
 
 // 桌面版只使用 WDH 自带的 CloakBrowser 内核。系统 Chrome / 自定义路径 / GitHub Release /
 // Chrome for Testing 不再作为选项：load 与 save 都归一到这里，旧的 settings.json 会被静默迁移。
@@ -17,9 +19,13 @@ const DEFAULTS = {
   embedMode: 'auto',
   kernel: KERNEL, // 固定 CloakBrowser；下载由 WDH 组件写入 kernels/cloak.json
   compactAt: 0.85, // 自动压缩阈值（占上下文窗口比例）；窗口本身随模型保存在 openai/anthropic.contextWindow，未设置则按模型名推断
+  // 会话标题前缀：纯展示配置，渲染时拼在标题前，不写入任何 title 字段（见 session-titles.mjs）
+  titlePrefix: '',
   // 用户接入的 MCP 服务（Claude Desktop 的 mcpServers 格式 + enabled/transport 扩展）
   mcpServers: {},
   subagentMaxActive: 3, // 研究子代理并发上限（1–8）
+  // 当前渠道下选中的思考强度：空串表示跟随模型声明，由 thinking.mjs 解析成合法档位后发送
+  activeThinking: '',
 };
 
 export function userDataDir() {
@@ -68,6 +74,16 @@ export function load() {
   if (process.env.JSRA_EMBED_MODE) s.embedMode = process.env.JSRA_EMBED_MODE;
   if (!s.mcpServers || typeof s.mcpServers !== 'object' || Array.isArray(s.mcpServers)) s.mcpServers = {};
   s.subagentMaxActive = Math.min(8, Math.max(1, Math.floor(Number(s.subagentMaxActive) || 3)));
+  // 会话标题前缀只影响展示：归一（去控制字符/折叠空白/截断），脏值回落成不显示前缀。
+  s.titlePrefix = normalizeTitlePrefix(s.titlePrefix);
+  // 思考强度：脏值回落成空串（跟随模型声明），避免把非法档位发到端点。
+  // 注意只在模型**已有声明**时归一，不给未配置的模型凭空写入声明——那会改变线上请求体。
+  if (process.env.JSRA_THINKING && ALL_LEVELS.includes(process.env.JSRA_THINKING)) s.activeThinking = process.env.JSRA_THINKING;
+  else if (!ALL_LEVELS.includes(s.activeThinking)) s.activeThinking = '';
+  const keepThinking = (value, fallback) => (value && typeof value === 'object' ? normalizeThinking(value, fallback) : value);
+  if (Array.isArray(s.providers)) s.providers = s.providers.map(p => ({ ...p, models: (p.models || []).map(m => m && typeof m === 'object' && m.thinking != null ? { ...m, thinking: normalizeThinking(m.thinking, p.type === 'anthropic' ? 'budget' : 'effort') } : m) }));
+  // 旧的 openai/anthropic 两段镜像同理：有声明才归一。
+  for (const type of ['openai', 'anthropic']) if (s[type] && typeof s[type] === 'object') s[type].thinking = keepThinking(s[type].thinking, type === 'anthropic' ? 'budget' : 'effort');
   return s;
 }
 // 是否以原生子窗口嵌入（仅 Windows + 有头）。纯函数，便于单元测试
@@ -88,6 +104,12 @@ export function save(s) {
   const c = JSON.parse(JSON.stringify(s));
   // 持久化边界再归一一次：界面或旧版本即使传了别的内核，也不会写回磁盘。
   c.kernel = KERNEL; c.chromePath = '';
+  // 前缀同样在落盘前归一，避免界面传入超长/带控制字符的值之后 load() 才被动纠正。
+  c.titlePrefix = normalizeTitlePrefix(c.titlePrefix);
+  // 思考强度同样在落盘前归一：界面即使传出非法档位，也不会写进 settings.json。未声明的模型保持原样。
+  if (!ALL_LEVELS.includes(c.activeThinking)) c.activeThinking = '';
+  if (Array.isArray(c.providers)) c.providers = c.providers.map(p => ({ ...p, models: (p.models || []).map(m => (m && typeof m === 'object' && m.thinking != null ? { ...m, thinking: normalizeThinking(m.thinking, p.type === 'anthropic' ? 'budget' : 'effort') } : m)) }));
+  for (const type of ['openai', 'anthropic']) if (c[type] && typeof c[type] === 'object' && c[type].thinking != null) c[type].thinking = normalizeThinking(c[type].thinking, type === 'anthropic' ? 'budget' : 'effort');
   // 密钥不落盘，由 OS keyring/DPAPI 管理（前端注入到内存）
   c.openai.apiKey = ''; c.anthropic.apiKey = '';
   // 渠道密钥同样只在密钥库里：providers[].apiKey 以前会被原样写盘，启动时再用 keyring 回填

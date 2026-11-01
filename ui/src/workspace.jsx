@@ -32,7 +32,7 @@ export function PendingActions() {
     setBusy(req.id); try { await w.inv('agent-approval-reply', { id: req.id, allow, always }); } catch (e) { w.toast(e.message, 'err'); } finally { setBusy(''); }
   }
   const question = w.cur.question;
-  async function respond(value) { if (!question) return; try { await w.inv('agent-answer', { id: question.id, answer: value }); setAnswer(''); } catch (e) { w.toast(e.message, 'err'); } }
+  async function respond(value, skipped = false) { if (!question) return; try { await w.inv('agent-answer', { id: question.id, answer: value, skipped }); setAnswer(''); } catch (e) { w.toast(e.message, 'err'); } }
   return <div className="pending-actions">
     {approvals.map(req => <Card size="2" key={req.id} className="approval-card">
       <Flex align="center" justify="between" gap="2"><Text size="2" weight="bold">需要批准操作</Text><Badge size="1" color={req.isolated === false ? 'amber' : 'gray'}>{req.isolated === false ? '未隔离执行' : req.isolated ? '受限执行' : '外部操作'}</Badge></Flex>
@@ -43,7 +43,7 @@ export function PendingActions() {
       {!!req.network?.length && <Text as="div" size="1">联网：{req.network.join('、')}</Text>}
       <Flex gap="2" justify="end" mt="3" wrap="wrap"><Button size="2" variant="soft" color="gray" disabled={!!busy} onClick={() => reply(req, false)}>拒绝</Button>{req.canRemember && <Button size="2" variant="soft" color="gray" disabled={!!busy} onClick={() => reply(req, true, true)}>本对话允许相同动作</Button>}<Button size="2" disabled={!!busy} onClick={() => reply(req, true)}>允许这一次</Button></Flex>
     </Card>)}
-    {question && <Card size="2"><Text size="2" weight="bold">{question.question}</Text>{question.detail && <Text as="div" size="1" color="gray" mt="2">{question.detail}</Text>}<Flex gap="2" wrap="wrap" mt="3">{(question.options || []).map(option => <Button size="2" key={option} variant="soft" color="gray" onClick={() => respond(option)}>{option}</Button>)}</Flex><TextArea size="2" mt="2" value={answer} onChange={e => setAnswer(e.target.value)} placeholder="补充你的回答" aria-label="回答 Agent" /><Flex gap="2" justify="end" mt="2"><Button size="2" variant="soft" color="gray" onClick={() => respond('')}>跳过</Button><Button size="2" disabled={!answer.trim()} onClick={() => respond(answer.trim())}>回答</Button></Flex></Card>}
+    {question && <Card size="2"><Text size="2" weight="bold">{question.question}</Text>{question.detail && <Text as="div" size="1" color="gray" mt="2">{question.detail}</Text>}<Flex gap="2" wrap="wrap" mt="3">{(question.options || []).map(option => <Button size="2" key={option} variant="soft" color="gray" onClick={() => respond(option)}>{option}</Button>)}</Flex><TextArea size="2" mt="2" value={answer} onChange={e => setAnswer(e.target.value)} placeholder="补充你的回答" aria-label="回答 Agent" /><Flex gap="2" justify="end" mt="2"><Button size="2" variant="soft" color="gray" onClick={() => respond('', true)}>跳过</Button><Button size="2" disabled={!answer.trim()} onClick={() => respond(answer.trim())}>回答</Button></Flex></Card>}
   </div>;
 }
 export function ChangesPanel() {

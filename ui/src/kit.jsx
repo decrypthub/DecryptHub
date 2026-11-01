@@ -70,11 +70,42 @@ export function EmptyState({ icon = 'folder', title, description, children, comp
 }
 
 export const DocumentLinks = React.createContext(null);
-export function Markdown({ text, basePath, root }) {
+
+// 流式输出时每个 token 都会触发一次 text 变化。若每次同步重算 Markdown 并重建
+// 整个 innerHTML，已渲染的文字会被反复销毁/重建 —— 这正是「打字机效果时上面的文字在闪」。
+// 这里在流式期间按帧合并更新，并在结束后用最终内容渲染一次。
+function useFlowText(text, streaming) {
+  const [shown, setShown] = React.useState(text);
+  const pending = useRef(text);
+  const frame = useRef(0);
+  pending.current = text;
+  React.useEffect(() => {
+    if (!streaming) {
+      // 流式结束：立刻用最终内容，避免末尾几个字符丢失。
+      if (frame.current) { cancelAnimationFrame(frame.current); frame.current = 0; }
+      setShown(text);
+      return;
+    }
+    // 流式中：同一帧内多次变化只渲染一次。
+    if (frame.current) return;
+    frame.current = requestAnimationFrame(() => {
+      frame.current = 0;
+      setShown(pending.current);
+    });
+  }, [text, streaming]);
+  React.useEffect(() => () => { if (frame.current) cancelAnimationFrame(frame.current); }, []);
+  return shown;
+}
+
+export function Markdown({ text, basePath, root, streaming = false }) {
   const ref = useRef();
   const open = React.useContext(DocumentLinks);
-  useEffect(() => { if (ref.current) highlightHtml(ref.current); }, [text]);
-  return <div className="md" ref={ref} onClick={e => { const link = e.target.closest('a[href]'); if (!link) return; e.preventDefault(); const href = link.getAttribute('href'); if (href?.startsWith('#')) { ref.current?.querySelector('[id="' + CSS.escape(href.slice(1)) + '"]')?.scrollIntoView(); return; } open?.(href, { basePath, root }); }} dangerouslySetInnerHTML={{ __html: renderMd(text) }} />;
+  const shown = useFlowText(text, streaming);
+  // 流式期间不跑高亮：dangerouslySetInnerHTML 每次都会重建 DOM，此时高亮的成果下一帧就被丢掉，
+  // 只是白白让每个 token 对全部代码块重复解析（代码块多的回复会明显闪）。
+  // 流式结束后统一高亮一次。
+  useEffect(() => { if (!streaming && ref.current) highlightHtml(ref.current); }, [shown, streaming]);
+  return <div className="md" ref={ref} onClick={e => { const link = e.target.closest('a[href]'); if (!link) return; e.preventDefault(); const href = link.getAttribute('href'); if (href?.startsWith('#')) { ref.current?.querySelector('[id="' + CSS.escape(href.slice(1)) + '"]')?.scrollIntoView(); return; } open?.(href, { basePath, root }); }} dangerouslySetInnerHTML={{ __html: renderMd(shown) }} />;
 }
 
 export function Dropdown({ value, options = [], onChange, placeholder = '选择', title, label, width }) {

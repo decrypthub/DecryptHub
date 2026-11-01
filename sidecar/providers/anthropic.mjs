@@ -2,6 +2,7 @@
 // usage / finishReason 归一化成 OpenAI 形状（prompt_tokens / completion_tokens / cached_tokens），
 // 这样 agent 的用量统计、上下文校准和压缩阈值对两个 provider 走同一条路径。
 import { post, sseData, modelStreamError } from './http.mjs';
+import { anthropicThinking } from '../thinking.mjs';
 
 function toAnthropicTools(tools) {
   return tools.map(t => ({ name: t.name, description: (t.description || '').slice(0, 1024), input_schema: t.schema || t.inputSchema || { type: 'object', properties: {} } }));
@@ -48,6 +49,14 @@ export async function completeAnthropic(cfg, messages, tools, { onDelta, onReaso
   const { system, messages: msgs } = toAnthropicMessages(messages);
   const body = { model: cfg.model, max_tokens: cfg.maxTokens || 4096, system, messages: msgs, stream: true, temperature: cfg.temperature ?? 0.2 };
   if (tools.length) body.tools = toAnthropicTools(tools);
+  // 思考预算：端点要求 budget_tokens < max_tokens，且开思考时 temperature 只能是 1。
+  // 这两条任一不满足都会直接 400，所以在装配请求时一次算清楚，而不是等端点报错。
+  const budget = anthropicThinking({ ...(cfg.thinking || {}), requestPurpose: cfg.requestPurpose });
+  if (budget) {
+    body.thinking = { type: 'enabled', budget_tokens: budget };
+    body.temperature = 1;
+    body.max_tokens = Math.max(body.max_tokens, budget + 1024);
+  }
 
   for (let attempt = 0; ; attempt++) {
     let content = '', reasoning = '', completed = false;

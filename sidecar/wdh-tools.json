@@ -17,6 +17,23 @@
     "group": "core"
   },
   {
+    "name": "browser_new_tab",
+    "description": "在新标签页打开网址，保留当前标签页的页面状态（已填表单、未提交的输入、页面内 token）。需要同时对照两个站点、或探测时不丢失当前页面时使用；只在当前页导航请用 browser_open。",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false
+    },
+    "group": "browser"
+  },
+  {
     "name": "browser_tabs",
     "description": "列出当前会话的浏览器标签页。",
     "schema": {
@@ -55,6 +72,17 @@
           "type": "string"
         }
       },
+      "required": [],
+      "additionalProperties": false
+    },
+    "group": "browser"
+  },
+  {
+    "name": "browser_reset",
+    "description": "重建浏览器调试上下文（销毁并重新绑定 CDP target）。当页面状态自相矛盾时使用：快照说暂停、恢复说未暂停、evaluate 报 not paused。保留页面、Cookie 和已填表单，只重建调试连接。",
+    "schema": {
+      "type": "object",
+      "properties": {},
       "required": [],
       "additionalProperties": false
     },

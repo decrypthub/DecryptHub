@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Badge, Box, Flex, Progress, Switch, Text, TextField } from '@radix-ui/themes';
+import { Badge, Box, Flex, Progress, Switch, Tabs, Text, TextField } from '@radix-ui/themes';
 import { useWorkbench } from './bus.jsx';
 import { Button, Icon } from './kit.jsx';
 import { BrowserSettings } from './plugin-browser.jsx';
@@ -27,6 +27,20 @@ const PHASES = {
 const active = (operation) => !!PHASES[operation?.phase];
 const size = (bytes) =>
   bytes > 1024 ** 2 ? (bytes / 1024 ** 2).toFixed(1) + ' MB' : Math.ceil((bytes || 0) / 1024) + ' KB';
+// 官方插件和自定义 MCP 分成两个页签，避免两套列表堆在同一屏里。
+const TABS = [
+  ['official', '官方插件'],
+  ['mcp', '自定义 MCP'],
+];
+const TAB_KEY = 'wdh_plugins_tab';
+const readTab = () => {
+  try {
+    const saved = localStorage.getItem(TAB_KEY);
+    return TABS.some(([key]) => key === saved) ? saved : 'official';
+  } catch {
+    return 'official';
+  }
+};
 export function PluginCenter() {
   const w = useWorkbench(),
     [data, setData] = useState(null),
@@ -34,7 +48,18 @@ export function PluginCenter() {
     [refreshing, setRefreshing] = useState(false),
     [error, setError] = useState(''),
     [opened, setOpened] = useState(null),
-    [busy, setBusy] = useState({});
+    [busy, setBusy] = useState({}),
+    [tab, setTab] = useState(readTab);
+  const page = useRef(null);
+  const switchTab = (value) => {
+    setTab(value);
+    try {
+      localStorage.setItem(TAB_KEY, value);
+    } catch {
+      /* 存储不可用不影响查看插件。 */
+    }
+    page.current?.scrollTo({ top: 0 });
+  };
   const alive = useRef(true),
     pending = useRef(new Set());
   const receive = (value) => {
@@ -110,7 +135,7 @@ export function PluginCenter() {
     }
   }
   return (
-    <main className="plugins-page">
+    <main className="plugins-page" ref={page}>
       <div className="plugins-intro">
         <div>
           <h1>插件</h1>
@@ -118,214 +143,233 @@ export function PluginCenter() {
             按需安装平台能力，或接入你自己的 MCP 服务。
           </Text>
         </div>
-        <Button size="2" variant="soft" color="gray" loading={refreshing} onClick={() => refresh(true)}>
-          <Icon n="reload" size={15} />
-          检查更新
-        </Button>
       </div>
       {error && (
         <div className="plugin-page-error" role="alert">
           {error}
         </div>
       )}
-      <section className="official-plugins" aria-label="官方插件">
-        <div className="plugin-section-heading">
-          <h2>官方插件</h2>
-          <Text size="1" color="gray">
-            由 DecryptHub 维护
-          </Text>
-        </div>
-        {loading && !data ? (
-          <div className="plugin-loading" role="status">
-            正在读取插件状态…
+      <Tabs.Root value={tab} onValueChange={switchTab} className="plugin-tabs">
+        <Tabs.List size="2" aria-label="插件类型">
+          {TABS.map(([key, label]) => (
+            <Tabs.Trigger key={key} value={key}>
+              {label}
+            </Tabs.Trigger>
+          ))}
+        </Tabs.List>
+        <Tabs.Content
+          value="official"
+          className="plugin-pane"
+          forceMount
+          hidden={tab !== 'official'}
+        >
+          <div className="plugin-toolbar">
+            <Text size="1" color="gray">
+              按需下载，由 DecryptHub 维护
+            </Text>
+            <Box flexGrow="1" />
+            <Button size="2" variant="soft" color="gray" loading={refreshing} onClick={() => refresh(true)}>
+              <Icon n="reload" size={15} />
+              检查更新
+            </Button>
           </div>
-        ) : (
-          (data?.official || []).map((plugin) => {
-            const operation = plugin.operation,
-              working = active(operation),
-              installed = plugin.installed,
-              expanded = opened === plugin.id;
-            const tone =
-              plugin.state === 'error'
-                ? 'red'
-                : ['ready', 'running'].includes(plugin.state)
-                  ? 'green'
-                  : 'gray';
-            return (
-              <article key={plugin.id} className="official-plugin" data-plugin-id={plugin.id}>
-                <div className="plugin-row">
-                  <div className="plugin-symbol">
-                    <Icon n={plugin.icon} size={24} />
-                  </div>
-                  <div className="plugin-summary">
-                    <div className="plugin-name">
-                      <h3>{plugin.name}</h3>
-                      <Badge size="1" color={tone}>
-                        {plugin.id !== 'wdh' && plugin.state === 'ready'
-                          ? '已连接'
-                          : STATES[plugin.state] || plugin.state}
-                      </Badge>
-                      {plugin.latest?.prerelease && (
-                        <Text size="1" color="gray">
-                          预览版
-                        </Text>
+          {loading && !data ? (
+            <div className="plugin-loading" role="status">
+              正在读取插件状态…
+            </div>
+          ) : (
+            (data?.official || []).map((plugin) => {
+              const operation = plugin.operation,
+                working = active(operation),
+                installed = plugin.installed,
+                expanded = opened === plugin.id;
+              const tone =
+                plugin.state === 'error'
+                  ? 'red'
+                  : ['ready', 'running'].includes(plugin.state)
+                    ? 'green'
+                    : 'gray';
+              return (
+                <article key={plugin.id} className="official-plugin" data-plugin-id={plugin.id}>
+                  <div className="plugin-row">
+                    <div className="plugin-symbol">
+                      <Icon n={plugin.icon} size={24} />
+                    </div>
+                    <div className="plugin-summary">
+                      <div className="plugin-name">
+                        <h3>{plugin.name}</h3>
+                        <Badge size="1" color={tone}>
+                          {plugin.id !== 'wdh' && plugin.state === 'ready'
+                            ? '已连接'
+                            : STATES[plugin.state] || plugin.state}
+                        </Badge>
+                        {plugin.latest?.prerelease && (
+                          <Text size="1" color="gray">
+                            预览版
+                          </Text>
+                        )}
+                      </div>
+                      <Text as="p" size="2" color="gray">
+                        {plugin.description}
+                      </Text>
+                      <div className="plugin-version">
+                        <span>
+                          {installed
+                            ? (plugin.runtime === 'python' ? '网关已安装 ' : '已安装 ') + plugin.version
+                            : '尚未安装'}
+                        </span>
+                        <span>
+                          {plugin.latest
+                            ? (plugin.runtime === 'python' ? '最新网关 ' : '最新 ') + plugin.latest.version
+                            : plugin.catalogError
+                              ? '版本检查失败'
+                              : refreshing
+                                ? '检查版本中…'
+                                : '暂无兼容安装包'}
+                        </span>
+                        {plugin.serverVersion && <span>MCP {plugin.serverVersion}</span>}
+                        {plugin.toolCount > 0 && <span>{plugin.toolCount} 个工具</span>}
+                      </div>
+                    </div>
+                    <div className="plugin-actions">
+                      {installed && (
+                        <Switch
+                          size="1"
+                          aria-label={'启用 ' + plugin.shortName}
+                          checked={plugin.enabled}
+                          disabled={working || busy[plugin.id]}
+                          onCheckedChange={(enabled) => {
+                            if (enabled && plugin.id !== 'wdh' && !plugin.endpoint) {
+                              setOpened(plugin.id);
+                              return;
+                            }
+                            act(plugin.id, 'plugin-toggle', { enabled });
+                          }}
+                        />
                       )}
-                    </div>
-                    <Text as="p" size="2" color="gray">
-                      {plugin.description}
-                    </Text>
-                    <div className="plugin-version">
-                      <span>
-                        {installed
-                          ? (plugin.runtime === 'python' ? '网关已安装 ' : '已安装 ') + plugin.version
-                          : '尚未安装'}
-                      </span>
-                      <span>
-                        {plugin.latest
-                          ? (plugin.runtime === 'python' ? '最新网关 ' : '最新 ') + plugin.latest.version
-                          : plugin.catalogError
-                            ? '版本检查失败'
-                            : refreshing
-                              ? '检查版本中…'
-                              : '暂无兼容安装包'}
-                      </span>
-                      {plugin.serverVersion && <span>MCP {plugin.serverVersion}</span>}
-                      {plugin.toolCount > 0 && <span>{plugin.toolCount} 个工具</span>}
-                    </div>
-                  </div>
-                  <div className="plugin-actions">
-                    {installed && (
-                      <Switch
-                        size="1"
-                        aria-label={'启用 ' + plugin.shortName}
-                        checked={plugin.enabled}
-                        disabled={working || busy[plugin.id]}
-                        onCheckedChange={(enabled) => {
-                          if (enabled && plugin.id !== 'wdh' && !plugin.endpoint) {
-                            setOpened(plugin.id);
-                            return;
-                          }
-                          act(plugin.id, 'plugin-toggle', { enabled });
-                        }}
-                      />
-                    )}
-                    {!installed || plugin.updateAvailable ? (
+                      {!installed || plugin.updateAvailable ? (
+                        <Button
+                          size="2"
+                          disabled={!plugin.latest || working || busy[plugin.id]}
+                          onClick={() => act(plugin.id, 'plugin-install')}
+                          aria-label={(installed ? '更新 ' : '安装 ') + plugin.shortName}
+                        >
+                          {installed ? '更新' : '下载并安装'}
+                        </Button>
+                      ) : null}
                       <Button
                         size="2"
-                        disabled={!plugin.latest || working || busy[plugin.id]}
-                        onClick={() => act(plugin.id, 'plugin-install')}
-                        aria-label={(installed ? '更新 ' : '安装 ') + plugin.shortName}
-                      >
-                        {installed ? '更新' : '下载并安装'}
-                      </Button>
-                    ) : null}
-                    <Button
-                      size="2"
-                      variant="soft"
-                      color="gray"
-                      aria-expanded={expanded}
-                      aria-controls={'plugin-detail-' + plugin.id}
-                      onClick={() => setOpened(expanded ? null : plugin.id)}
-                    >
-                      {expanded ? '收起' : '配置'}
-                      <Icon n={expanded ? 'chevup' : 'chevdown'} size={12} />
-                    </Button>
-                  </div>
-                </div>
-                {working && (
-                  <div className="plugin-operation" role="status">
-                    <Flex align="center" gap="3">
-                      <Text size="1">
-                        {PHASES[operation.phase]}
-                        {operation.phase === 'verifying' && operation.totalFiles
-                          ? ' · ' + operation.doneFiles + ' / ' + operation.totalFiles + ' 文件'
-                          : ''}
-                        {operation.total ? ' · ' + size(operation.got) + ' / ' + size(operation.total) : ''}
-                      </Text>
-                      <Box flexGrow="1" />
-                      <Button
-                        size="1"
-                        variant="ghost"
+                        variant="soft"
                         color="gray"
-                        disabled={operation.phase === 'installing' || operation.phase === 'cancelling'}
-                        onClick={() => act(plugin.id, 'plugin-cancel')}
-                        aria-label={'取消安装 ' + plugin.shortName}
+                        aria-expanded={expanded}
+                        aria-controls={'plugin-detail-' + plugin.id}
+                        onClick={() => setOpened(expanded ? null : plugin.id)}
                       >
-                        取消
-                      </Button>
-                    </Flex>
-                    <Progress
-                      size="1"
-                      value={
-                        operation.total ? Math.round((operation.got / operation.total) * 100) : undefined
-                      }
-                    />
-                  </div>
-                )}
-                {operation?.phase === 'error' && (
-                  <div className="plugin-inline-error" role="alert">
-                    {operation.error}
-                  </div>
-                )}
-                {plugin.catalogError && (
-                  <div className="plugin-inline-note">{plugin.catalogError} 已安装的插件可继续使用。</div>
-                )}
-                {expanded && (
-                  <div className="plugin-detail" id={'plugin-detail-' + plugin.id}>
-                    <Text as="p" size="2" color="gray">
-                      {plugin.note}
-                    </Text>
-                    <div className="plugin-source">
-                      <Text size="1" color="gray">
-                        来源
-                      </Text>
-                      <Button
-                        size="1"
-                        variant="ghost"
-                        color="gray"
-                        title="复制项目地址"
-                        onClick={() =>
-                          navigator.clipboard
-                            .writeText('https://github.com/' + plugin.repository)
-                            .then(() => w.toast('项目地址已复制', 'ok'))
-                        }
-                      >
-                        {plugin.repository}
-                        <Icon n="copy" size={12} />
+                        {expanded ? '收起' : '配置'}
+                        <Icon n={expanded ? 'chevup' : 'chevdown'} size={12} />
                       </Button>
                     </div>
-                    {plugin.id === 'wdh' ? (
-                      installed ? (
-                        plugin.enabled ? (
-                          <WdhPreferences />
+                  </div>
+                  {working && (
+                    <div className="plugin-operation" role="status">
+                      <Flex align="center" gap="3">
+                        <Text size="1">
+                          {PHASES[operation.phase]}
+                          {operation.phase === 'verifying' && operation.totalFiles
+                            ? ' · ' + operation.doneFiles + ' / ' + operation.totalFiles + ' 文件'
+                            : ''}
+                          {operation.total ? ' · ' + size(operation.got) + ' / ' + size(operation.total) : ''}
+                        </Text>
+                        <Box flexGrow="1" />
+                        <Button
+                          size="1"
+                          variant="ghost"
+                          color="gray"
+                          disabled={operation.phase === 'installing' || operation.phase === 'cancelling'}
+                          onClick={() => act(plugin.id, 'plugin-cancel')}
+                          aria-label={'取消安装 ' + plugin.shortName}
+                        >
+                          取消
+                        </Button>
+                      </Flex>
+                      <Progress
+                        size="1"
+                        value={
+                          operation.total ? Math.round((operation.got / operation.total) * 100) : undefined
+                        }
+                      />
+                    </div>
+                  )}
+                  {operation?.phase === 'error' && (
+                    <div className="plugin-inline-error" role="alert">
+                      {operation.error}
+                    </div>
+                  )}
+                  {plugin.catalogError && (
+                    <div className="plugin-inline-note">{plugin.catalogError} 已安装的插件可继续使用。</div>
+                  )}
+                  {expanded && (
+                    <div className="plugin-detail" id={'plugin-detail-' + plugin.id}>
+                      <Text as="p" size="2" color="gray">
+                        {plugin.note}
+                      </Text>
+                      <div className="plugin-source">
+                        <Text size="1" color="gray">
+                          来源
+                        </Text>
+                        <Button
+                          size="1"
+                          variant="ghost"
+                          color="gray"
+                          title="复制项目地址"
+                          onClick={() =>
+                            navigator.clipboard
+                              .writeText('https://github.com/' + plugin.repository)
+                              .then(() => w.toast('项目地址已复制', 'ok'))
+                          }
+                        >
+                          {plugin.repository}
+                          <Icon n="copy" size={12} />
+                        </Button>
+                      </div>
+                      {plugin.id === 'wdh' ? (
+                        installed ? (
+                          plugin.enabled ? (
+                            <WdhPreferences />
+                          ) : (
+                            <Text as="p" size="2">
+                              启用 WDH 后可管理浏览器内核。
+                            </Text>
+                          )
                         ) : (
                           <Text as="p" size="2">
-                            启用 WDH 后可管理浏览器内核。
+                            安装后即可配置浏览器内核。
                           </Text>
                         )
                       ) : (
-                        <Text as="p" size="2">
-                          安装后即可配置浏览器内核。
-                        </Text>
-                      )
-                    ) : (
-                      <DeviceConnection
-                        plugin={plugin}
-                        busy={busy[plugin.id]}
-                        onConfigure={(endpoint) => act(plugin.id, 'plugin-configure', { endpoint })}
-                        onReconnect={() => act(plugin.id, 'plugin-reconnect')}
-                      />
-                    )}
-                  </div>
-                )}
-              </article>
-            );
-          })
-        )}
-      </section>
-      <section className="custom-plugins" aria-label="自定义 MCP 服务">
-        <McpServices />
-      </section>
+                        <DeviceConnection
+                          plugin={plugin}
+                          busy={busy[plugin.id]}
+                          onConfigure={(endpoint) => act(plugin.id, 'plugin-configure', { endpoint })}
+                          onReconnect={() => act(plugin.id, 'plugin-reconnect')}
+                        />
+                      )}
+                    </div>
+                  )}
+                </article>
+              );
+            })
+          )}
+        </Tabs.Content>
+        <Tabs.Content
+          value="mcp"
+          className="plugin-pane"
+          forceMount
+          hidden={tab !== 'mcp'}
+        >
+          <McpServices />
+        </Tabs.Content>
+      </Tabs.Root>
     </main>
   );
 }

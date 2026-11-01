@@ -1,5 +1,7 @@
 // 纯逻辑：状态形状、reducer、格式化。没有任何 JSX。
 
+import { sessionDisplayTitle } from '../../sidecar/session-titles.mjs';
+
 export const blankSession = () => ({
   status: { running: false, pages: [] },
   requests: [], scripts: [], events: [], logs: [],
@@ -87,8 +89,9 @@ export const hostOf = u => { try { return new URL(u).host; } catch { return ''; 
 export const shortPath = u => { try { const x = new URL(u); return (x.pathname.split('/').filter(Boolean).pop() || x.host).slice(0, 40); } catch { return String(u || '').slice(0, 40); } };
 export const isApi = r => r.type === 'xhr' || r.type === 'fetch';
 export const argBrief = a => { if (!a) return ''; const v = a.url || a.names || a.expression || a.pattern || a.query || a.file || a.urlPattern || a.code || a.ids || ''; return String(Array.isArray(v) ? v.join(',') : v).replace(/\s+/g, ' ').slice(0, 70); };
-export const sessionLabel = s => {
-  if (!s) return '对话';
-  return s.title || '对话';
-};
+// 会话名的**存储值**（不带展示前缀）。重命名对话框必须用它预填：把展示名写回 title
+// 会让前缀叠进持久化字段，重复命名就会层层叠加，且 40 字截断会先吃掉标题本体。
+export const sessionTitle = s => (s?.title || '对话');
+// 会话名的**展示值**（前缀 + 原标题）。prefix 来自设置项 titlePrefix，只在渲染层拼接。
+export const sessionLabel = (s, prefix) => sessionDisplayTitle(sessionTitle(s), prefix);
 export const mod = e => e.ctrlKey || e.metaKey;

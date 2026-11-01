@@ -2,7 +2,10 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Flex, Text, Badge, Card, TextField, TextArea, SegmentedControl, Switch, Progress, Dialog, RadioCards } from '@radix-ui/themes';
 import { useWorkbench } from './bus.jsx';
-import { fmtK } from './state.js';
+import { fmtK, sessionLabel } from './state.js';
+import { TITLE_PREFIX_MAX } from '../../sidecar/session-titles.mjs';
+import { THINKING_LEVELS, THINKING_TRANSPORTS, normalizeThinking, levelsLabel, levelLabel } from '../../sidecar/thinking.mjs';
+import { LevelSlider } from './thinking-picker.jsx';
 import { Button, ActionIcon, NavButton, Icon, LogoMark, EmptyState, askConfirm, Dropdown } from './kit.jsx';
 import { native } from './transport.js';
 import { checkForUpdate, installAndRelaunch } from './updater.js';
@@ -93,7 +96,7 @@ function AiTab({ s, setS }) {
     if (!mEdit) return;
     const id = String(mEdit.data.id || '').trim();
     if (!id) return;
-    const entry = { id, name: String(mEdit.data.name || '').trim() || id, contextWindow: Number(mEdit.data.contextWindow) || 0, vision: !!mEdit.data.vision };
+    const entry = { id, name: String(mEdit.data.name || '').trim() || id, contextWindow: Number(mEdit.data.contextWindow) || 0, vision: !!mEdit.data.vision, thinking: normalizeThinking(mEdit.data.thinking, edit.data.type === 'anthropic' ? 'budget' : 'effort') };
     const models = [...(edit.data.models || [])];
     if (mEdit.i >= 0) models[mEdit.i] = entry; else models.push(entry);
     patch({ models });
@@ -189,6 +192,7 @@ function AiTab({ s, setS }) {
                 <span className="mono model-id">{m.id}</span>
                 {m.contextWindow ? <Badge size="1" variant="soft" color="gray">{fmtK(m.contextWindow)}</Badge> : null}
                 {m.vision ? <Badge size="1" variant="soft" color="gray">图片</Badge> : null}
+                {m.thinking?.levels?.length ? <Badge size="1" variant="soft" color="gray" title={'思考强度：' + levelsLabel(m.thinking.levels) + (m.thinking.default ? '（默认' + levelLabel(m.thinking.default) + '）' : '')}>思考 {levelsLabel(m.thinking.levels)}</Badge> : null}
                 <Box flexGrow="1" />
                 <ActionIcon icon="edit" size="1" onClick={() => setMEdit({ i: idx, data: { ...m } })} title="编辑模型" />
                 <ActionIcon icon="trash" size="1" variant="soft" color="red" onClick={() => removeModel(idx)} title="删除模型" />
@@ -225,6 +229,7 @@ function AiTab({ s, setS }) {
             <Switch size="1" checked={!!mEdit.data.vision} onCheckedChange={v => patchModel({ vision: v })} />
             <Text size="2">支持图片输入</Text>
           </Flex>
+          <ThinkingEditor data={mEdit.data} type={edit?.data?.type} onChange={p => patchModel({ thinking: { ...normalizeThinking(mEdit.data.thinking, edit?.data?.type === 'anthropic' ? 'budget' : 'effort'), ...p } })} />
         </>}
         <Flex justify="end" gap="2" mt="4">
           <Button size="2" variant="soft" color="gray" onClick={() => setMEdit(null)}>取消</Button>
@@ -233,6 +238,44 @@ function AiTab({ s, setS }) {
       </Dialog.Content>
     </Dialog.Root>
   </>;
+}
+
+// ---------- 思考强度 ----------
+// 逐模型声明「支持哪些档位」，并选择发送方式。声明是唯一的判断依据：
+// 没声明就不发送任何思考参数（端点自己决定），所以这里的文案必须说清「发了什么」，不能只写「更聪明」。
+function ThinkingEditor({ data, type, onChange }) {
+  const value = normalizeThinking(data.thinking, type === 'anthropic' ? 'budget' : 'effort');
+  const toggleLevel = id => {
+    const levels = value.levels.includes(id) ? value.levels.filter(x => x !== id) : THINKING_LEVELS.map(l => l.id).filter(x => x === id || value.levels.includes(x));
+    // 取消勾选默认档时，默认档必须跟着落到剩下的某一档，否则会存下「默认不在支持范围内」的矛盾配置。
+    const next = levels.includes(value.default) ? value.default : (levels[0] || '');
+    onChange({ levels, default: next });
+  };
+  const transport = THINKING_TRANSPORTS.find(t => t.id === value.transport) || THINKING_TRANSPORTS[0];
+  return <Box mt="4">
+    <Text as="div" size="1" color="gray" mb="1">支持的思考强度</Text>
+    <Flex gap="1" wrap="wrap">
+      {THINKING_LEVELS.map(l => {
+        const on = value.levels.includes(l.id);
+        return <Button key={l.id} size="1" aria-pressed={on} variant={on ? 'solid' : 'soft'} color={on ? undefined : 'gray'} onClick={() => toggleLevel(l.id)}>{l.label}</Button>;
+      })}
+    </Flex>
+    <Text as="div" size="1" color="gray" mt="2" style={{ lineHeight: 1.6 }}>
+      {value.levels.length ? '当前声明：' + levelsLabel(value.levels) : '未声明任何档位：请求里不会带思考参数，由端点自行决定是否思考。'}
+    </Text>
+    <Text as="div" size="1" color="gray" mt="4" mb="1">默认强度</Text>
+    {value.levels.length
+      ? <LevelSlider levels={value.levels} value={value.default} onChange={id => onChange({ default: id })} />
+      : <Text as="div" size="1" color="gray">先勾选上面支持的档位，再选默认档。</Text>}
+    <Text as="div" size="1" color="gray" mt="4" mb="1">发送方式</Text>
+    <SegmentedControl.Root size="1" value={value.transport} onValueChange={v => onChange({ transport: v })} style={{ width: '100%' }}>
+      {THINKING_TRANSPORTS.map(t => <SegmentedControl.Item key={t.id} value={t.id} style={{ flex: 1 }}>{t.label}</SegmentedControl.Item>)}
+    </SegmentedControl.Root>
+    <Text as="div" size="1" color="gray" mt="1" style={{ lineHeight: 1.6 }}>{transport.desc}</Text>
+    {value.transport === 'budget' && value.levels.some(id => id !== 'off') && <Text as="div" size="1" color="amber" mt="1" style={{ lineHeight: 1.6 }}>
+      Claude 原生端点要求思考预算小于最大输出、且温度只能为 1；保存后这两项会按所选档位自动调整。
+    </Text>}
+  </Box>;
 }
 
 // ---------- 运行参数 ----------
@@ -258,6 +301,11 @@ function RuntimeTab({ s, up }) {
         <SegmentedControl.Root size="2" value={String(s.compactAt || 0.85)} onValueChange={v => up('compactAt', +v)}>
           {[[0.8, '80%'], [0.85, '85%'], [0.9, '90%']].map(([v, l]) => <SegmentedControl.Item key={v} value={String(v)}>{l}</SegmentedControl.Item>)}
         </SegmentedControl.Root>
+      </Row>
+    </Section>
+    <Section title="会话列表">
+      <Row label="会话标题前缀" desc="只影响侧栏和标题栏的显示，不会写入会话名；留空表示不显示前缀，最多 20 字">
+        <TextField.Root aria-label="会话标题前缀" size="2" maxLength={TITLE_PREFIX_MAX} placeholder="如 [分析]" style={{ width: 160 }} value={s.titlePrefix ?? ''} onChange={e => up('titlePrefix', e.target.value)} />
       </Row>
     </Section>
   </>;
@@ -361,7 +409,7 @@ function Automations() {
         </Flex>
         <Box mb="3"><Text as="div" size="1" color="gray" mb="1">要 AI 做什么</Text>
           <TextArea size="2" rows={4} value={form.prompt} onChange={e => setForm({ ...form, prompt: e.target.value })} placeholder="例如：打开 https://example.com，看它首页调了哪些接口，把新增的参数记到 findings.md" /></Box>
-        <Box mb="3"><Text as="div" size="1" color="gray" mb="1">执行会话</Text><Dropdown label="执行会话" value={form.sessionId || ''} options={w.sessions.sessions.map(s => ({ value: s.id, label: s.title + ' · ' + (w.projects.find(p => p.id === s.projectId)?.name || s.workspace?.label) }))} onChange={value => setForm({ ...form, sessionId: value })} placeholder="选择项目内的会话" /><Text as="div" size="1" color="gray" mt="1">使用该会话的项目目录和权限；目录不可用或遇到新权限时暂停处理。</Text></Box>
+        <Box mb="3"><Text as="div" size="1" color="gray" mb="1">执行会话</Text><Dropdown label="执行会话" value={form.sessionId || ''} options={w.sessions.sessions.map(s => ({ value: s.id, label: sessionLabel(s, w.settings?.titlePrefix) + ' · ' + (w.projects.find(p => p.id === s.projectId)?.name || s.workspace?.label) }))} onChange={value => setForm({ ...form, sessionId: value })} placeholder="选择项目内的会话" /><Text as="div" size="1" color="gray" mt="1">使用该会话的项目目录和权限；目录不可用或遇到新权限时暂停处理。</Text></Box>
         <Flex align="center" gap="2" mb="3" wrap="wrap">
           <Text size="1" color="gray">星期</Text>
           {DAYS.map((d, i) => <Button key={i} size="2" variant={form.days.includes(i) ? 'solid' : 'soft'} color={form.days.includes(i) ? undefined : 'gray'}

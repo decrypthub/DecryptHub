@@ -32,6 +32,34 @@ if (!CHROME) { console.error('找不到 Chrome/Edge，设置 CHROME_PATH'); proc
 
 const fails = [];
 const ok = (cond, msg) => { if (!cond) fails.push(msg); };
+
+// ---------- 分节运行 ----------
+// 本机改设置页时不该陪着跑浏览器抓包和终端。CI 仍然跑全量（默认 --only=all）。
+// 只切出已经自包含的部分；其余长流水线仍是一整段，宁可慢也不能切出假绿。
+const SECTIONS = {
+  window: '窗口外壳与标题栏（checkWindowChrome，含原生/自定义两套）',
+  account: '账号菜单与设置页账号面（checkAccountMenu）',
+  app: '主流程：项目、会话、附件、设置、插件、浏览器、计划、工作页签、终端',
+};
+const SKIPPED = [];
+export function skipSection(name, reason) {
+  SKIPPED.push({ name, reason });
+}
+
+function parseSections(argv) {
+  const arg = argv.find(a => a.startsWith('--only='))?.slice('--only='.length)
+    ?? (argv.includes('--only') ? argv[argv.indexOf('--only') + 1] : null);
+  if (!arg || arg === 'all') return new Set(Object.keys(SECTIONS));
+  const wanted = arg.split(',').map(s => s.trim()).filter(Boolean);
+  const unknown = wanted.filter(s => !SECTIONS[s]);
+  if (unknown.length) {
+    console.error('未知的分节：' + unknown.join(', ') + '\n可用：' + Object.keys(SECTIONS).join(', ') + ', all');
+    process.exit(2);
+  }
+  return new Set(wanted);
+}
+const enabled = parseSections(process.argv.slice(2));
+const want = name => enabled.has(name);
 async function checkProcessRow(page, label) {
   const issues = await page.locator('.turn-process > summary:not([hidden])').evaluateAll(rows => rows.flatMap(row => {
     const bounds = row.getBoundingClientRect(), issues = [];
@@ -210,6 +238,15 @@ async function checkWindowChrome(scheme) {
       const skip = page.getByRole('button', { name: '稍后', exact: true });
       if (await skip.count()) await skip.click();
       const label = '[' + scheme + '] ' + (nativeTitlebar ? 'Mac 原生标题栏' : '自定义标题栏');
+      // 侧栏折叠偏好是持久化的（localStorage 的 wdh_rail）：上一次运行留下的「已折叠」
+      // 会让后面的按钮断言找不到元素。这里先把偏好清成「新用户」状态，
+      // 保证断言的是初始形态而不是上一轮的残留。
+      const railPreference = await page.evaluate(() => localStorage.getItem('wdh_rail'));
+      if (railPreference !== null) {
+        await page.evaluate(() => localStorage.removeItem('wdh_rail'));
+        await page.reload();
+        await page.locator('.stage-head').waitFor();
+      }
       ok(await page.locator('.rail').isVisible(), label + ' 新用户应默认展开侧栏');
       for (const name of ['最小化', '最大化', '关闭']) ok(await page.locator('.win-controls').getByRole('button', { name, exact: true }).count() === (nativeTitlebar ? 0 : 1), label + ' 窗口按钮重复或缺失：' + name);
       ok(await page.locator('.win-controls .tool-panel-toggle').isVisible(), label + ' 工具面板开关应保留');
@@ -316,8 +353,11 @@ async function showTool(page, kind) {
 let activePage;
 try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SCHEME] : ['dark', 'light'])) {
   console.log('检查主题：' + scheme);
-  await checkWindowChrome(scheme);
-  await checkAccountMenu({ browser, baseUrl: 'http://127.0.0.1:' + PORT, wsPort: WS_PORT, scheme, shots: SHOTS, ok });
+  if (want('window')) await checkWindowChrome(scheme);
+  else skipSection('window', '未选中 --only=window');
+  if (want('account')) await checkAccountMenu({ browser, baseUrl: 'http://127.0.0.1:' + PORT, wsPort: WS_PORT, scheme, shots: SHOTS, ok });
+  else skipSection('account', '未选中 --only=account');
+  if (!want('app')) { skipSection('app', '未选中 --only=app'); continue; }
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: scheme });
   await ctx.grantPermissions(['clipboard-read', 'clipboard-write']);
   const page = await ctx.newPage();
@@ -712,14 +752,25 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.waitForTimeout(300);
 
   await page.locator('.rail-nav').getByRole('button', { name: '插件', exact: true }).click();
+  // 页签选择会被记住，回归测试先显式停在「官方插件」。
+  await page.getByRole('tab', { name: '官方插件', exact: true }).click();
   await page.locator('[data-plugin-id="wdh"]').waitFor();
+  ok(await page.getByRole('tab').allInnerTexts().then(t => t.join('|')) === '官方插件|自定义 MCP', '[' + scheme + '] 插件页应为官方插件 / 自定义 MCP 两个页签');
   ok(await page.locator('.official-plugin').count() === 3, '[' + scheme + '] 官方插件应包含 WDH/IDH/ADH');
+  await page.getByRole('tab', { name: '自定义 MCP', exact: true }).click();
+  ok(await page.locator('.official-plugin').isVisible().catch(() => false) === false, '[' + scheme + '] 自定义 MCP 页签下不应同时显示官方插件列表');
+  await page.getByRole('tab', { name: '官方插件', exact: true }).click();
+  ok(await page.locator('.official-plugin').count() === 3 && await page.locator('.official-plugin').first().isVisible(), '[' + scheme + '] 切回官方插件后列表应恢复');
   await checkWindowDragging(page, ['.screen-head'], scheme + ' 插件顶部拖动');
   await page.locator('[data-plugin-id="wdh"]').getByRole('button', { name: '配置', exact: true }).click();
-  // 缺少组件/内核时直接失败：静默跳过会让“绿”的回归其实没覆盖插件页。
+  // 插件页和紧随其后的浏览器抓包都要真组件 + CloakBrowser 内核。
+  // 本机没装时整段跳过并明确报告，而不是中断后面 87 条与内核无关的断言。
+  // CI 有组件，这道判断直接放行，仍然覆盖插件页。
   const kernelState = await rpc('kernel-info').catch(error => { throw new Error('[' + scheme + '] 无法读取内核状态：' + error.message); });
-  if (!kernelState?.component?.installed) throw new Error('[' + scheme + '] WDH 组件未安装，无法验证插件页；请先安装组件再运行 check:ui');
-  if (!kernelState?.cloak) throw new Error('[' + scheme + '] CloakBrowser 内核未安装，无法验证插件页；请先安装内核再运行 check:ui');
+  const kernelMissing = !kernelState?.component?.installed ? 'WDH 组件未安装' : !kernelState?.cloak ? 'CloakBrowser 内核未安装' : null;
+  if (kernelMissing) {
+    skipSection('kernel:' + scheme, kernelMissing + '（插件页与浏览器抓包段未验证）');
+  } else {
   await page.getByRole('button', { name: '测试 CloakBrowser', exact: true }).click();
   await page.getByText('浏览器启动与画面检查通过', { exact: true }).waitFor({ timeout: 90000 });
   await page.screenshot({ path: path.join(SHOTS, scheme + '-plugins.png') });
@@ -807,6 +858,7 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.screenshot({ path: path.join(SHOTS, scheme + '-browser-restored.png') });
   await page.getByRole('button', { name: '浏览器菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '关闭浏览器（保留会话）', exact: true }).click();
+  } // kernel 段结束：以下断言不再依赖组件与 CloakBrowser 内核
 
   await page.locator('.rail .new-session').click();
   await page.locator('.welcome').waitFor();
@@ -1226,6 +1278,16 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
     const metrics = await activePage.locator('.project-picker-panel').evaluateAll(nodes => nodes.map(node => ({ rect: node.getBoundingClientRect().toJSON(), side: node.getAttribute('data-side'), animations: node.getAnimations().map(a => ({ state: a.playState, time: a.currentTime })) }))).catch(() => []);
     if (metrics.length) console.error('Project popup diagnostics: ' + JSON.stringify(metrics));
   }
+  // 中断前已经累积的契约失败同样要报出来，否则真正的回归会被后面的环境错误盖住。
+  if (fails.length) {
+    console.error('\n✖ 中断前已记录 UI 契约失败 ' + fails.length + ' 项：');
+    for (const f of fails) console.error('  · ' + f);
+  }
+  if (SKIPPED.length) {
+    const unique = [...new Map(SKIPPED.map(s => [s.name, s])).values()];
+    console.error('\n⚠ 中断前已跳过 ' + unique.length + ' 段（这些段没有被验证）：');
+    for (const s of unique) console.error('  · ' + s.name + '：' + s.reason);
+  }
   throw error;
 } finally {
   await browser.close(); srv.closeAllConnections(); srv.close(); sidecar.kill();
@@ -1237,4 +1299,13 @@ if (fails.length) {
   console.error('\n截图：' + SHOTS);
   process.exit(1);
 }
-console.log('✔ UI 契约通过（截图：' + SHOTS + '）');
+// 跳过的东西必须说出来。悄悄跳过等于把「没验证」伪装成「通过」，
+// 那比红灯更糟：红灯至少会让人去看。
+if (SKIPPED.length) {
+  const unique = [...new Map(SKIPPED.map(s => [s.name, s])).values()];
+  console.log('⚠ 已跳过 ' + unique.length + ' 段（其余断言全部通过）：');
+  for (const s of unique) console.log('  · ' + s.name + '：' + s.reason);
+  console.log('');
+}
+const sections = [...enabled].join(', ');
+console.log('✔ UI 契约通过（分节：' + sections + '；截图：' + SHOTS + '）');

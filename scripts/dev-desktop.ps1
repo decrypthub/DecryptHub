@@ -1,4 +1,4 @@
-# Debug mode (Tauri dev equivalent, no Tauri CLI required):
+﻿# Debug mode (Tauri dev equivalent, no Tauri CLI required):
 #   Vite serves the UI with HMR, the debug binary loads http://127.0.0.1:5173
 #   - UI changes: hot reload, no rebuild
 #   - Rust changes: rebuild first (cargo build), then run this script again
@@ -40,17 +40,25 @@ if (-not (Test-Port $vitePort)) {
   Write-Output "Reusing Vite already listening on 127.0.0.1:$vitePort"
 }
 
-$before = @{ Node = $env:JSRA_SIDECAR_NODE; AppData = $env:DECRYPTHUB_DATA_DIR; DevUrl = $env:JSRA_UI_DEV_URL }
+$before = @{ Node = $env:JSRA_SIDECAR_NODE; AppData = $env:DECRYPTHUB_DATA_DIR; DevUrl = $env:JSRA_UI_DEV_URL; Community = $env:DECRYPTHUB_COMMUNITY_URL }
 try {
   $env:JSRA_SIDECAR_NODE = $sidecarEntry
   $env:DECRYPTHUB_DATA_DIR = Join-Path $root '.tmp\desktop-appdata\WebDecryptHub'
   $env:JSRA_UI_DEV_URL = "http://127.0.0.1:$vitePort/"
+  # DECRYPTHUB_COMMUNITY_URL 只影响 debug 构建；留空则连生产社区 decrypthub.cn。
+  # 连测试服：$env:DECRYPTHUB_COMMUNITY_URL = 'https://decrypthub.taisuii.cn'
+  if ($env:DECRYPTHUB_COMMUNITY_URL) {
+    Write-Output "Community origin: $env:DECRYPTHUB_COMMUNITY_URL"
+  } else {
+    Write-Output 'Community origin: https://decrypthub.cn (default)'
+  }
   $app = Start-Process -FilePath $binary -WorkingDirectory $root -PassThru `
     -RedirectStandardOutput (Join-Path $logs 'dev-stdout.log') -RedirectStandardError (Join-Path $logs 'dev-stderr.log')
 } finally {
   $env:JSRA_SIDECAR_NODE = $before.Node
   $env:DECRYPTHUB_DATA_DIR = $before.AppData
   $env:JSRA_UI_DEV_URL = $before.DevUrl
+  $env:DECRYPTHUB_COMMUNITY_URL = $before.Community
 }
 
 Write-Output "Debug mode running: UI from http://127.0.0.1:$vitePort/ , app PID $($app.Id)"

@@ -300,7 +300,7 @@ async function startServer() {
     },
     'session-set-mode': a => S(a).setMode(a?.mode, a?.review),
     'agent-approval-reply': a => ({ ok: S(a).replyApproval(a?.id, { allow: !!a?.allow, always: !!a?.always }) }),
-    'agent-answer': a => ({ ok: S(a).answerAsk(a?.id, a?.answer) }),
+    'agent-answer': a => ({ ok: S(a).answerAsk(a?.id, a?.answer, { skipped: a?.skipped === true }) }),
     'debug-paused': async a => {
       const s = S(a);
       if (!s.browser.running || !s.mcp?.has?.('get_paused_info')) return { paused: false, text: '浏览器分析内核未连接，无法读取断点。' };

@@ -15,6 +15,10 @@ export function useSessionView(sessionId) {
   }), [update]);
   const revealBrowser = useCallback(id => setViews(previous => revealSessionBrowser(previous, id, initial.fallback)), [initial]);
   const setPanelLayout = useCallback((layout, id = owner.current) => { if (layout.length === 2) update(id, { layout }); }, [update]);
+  // 记录阅读位置：只有用户主动停留过才写，null 表示「回到贴底默认」。
+  const setScroll = useCallback((scroll, id = owner.current) => update(id, () => ({ scroll })), [update]);
+  // 逐条记住展开的思考块（按消息 id），最多保留 last-N。
+  const setReasoningOpen = useCallback((ids, id = owner.current) => update(id, () => ({ reasoningOpen: ids })), [update]);
   const forget = useCallback(id => setViews(previous => { const next = { ...previous }; delete next[id]; return next; }), []);
-  return { ...sessionView(views, sessionId, initial.fallback), setSide, setSideOpen, setPanelLayout, update, revealBrowser, forget };
+  return { ...sessionView(views, sessionId, initial.fallback), views, setSide, setSideOpen, setPanelLayout, setScroll, setReasoningOpen, update, revealBrowser, forget };
 }

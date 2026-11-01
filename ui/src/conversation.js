@@ -54,8 +54,10 @@ export function conversationTurns(events, run = null, running = false, subagents
       if (e.type === 'assistant') {
         if (e.reasoning) turn.process.push({ type: 'reasoning', id: 'reasoning-' + e.id, content: e.reasoning, finished: e.finished, at: e.at, turnId: e.turnId });
         const phase = e.phase || (i === lastAssistant && !turn.items.slice(i + 1).some(t => t.type === 'tool') ? 'final_answer' : 'commentary');
-        // 最终回复放正文区；工具之间的进度说明留在执行过程里，按真实顺序与工具交错。
-        if (e.content) (phase === 'commentary' ? turn.process : turn.answers).push({ ...e, phase });
+        // 正文区只承载本轮定稿的答复；执行过程里的正文（进度说明、思考后的开场句）留在 Agent Loop，
+        // 和思考、工具按真实顺序交错。流式期间还不知道这一步会不会继续调用工具，所以先按过程处理，
+        // 等 assistant-end 给出 phase 再决定去留——否则过渡句会先出现在正文区、拿到 commentary 后再消失。
+        if (e.content) (phase === 'commentary' || phase === 'streaming' ? turn.process : turn.answers).push({ ...e, phase });
       } else if (e.type === 'error') turn.alerts.push(e);
       else turn.process.push(e);
     });
@@ -72,7 +74,7 @@ export function conversationTurns(events, run = null, running = false, subagents
   return turns;
 }
 
-const TITLES = { workspace_list: '查看文件', workspace_read: '读取文件', workspace_grep: '搜索代码', workspace_write: '写入文件', workspace_edit: '编辑文件', workspace_shell: '运行命令', workspace_run: '运行脚本', workspace_npm: '安装依赖', workspace_job_output: '查看任务输出', workspace_job_kill: '停止后台任务', browser_open: '打开网页', browser_snapshot: '读取页面', browser_tabs: '查看标签页', browser_select: '切换标签页', browser_click: '点击页面', browser_fill: '填写表单', browser_press: '发送按键', todo_write: '更新计划', compact_context: '整理上下文', ask_user: '询问用户', discover_tools: '加载工具' };
+const TITLES = { workspace_list: '查看文件', workspace_read: '读取文件', workspace_grep: '搜索代码', workspace_write: '写入文件', workspace_edit: '编辑文件', workspace_shell: '运行命令', workspace_run: '运行脚本', workspace_npm: '安装依赖', workspace_job_output: '查看任务输出', workspace_job_kill: '停止后台任务', browser_open: '打开网页', browser_new_tab: '新建标签页', browser_reset: '重建调试上下文', browser_snapshot: '读取页面', browser_tabs: '查看标签页', browser_select: '切换标签页', browser_click: '点击页面', browser_fill: '填写表单', browser_press: '发送按键', todo_write: '更新计划', compact_context: '整理上下文', ask_user: '询问用户', discover_tools: '加载工具' };
 Object.assign(TITLES, { agent_spawn: '创建研究子代理', agent_wait: '汇总子代理结论', agent_list: '查看子代理', agent_cancel: '取消子代理', goal_update: '更新目标进展', browser_requests: '查看抓包列表', browser_request_detail: '读取请求详情', browser_capture: '调整抓包状态', list_scripts: '列出页面脚本', get_script_source: '读取脚本源码', save_script_source: '保存脚本源码', search_in_sources: '搜索页面源码', set_breakpoint_on_text: '设置源码断点', break_on_xhr: '设置请求断点', remove_breakpoint: '移除断点', list_breakpoints: '查看断点', get_paused_info: '检查暂停现场', pause_or_resume: '暂停或恢复执行', step: '单步调试', evaluate_script: '在网页中求值', select_frame: '选择页面框架', list_console_messages: '读取控制台', get_websocket_messages: '读取 WebSocket 消息', list_network_requests: '检查网络请求', get_request_initiator: '定位请求调用栈', take_screenshot: '截取网页画面', clear_site_data: '清除站点数据', clear_network_requests: '清空调试请求' });
 
 export function toolPresentation(event) {

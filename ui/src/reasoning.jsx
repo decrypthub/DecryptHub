@@ -1,14 +1,14 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Spinner } from '@radix-ui/themes';
 import { Icon, Markdown } from './kit.jsx';
 
 // 思考过程：一行摘要（图标 + 首行内容），展开后在看得到的高度内滚动。
 // 与 DeepSeek Harness 一致：不把整段推理摊开，也不让它把页面顶走。
-export function Reasoning({ event }) {
-  const [open, setOpen] = useState(false);
+// 展开状态由父组件按消息 id 存在会话视图里，重开会话/刷新后保持原样。
+export function Reasoning({ event, open = false, onToggle }) {
   const text = String(event.content || '').replace(/\s+/g, ' ').trim();
   return <div className={'reason-row' + (open ? ' is-open' : '')}>
-    <button type="button" className="reason-head" aria-expanded={open} onClick={() => setOpen(v => !v)} title={text}>
+    <button type="button" className="reason-head" aria-expanded={open} onClick={() => onToggle?.(event)} title={text}>
       <span className="reason-icon">{!event.finished ? <Spinner size="1" /> : <Icon n="sparkles" size={12} />}</span>
       <span className="reason-label">思考</span>
       <span className="reason-preview">{text || (event.finished ? '没有可读内容' : '正在思考…')}</span>

@@ -18,7 +18,10 @@ import { PlanButton } from './plan.jsx';
 import { GoalDetails, GoalResumeBanner } from './goal-details.jsx';
 import { Reasoning } from './reasoning.jsx';
 import { processPresentation } from './process-presentation.js';
+import { reasoningOpen, toggleReasoning } from './scroll-stick.js';
 import { QueuedMessages } from './queue-strip.jsx';
+import { ThinkingPicker } from './thinking-picker.jsx';
+import { modelThinking, effectiveThinking } from '../../sidecar/thinking.mjs';
 
 const CTX_PARTS = [['system', '系统提示'], ['tools', '工具定义'], ['summary', '压缩摘要'], ['history', '对话'], ['attachments', '附件'], ['toolResults', '工具结果']];
 
@@ -35,6 +38,9 @@ export function ChatStage({ railOpen, onExpandRail }) {
   const model = settings.activeModel || '';
   const modelInfo = (activeProvider?.models || []).find(m => (typeof m === 'string' ? m : m.id) === model);
   const vision = typeof modelInfo === 'object' && modelInfo?.vision;
+  // 思考档位：只有当前模型确实声明了档位时才给选择器，否则不摆一个切换无效的控件。
+  const declaredThinking = modelThinking(typeof modelInfo === 'object' ? modelInfo?.thinking : null, model);
+  const thinking = effectiveThinking(declaredThinking, settings.activeThinking);
   const commands = commandDismissed ? [] : commandMatches(input), commandId = 'composer-commands-' + w.sid;
   const chooseCommand = c => { setInput('/' + c.name + ' '); setCommandDismissed(true); setTimeout(() => refs.inputRef.current?.focus(), 0); };
   const composerKey = e => {
@@ -58,7 +64,7 @@ export function ChatStage({ railOpen, onExpandRail }) {
     <header className="stage-head" data-window-drag-region onMouseDown={e => handleWindowDrag(e, native)}>
       {!railOpen && <ActionIcon icon="sidebar" variant="soft" color="gray" onClick={onExpandRail} title="展开会话列表" />}
       <div className="stage-identity">
-        <strong className="ellipsis" title={sessionLabel(session || {})}>{sessionLabel(session || {})}</strong>
+        <strong className="ellipsis" title={sessionLabel(session || {}, settings.titlePrefix)}>{sessionLabel(session || {}, settings.titlePrefix)}</strong>
       </div>
       <Box flexGrow="1" />
       <div className="stage-progress" aria-label="目标、计划与子代理">
@@ -119,6 +125,10 @@ export function ChatStage({ railOpen, onExpandRail }) {
           <div className="composer-mode"><PermissionPicker /></div>
           <Box flexGrow="1" />
           <div className="composer-context"><CtxMeter /></div>
+            {declaredThinking.levels.length > 0 && <div className="composer-thinking"><ThinkingPicker
+              levels={declaredThinking.levels} value={thinking.level} transport={declaredThinking.transport}
+              defaultLevel={declaredThinking.default} modelLabel={modelInfo?.name || model}
+              onChange={level => w.pickThinking(level)} /></div>}
           <div className="composer-model"><Dropdown width={110} label="选择模型" value={(providers.find(p => p.id === settings.activeProviderId)?.id || '') + '|' + model}
             placeholder={providers.length ? '选择模型' : '选择渠道'}
             options={providers.map(p => ({ group: p.name, items: (p.models || []).map(m => { const id = typeof m === 'string' ? m : m.id; return { value: p.id + '|' + id, label: (m && m.name) || id }; }) }))}
@@ -158,7 +168,7 @@ function TurnFiles({ turn }) {
 }
 
 function TurnProcess({ turn }) {
-  const { cur } = useWorkbench();
+  const { cur, presentation: view } = useWorkbench();
   const [expanded, setExpanded] = useState(null), [now, setNow] = useState(Date.now());
   const presentation = processPresentation(turn), open = expanded ?? presentation.defaultOpen, hasReasoning = turn.process.some(e => e.type === 'reasoning');
   useEffect(() => { if (!turn.active) return; const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, [turn.active]);
@@ -173,7 +183,7 @@ function TurnProcess({ turn }) {
   const count = [hasReasoning && '思考', kindSummary.join(' · ') || (turn.tools.length ? `${turn.tools.length} 项操作` : ''), turn.subagents.length && `子代理 ${turn.subagents.length}`, turn.failures && `失败 ${turn.failures}`].filter(Boolean).join(' · ');
   if (!turn.process.length && !turn.subagents.length) return turn.active ? <div className="turn-meta" role="status"><span className="tool-state run"><Spinner size="1" /></span><span className="turn-process-label" title={label}>{label}</span></div> : null;
   const header = <><span className={'tool-state ' + (turn.active ? 'run' : turn.failures ? 'err' : 'ok')}>{turn.active ? <Spinner size="1" /> : <Icon n={turn.failures ? 'info' : 'check'} size={13} />}</span><span className="turn-process-label" title={label}>{label}</span>{turn.active && elapsed && <span className="turn-process-elapsed">{elapsed}</span>}{count && <span className="tool-count" title={count}>{count}</span>}</>;
-  const content = <div className="turn-process-items">{turn.process.map((e, i) => e.type === 'tool' ? <ToolEvent key={e.itemId || i} e={e} /> : e.type === 'reasoning' ? <Reasoning key={e.id} event={e} /> : e.type === 'assistant' ? <div className="process-message" key={e.id || i}><Markdown text={e.content} /></div> : <Event key={e.id || i} e={e} />)}<TurnSubagents agents={turn.subagents} /></div>;
+  const content = <div className="turn-process-items">{turn.process.map((e, i) => e.type === 'tool' ? <ToolEvent key={e.itemId || i} e={e} /> : e.type === 'reasoning' ? <Reasoning key={e.id} event={e} open={reasoningOpen(view, e)} onToggle={ev => { const next = toggleReasoning(view, ev); if (next) view.setReasoningOpen(next); }} /> : e.type === 'assistant' ? <div className="process-message" key={e.id || i}><Markdown text={e.content} streaming={e.phase === 'streaming'} /></div> : <Event key={e.id || i} e={e} />)}<TurnSubagents agents={turn.subagents} /></div>;
   // Keep the same parent as a short live turn grows, preserving open tool details.
   return <details className={'turn-process tool-group' + (!presentation.foldable ? ' turn-process-inline' : '')} open={!presentation.foldable || open}>
     <summary hidden={!presentation.foldable} aria-label="执行过程" onClick={e => { e.preventDefault(); setExpanded(!open); }}>{header}<Icon n={open ? 'chevup' : 'chevdown'} size={12} /></summary>
@@ -212,7 +222,7 @@ function AssistantMessage({ e, turn, copy }) {
   const time = complete ? new Date(turn.endedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '';
   const final = e.phase === 'final_answer';
   return <article aria-label="模型回复" className={'msg assistant' + (final ? '' : ' commentary') + (e.phase === 'streaming' ? ' is-streaming' : '')}>
-    <div className="bubble"><Markdown text={e.content} /></div>
+    <div className="bubble"><Markdown text={e.content} streaming={e.phase === 'streaming'} /></div>
     {final && <div className="message-foot">
       <ActionIcon icon="copy" size="1" variant="ghost" color="gray" onClick={copy} title="复制回复" aria-label="复制回复" />
       <ActionIcon icon="thumbup" size="1" variant="ghost" color={rating === 'up' ? 'tomato' : 'gray'} onClick={() => w.rate(e.id, 'up')} title={rating === 'up' ? '取消“有帮助”' : '标记为有帮助'} aria-label="有帮助" aria-pressed={rating === 'up'} />

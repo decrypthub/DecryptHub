@@ -260,13 +260,16 @@ test('ask_user: 问题与选项透传到界面，回答回喂模型', async () =
   assert.match(toolEvent.content, /用户回答：走接口 B/);
 });
 
-test('ask_user: 用户跳过时不算错误，提示按判断继续', async () => {
+test('ask_user: 用户跳过时不算错误，但必须说明跳过不是授权', async () => {
   const { agent } = fakeAgent({ tools: AGENT_TOOLS, projectDir: tmp(), ask: async () => '' });
   agent.chat = scripted([callTool('ask_user', { question: '要继续吗' }), answer('好')]);
   await agent.send('x');
   const toolEvent = agent.hist.events.find(e => e.t === 'tool' && e.name === 'ask_user');
-  assert.match(toolEvent.content, /没有回答/);
-  assert.equal(toolEvent.isError, undefined);
+  // 旧实现只回「用户没有回答，请按判断继续」，模型会把它当成许可去执行需审批的操作。
+  assert.match(toolEvent.content, /跳过/);
+  assert.match(toolEvent.content, /不要把它当成授权/);
+  assert.doesNotMatch(toolEvent.content, /用户没有回答（跳过或超时）/);
+  assert.equal(toolEvent.isError, undefined, '跳过是正常结局，不算工具错误');
 });
 
 test('ask_user: 没有提问通道时（例如直连 tool-run）给一句说明而不是报错', async () => {

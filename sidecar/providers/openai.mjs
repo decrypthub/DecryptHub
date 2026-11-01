@@ -1,6 +1,7 @@
 // OpenAI 兼容适配器：流式 + 工具调用 + reasoning_content 兼容。
 // 返回统一形状 { content, reasoning, toolCalls, usage, finishReason }。
 import { post, sseData, modelStreamError } from './http.mjs';
+import { openAIThinking } from '../thinking.mjs';
 
 export function toOpenAITools(tools) {
   return tools.map(t => ({ type: 'function', function: { name: t.name, description: (t.description || '').slice(0, 1024), parameters: t.schema || t.inputSchema || { type: 'object', properties: {} } } }));
@@ -10,7 +11,7 @@ export function toOpenAITools(tools) {
 // 若服务端拒绝消息中的 reasoning_content（部分官方 reasoner 会 400），自动剥离后重试。
 export async function completeOpenAI(cfg, messages, tools, { onDelta, onReasoning, signal } = {}) {
   const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.apiKey };
-  let stripReasoning = false, useStreamOpts = true;
+  let stripReasoning = false, useStreamOpts = true, dropThinking = false;
   for (let attempt = 0; ; attempt++) {
     const msgs = messages.map(m => {
       if (m.role !== 'assistant') return m;
@@ -19,9 +20,12 @@ export async function completeOpenAI(cfg, messages, tools, { onDelta, onReasonin
     });
     const body = { model: cfg.model, messages: msgs, stream: true, temperature: cfg.temperature ?? 0.2 };
     if (cfg.maxTokens) body.max_tokens = cfg.maxTokens;
-    // V4 thinking is on by default and can exhaust a short title's output budget.
-    // This documented switch applies only to metadata, never the user's task.
-    if (cfg.requestPurpose === 'session-title' && /deepseek[-_/](?:v4|flash)/i.test(cfg.model || '')) body.thinking = { type: 'disabled' };
+    // 思考强度由用户在渠道里逐模型声明：effort → reasoning_effort，switch → thinking.type，none → 不发。
+    const thinking = dropThinking ? null : openAIThinking({ ...(cfg.thinking || {}), requestPurpose: cfg.requestPurpose });
+    if (thinking) body[thinking.field] = thinking.value;
+    // 会话标题是元数据，不该花思考预算：DeepSeek V4 默认思考，会把 256 token 的标题预算吃光。
+    // 这条与会话标题的思考声明无关，是独立保护，所以在这里兜底而不是塞进 openAIThinking。
+    else if (cfg.requestPurpose === 'session-title' && /deepseek[-_/](?:v4|flash)|deepseek[-_/]reasoner|deepseek-r1/i.test(cfg.model || '') && body.thinking === undefined) body.thinking = { type: 'disabled' };
     if (useStreamOpts) body.stream_options = { include_usage: true };
     if (tools.length) { body.tools = toOpenAITools(tools); body.tool_choice = 'auto'; }
     let content = '', reasoning = '', usage = null, finishReason = null, completed = false; const calls = {};
@@ -48,6 +52,9 @@ export async function completeOpenAI(cfg, messages, tools, { onDelta, onReasonin
       }, signal, cfg.idleTimeoutMs || 180000);
     } catch (e) {
       const msg = String(e.message || e);
+      // 端点不认思考参数（老模型 / 中转未透传）：去掉参数重试，而不是让整个请求失败。
+      // 必须先于下面那条判定——"reasoning_effort" 也含 reasoning，否则会被误判成「消息里禁止 reasoning_content」。
+      if (e.status === 400 && !dropThinking && thinking && /reasoning_effort|thinking/i.test(msg)) { dropThinking = true; continue; }
       if (e.status === 400 && !stripReasoning && /reasoning/i.test(msg)) { stripReasoning = true; continue; }
       if (e.status === 400 && useStreamOpts && /stream_options/i.test(msg)) { useStreamOpts = false; continue; }
       throw e;
