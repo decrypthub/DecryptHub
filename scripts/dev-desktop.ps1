@@ -2,12 +2,13 @@
 #   Vite serves the UI with HMR, the debug binary loads http://127.0.0.1:5173
 #   - UI changes: hot reload, no rebuild
 #   - Rust changes: rebuild first (cargo build), then run this script again
+#   - Parallel worktrees: set JSRA_DEV_UI_PORT so each one keeps its own Vite
 # Usage: powershell -ExecutionPolicy Bypass -File scripts/dev-desktop.ps1
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $binary = Join-Path $root 'src-tauri\target\debug\jsra-tauri.exe'
 $sidecarEntry = Join-Path $root 'sidecar\index.mjs'
-$vitePort = 5173
+$vitePort = if ($env:JSRA_DEV_UI_PORT) { [int]$env:JSRA_DEV_UI_PORT } else { 5173 }
 $logs = Join-Path $root '.tmp'
 
 if (-not (Test-Path -LiteralPath $binary)) {

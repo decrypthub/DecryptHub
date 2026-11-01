@@ -179,3 +179,86 @@ test('view: 孤儿 tool 结果被跳过（防御旧数据）', () => {
   const v = h.view();
   assert.deepEqual(v.map(m => m.role), ['system', 'user']);
 });
+
+/** 严格校验 wire 是否满足 tool_call/tool 配对：每条 calls 都必须有唯一、连续、同序的响应。 */
+function pairingProblems(msgs) {
+  const problems = [];
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    if (m.role !== 'assistant' || !m.tool_calls?.length) continue;
+    const ids = m.tool_calls.map(c => c.id);
+    const got = [];
+    for (let j = i + 1; j < msgs.length && msgs[j].role === 'tool'; j++) got.push(msgs[j].tool_call_id);
+    for (const id of ids) if (!got.includes(id)) problems.push(`缺少 ${id} 的响应`);
+    for (const id of got) if (!ids.includes(id)) problems.push(`多出 ${id} 的响应`);
+    if (new Set(got).size !== got.length) problems.push(`重复响应：${got.join(',')}`);
+    if (got.join(',') !== ids.filter(id => got.includes(id)).join(',')) problems.push(`响应顺序错乱：${got.join(',')}`);
+  }
+  return problems;
+}
+
+test('view: 一批里有调用没有结果时补占位响应（服务端会因此 400）', () => {
+  // 模型给了两个调用，进程在第二条结果落盘前退出：磁盘上就是 assistant[c1,c2] + tool{c1}
+  const h = new History({ system: 'S' });
+  h.append({ t: 'user', content: 'u1' });
+  h.append({ t: 'assistant', content: '', calls: [{ id: 'c1', name: 'workspace_shell', args: {} }, { id: 'c2', name: 'workspace_read', args: {} }] });
+  h.append({ t: 'tool', id: 'c1', name: 'workspace_shell', content: 'ok' });
+  h.append({ t: 'user', content: 'u2' });
+
+  const v = h.view();
+  assert.deepEqual(pairingProblems(v), []);
+  assert.equal(v[3].tool_call_id, 'c1');
+  assert.equal(v[3].content, 'ok');                       // 真结果原样保留
+  assert.equal(v[4].tool_call_id, 'c2');
+  assert.equal(v[4]._synth, true);                        // 缺失的那条是补的
+  assert.match(v[4].content, /未执行/);
+});
+
+test('view: 补齐只影响视图，事件保持 append-only 原样', () => {
+  const h = new History({ system: 'S' });
+  h.append({ t: 'user', content: 'u' });
+  h.append({ t: 'assistant', content: '', calls: [{ id: 'c1', name: 'n', args: {} }, { id: 'c2', name: 'n', args: {} }] });
+  const before = JSON.stringify(h.events);
+  const v = h.view();
+  assert.equal(v.filter(m => m._synth).length, 2);
+  assert.equal(JSON.stringify(h.events), before);
+});
+
+test('view: 没有结果的调用紧跟用户消息时也要补齐（旧数据/fork 种子）', () => {
+  const h = new History({ system: 'S' });
+  h.events = [
+    { t: 'user', content: 'q1' },
+    { t: 'assistant', content: '', calls: [{ id: 'f1', name: 'workspace_read', args: {} }] },
+    { t: 'user', content: 'q2' },
+    { t: 'assistant', content: '答' },
+  ];
+  const v = h.view();
+  assert.deepEqual(pairingProblems(v), []);
+  assert.deepEqual(v.map(m => m.role), ['system', 'user', 'assistant', 'tool', 'user', 'assistant']);
+});
+
+test('view: 响应按 tool_calls 顺序排列，重复的丢弃', () => {
+  const h = new History({ system: 'S' });
+  h.events = [
+    { t: 'user', content: 'u' },
+    { t: 'assistant', content: '', calls: [{ id: 'c1', name: 'n', args: {} }, { id: 'c2', name: 'n', args: {} }] },
+    { t: 'tool', id: 'c2', name: 'n', content: '两次' },
+    { t: 'tool', id: 'c1', name: 'n', content: '一次' },
+    { t: 'tool', id: 'c2', name: 'n', content: '两次' },
+    { t: 'tool', id: 'zz', name: 'n', content: '无主' },
+  ];
+  const v = h.view();
+  assert.deepEqual(v.map(m => m.tool_call_id).filter(Boolean), ['c1', 'c2']);
+  assert.deepEqual(v.filter(m => m.role === 'tool').map(m => m.content), ['一次', '两次']);
+  assert.deepEqual(pairingProblems(v), []);
+});
+
+test('view: 正常成对的历史不被改动（补齐逻辑不误伤）', () => {
+  const h = sample();
+  const before = h.view().filter(m => !m._synth).length;
+  const v = h.view();
+  assert.equal(v.some(m => m._synth), false);
+  assert.equal(v.length, before);
+  assert.deepEqual(pairingProblems(v), []);
+});
+

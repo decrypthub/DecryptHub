@@ -16,7 +16,7 @@ import { checkAccountMenu } from './check-account-ui.mjs';
 const ROOT = process.cwd();
 const DIST = path.join(ROOT, 'ui-dist');
 const SHOTS = path.join(ROOT, 'artifacts', 'ui');
-const PORT = 5311, WS_PORT = 5312;
+const PORT = Number(process.env.JSRA_UI_HTTP_PORT || 5311), WS_PORT = Number(process.env.JSRA_UI_WS_PORT || 5312);
 const CHROME = process.env.CHROME_PATH || [
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',

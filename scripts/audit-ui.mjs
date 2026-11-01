@@ -10,7 +10,7 @@ import os from 'node:os';
 
 const ROOT = process.cwd();
 const DIST = path.join(ROOT, 'ui-dist');
-const PORT = 5211, WS_PORT = 5212;
+const PORT = Number(process.env.JSRA_UI_HTTP_PORT || 5211), WS_PORT = Number(process.env.JSRA_UI_WS_PORT || 5212);
 const CHROME = process.env.CHROME_PATH || [
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
