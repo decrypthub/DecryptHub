@@ -227,6 +227,8 @@ export class PluginManager {
           active: plugin.id === 'wdh' ? active : 0,
           toolCount: connection?.toolCount || 0,
           serverVersion: connection?.version || null,
+          // 官方插件声明的环境事实会进入系统记忆；这里只报告有无，设置页不提供编辑。
+          hasInstructions: !!connection?.instructions,
           endpoint: cfg?.args?.find((a, i) => cfg.args[i - 1] === '--endpoint') || '',
           runtimeInfo:
             plugin.runtime === 'python'

@@ -16,6 +16,7 @@ import { decideTool, toolRisk, HOST_EXEC, WORKER_TOOLS } from './policy.mjs';
 import { formatTodos } from './todos.mjs';
 import { workspacePath } from './workspaces.mjs';
 import { profilePrompt } from './profile.mjs';
+import { systemMemoryPrompt, pluginIdFromServerName } from './system-memory.mjs';
 
 const REF_TOOL = { name: 'context_ref_read', description: '读取被截断的长工具输出（截断提示里的 ctx_ref）。offset/length 分页（默认 6000 字符）。', schema: { type: 'object', properties: { ref: { type: 'string' }, offset: { type: 'number' }, length: { type: 'number' } }, required: ['ref'] } };
 const MAX_AUTO_FAILURES = 2;
@@ -46,7 +47,9 @@ const SYSTEM = `你是桌面端通用 Agent，帮助用户阅读和修改代码�
 只读权限下只做调查。命令是否隔离由应用实际状态决定，不把 cwd 或 Node vm 当作安全沙箱。Windows 命令使用 PowerShell。
 核心工具用于文件、执行、提问和上下文。需要网页时用 browser_open 打开，再用 browser_snapshot 读取。浏览器与外部 MCP 用 discover_tools 按需加载，不编造工具；缺少用户必要信息时使用 ask_user。
 多步任务可以维护 todo_write。能自行查证的信息先查证，不为常规步骤反复询问。完成后说明修改、验证结果和未解决问题；不能把任务投递当作执行完成。
-大输出落盘或分页，避免重复读取。每次工具调用都有超时：脚本和命令用 timeoutMs 显式给出预计耗时（workspace_run/shell 默认 60s、上限 300s，npm 默认 180s、上限 600s），更久的工作用后台任务并轮询；其他工具超时会返回错误，应缩小范围或拆分步骤，不要重复同样的长调用。默认使用中文，表达简洁。`;
+大输出落盘或分页，避免重复读取。每次工具调用都有超时：脚本和命令用 timeoutMs 显式给出预计耗时（workspace_run/shell 默认 60s、上限 300s，npm 默认 180s、上限 600s），更久的工作用后台任务并轮询；其他工具超时会返回错误，应缩小范围或拆分步骤，不要重复同样的长调用。默认使用中文，表达简洁。
+
+记忆和技能：系统记忆是产品与插件声明的环境事实，只读，优先于你的推断，不要试图改写。用户纠正你的环境判断、给出稳定偏好或确认了一条可复用的做法时，用 memory_manage 写成长期记忆（用户级 scope=user），先 list 看有没有同名条目，覆盖前读取最新 hash；只记录已验证的事实或用户明确要求的内容，不记录猜测、密钥和一次性细节。可复用的多步流程用 skill_manage 存成技能。写入成功后才能说「已记住」。`;
 
 const DISCOVER = { name: 'discover_tools', description: '按需启用工具组：browser=页面阅读、交互和抓包；debugger=脚本源码、搜索、文本/XHR断点、暂停/单步/调用栈/作用域求值、控制台与WebSocket；mcp=用户连接的服务。网站分析先打开浏览器再启用 debugger。不会授予额外权限。', schema: { type: 'object', properties: { group: { type: 'string', enum: ['browser', 'debugger', 'mcp'] } }, required: ['group'] } };
 
@@ -72,7 +75,7 @@ class Agent {
     this.notices = [];
     this.steers = [];
     this.acceptingSteer = false;
-    this.hist = new History({ system: SYSTEM + profilePrompt(this.getSettings()) });
+    this.hist = new History({ system: this.systemText() });
     this.hist.ctxDir = this.ctxDir();
     this.running = false; this.abort = null; this.wrapUp = false;
     this.calib = 1; this.compressing = false; this.lastCompressAfter = null;
@@ -154,12 +157,24 @@ class Agent {
   // 对话上下文落盘，重启应用后恢复（系统提示总用最新版本）
   histFile() { return this.projectDir ? this.projectDir + '/.agent-history.json' : null; }
   persist() { const f = this.histFile(); if (f && !this.hist.save(f)) throw new Error('无法保存对话状态，已停止以免丢失执行记录'); }
-  restore() { const f = this.histFile(); if (!f) return; const h = History.load(f, SYSTEM + profilePrompt(this.getSettings())); h.ctxDir = this.ctxDir(); if (h.events.length) this.hist = h; this.hist.onAppend = () => this.persist(); }
+  restore() { const f = this.histFile(); if (!f) return; const h = History.load(f, this.systemText()); h.ctxDir = this.ctxDir(); if (h.events.length) this.hist = h; this.hist.onAppend = () => this.persist(); }
+
+  // 系统提示 = 产品规则 + 用户画像 + 系统记忆（产品内置 + 已连接插件声明的事实）。
+  // 系统记忆每轮重算：插件连上/断开后，模型看到的设备能力必须跟着变，不能沿用上一次连接的说法。
+  systemText() { return SYSTEM + profilePrompt(this.getSettings()) + '\n\n' + this.systemMemory(); }
+  systemMemory() {
+    try {
+      const plugins = (this.mcpHost?.status?.() || [])
+        .filter(p => p.state === 'ready' && p.instructions)
+        .map(p => ({ name: p.name, id: pluginIdFromServerName(p.name), instructions: p.instructions }));
+      return systemMemoryPrompt({ plugins });
+    } catch { return systemMemoryPrompt(); }
+  }
 
 
   allTools() {
     if (this.browser?.running) this.groups.add('browser');
-    this.hist.system = SYSTEM + profilePrompt(this.getSettings());
+    this.hist.system = this.systemText();
     const mcpTools = this.groups.has('debugger') ? (this.mcp.tools || []).map(t => ({ name: t.name, description: t.description, schema: t.inputSchema })) : [];
     // 用户接入的 MCP 服务：工具名已带「服务名__」前缀
     const ext = this.groups.has('mcp') ? (this.mcpHost?.tools?.() || []).map(t => ({ name: t.name, description: t.description, schema: t.inputSchema })) : [];

@@ -109,6 +109,9 @@ export class McpHost {
       state: e.state,
       version: e.version || null,
       error: ['error', 'needs-approval'].includes(e.state) ? (e.error || '连接失败') : '',
+      // 服务在 initialize 里声明的环境说明：只作为「系统记忆」材料交给模型，不改变权限，
+      // 也不允许它覆盖产品规则。设置页只显示有无，不提供编辑。
+      instructions: e.instructions || '',
       tools: (e.tools || []).map(t => ({ name: t.name, description: t.description || '' })),
       toolCount: (e.tools || []).length,
       // 编辑对话框要用回原始配置
@@ -226,12 +229,15 @@ export class McpHost {
         e.pendingClient = null;
         e.client = client; e.transport = transport; e.tools = res.tools || [];
         e.version = client.getServerVersion?.()?.version || null;
+        // 服务端在 initialize 里返回的 instructions 是它自己的环境说明（例如设备通道能做什么）。
+        // 之前这里只取工具列表，导致插件声明的能力对模型完全不可见。
+        e.instructions = typeof client.getInstructions === 'function' ? String(client.getInstructions() || '') : '';
         e.state = 'ready'; e.error = '';
         const previousClose = transport.onclose;
         transport.onclose = () => {
           previousClose?.();
           if (e.client !== client) return;
-          e.client = null; e.tools = []; e.state = 'error'; e.error = '连接已断开';
+          e.client = null; e.tools = []; e.instructions = ''; e.state = 'error'; e.error = '连接已断开';
           this.log(`[mcp] ${name} 连接已断开`);
           this.notify();
         };
@@ -257,7 +263,7 @@ export class McpHost {
     e.generation = (e.generation || 0) + 1;
     this.starting.delete(name);
     const clients = new Set([e.client, e.pendingClient]);
-    e.client = null; e.pendingClient = null; e.tools = [];
+    e.client = null; e.pendingClient = null; e.tools = []; e.instructions = '';
     for (const c of clients) if (c) { try { await c.close(); } catch {} }
     if (e.state !== 'disabled') e.state = 'idle';
     this.notify();
