@@ -29,9 +29,27 @@ export function findExecutable(name) {
   for (const base of (process.env.PATH || '').split(path.delimiter)) if (base && path.isAbsolute(base)) for (const n of names) { const file = path.join(base, n); if (fs.existsSync(file)) return file; }
   throw new Error('未找到运行程序：' + name);
 }
+// Windows PowerShell 5.1 默认使用系统 ANSI 代码页（中文机器为 CP936），而宿主与
+// workspace_read 全程按 UTF-8 处理，于是整条链路三处都会坏：
+//   输出侧：stdout 是 CP936 字节 → 宿主按 UTF-8 解码，中文全成乱码；
+//   读取侧：Get-Content / Select-String 按 ANSI 解读 UTF-8 文件 → 读中文文件、匹配都失败；
+//   写入侧：Set-Content / Out-File 按 ANSI 写盘 → workspace_read 再读回来又是乱码。
+// 三处必须一起对齐到 UTF-8，否则只是把乱码从一端挪到另一端（写入端默认 ANSI 时，
+// 读回必然坏）。这里只固定这几个 cmdlet，不影响其它行为。
+const PS_UTF8 = "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;" +
+  "$OutputEncoding=[System.Text.Encoding]::UTF8;" +
+  "$PSDefaultParameterValues['Get-Content:Encoding']='utf8';" +
+  "$PSDefaultParameterValues['Select-String:Encoding']='utf8';" +
+  "$PSDefaultParameterValues['Import-Csv:Encoding']='utf8';" +
+  "$PSDefaultParameterValues['Set-Content:Encoding']='utf8';" +
+  "$PSDefaultParameterValues['Add-Content:Encoding']='utf8';" +
+  "$PSDefaultParameterValues['Out-File:Encoding']='utf8';" +
+  "$PSDefaultParameterValues['Export-Csv:Encoding']='utf8';";
+// 注意：Windows PowerShell 5.1 的 -Encoding 只接受字符串枚举，不能传 UTF8Encoding 对象，
+// 所以写入端固定为带 BOM 的 'utf8'。BOM 由 workspace_read 剥离（同 settings.mjs 的做法）。
 export function shellSpec(command) {
-  if (process.platform === 'win32') return { file: path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command] };
-  return { file: '/bin/sh', args: ['-c', command] };
+  if (process.platform === 'win32') return { file: path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', PS_UTF8 + command] };
+  return { file: '/bin/sh', args: ['-c', 'export LC_ALL=${LC_ALL:-C.UTF-8} LANG=${LANG:-C.UTF-8}; ' + command] };
 }
 function sandboxEntry() {
   const candidates = [path.join(path.dirname(process.execPath), 'resources', 'executor', 'sandbox-entry.mjs'), path.join(path.dirname(process.execPath), '..', 'executor', 'sandbox-entry.mjs'), path.join(HERE, 'sandbox-entry.mjs')];
