@@ -2,6 +2,8 @@
 
 先读 `docs/component-architecture.md`、`docs/browser-architecture.md`、`docs/security.md` 和与当前改动相关的设计文档。历史文档中的审计问题需要核对当前代码，不直接当作现状。
 
+**设计决策先看 DeepSeek Harness。** 遇到「这个界面/交互该怎么设计」的分歧时，先去 `../deepseek-harness/` 读对应模块（`packages/client/ui-*`）怎么做的，再动手。它是外部参考项目（DeepSeek 官方开源，MIT），**只读、不改动**；参考的是信息架构与交互取舍，不复制标识与源码。**尤其不要发明 DSH 里不存在的概念**：`AGENTS.md` 之外最典型的反例是「让用户在界面上挑适配器字段名」（`reasoning_effort` / `thinking.budget_tokens` / `thinking.type`）——DSH 把这些放在 `compat.thinkingFormat` 配置里，界面上只留「选哪一档」。2026-11-02 因为把一个字段名显示到思考强度浮层底部，用户直接问「别的 AI 工具都没有，你搞这个干什么」。协议差异在适配器内部解决，不要外溢到 UI。
+
 - 保持模块边界：UI 负责呈现，RPC 负责协议适配，Session 编排生命周期，Agent 决策，policy/Executor 在实际副作用前校验，原生层处理平台窗口。新业务逻辑放入独立域模块，不持续堆入 bus、Session 或 RPC handler。
 - 浏览器进程/CDP 控制与显示分开。UI 原生显示、隐藏和释放统一经过 BrowserSurface；不要新增绕过队列的并发调用。新显示后端保持相同工具契约，先验证 capabilities 和系统兼容性。
 - 异步工作要有所属会话、取消信号与过期结果处理。切换/关闭后的晚到结果不能写回另一个会话；辅助元数据失败不能改变任务完成状态。
@@ -13,3 +15,5 @@
 - 保留用户未提交的改动。不要做与当前任务无关的大规模迁移；跨模块迁移先记录决定、兼容策略和可验证的退出条件。
 - **合并之后要核对结果，别只信「没有冲突」。** 2026-11-02 的 `a043f9c`（把 main 合进功能分支）没有报冲突，却把 main 上刚做好的五处 CI 加固覆盖回了旧值：`check-ui.mjs` 的 `context.setDefaultTimeout(60000)` 整行消失、端口退回硬编码，`check-sidecar.mjs` 的 PTY 等待 90000→15000，`shell-encoding` 的 `timeoutMs` 90000→30000，`workspace-tabs` 的提示符窗口 45000→20000。这类回退不红不报错，只把窗口悄悄收窄，等到下一次超时才表现为「新代码有问题」。**判据**：合并后某个文件如果「结果 = 分支侧」且「结果 ≠ main」，而该文件在 main 上有近期改动，就是被吞了——逐项核对，别只看 `git diff` 是否为空。
 - **`check:ui` 是 CI 的验收项，不是本机自检工具。** 跑之前先想清楚这次改动到底需要它回答什么问题：逻辑正确性用 `node --test`；需要肉眼判断的交互交给人工或 CI；只有「这一处界面在真实浏览器里的行为」才值得本机跑，且用 `--only=` 分节。缺 WDH 组件与 CloakBrowser 内核时不要为了跑通去下载——那一段本来就该由 CI 验证。跑不通说明不了代码坏，跑通了也不等于界面好，别为了「做了事」而跑。
+- **本机 `check:ui` 有已知的假红：`scripts/check-ui.mjs:1220` 等 `.screen-canvas` 超时。** 根因是「多标签浏览器」那一段没像插件段（第 779 行）那样先判断 `kernelMissing`；本机没装 WDH 组件与 CloakBrowser 内核，`skipSection` 只跳过了插件/抓包段，后面照样去开浏览器，于是等满 90 秒才失败。CI 装了组件所以是绿的。**看到这条超时先确认 `kernel-info` 的 `component.installed` / `cloak`，不要先怀疑自己的改动。**
+- **UI 里不出现适配器的字段名。** `reasoning_effort` / `thinking.budget_tokens` / `thinking.type` 只在 `sidecar/thinking.mjs` 与设置页的说明文字里；聊天浮层、触发器、任何常规交互面一律不显示（DSH 的模型菜单同样只写「模型名 · 档位」）。`scripts/check-thinking-ui.mjs` 已用断言锁住这一条。
