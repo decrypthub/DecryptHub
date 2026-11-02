@@ -6,7 +6,9 @@ export const DEFAULT_SESSION_VIEW = Object.freeze({ side: 'browser', sideOpen: f
 const validId = id => /^(?:main|s(?:[a-f0-9]{6}|[a-f0-9]{32}))$/.test(id || '');
 const sides = new Set(['browser', 'evidence', 'code', 'document', 'terminal']);
 // 阅读位置：只有用户主动往上翻过才记录，否则恢复时仍贴底（符合「跟上最新进展」的默认预期）。
-// 展开的思考块按消息 id 记，最多保留 200 条，避免长期会话把 localStorage 撑大。
+// 思考块的展开状态则是**纯运行期状态**，刻意不落盘：刷新、重开会话后一律收起，
+// 与 docs/conversation-presentation.md 的「思考过程默认收起」一致。用户当场点开照样能看，
+// 只是不跨刷新记住——否则页面会一进来就把整段推理摊开，把对话顶走。
 const MAX_OPEN_REASONING = 200;
 const normalizeScroll = value => {
   if (!value || typeof value !== 'object') return null;
@@ -26,7 +28,9 @@ const normalize = (value, previous = DEFAULT_SESSION_VIEW) => {
   manuallyClosed: typeof value?.manuallyClosed === 'boolean' ? value.manuallyClosed : previous.manuallyClosed,
   layout: Array.isArray(value?.layout) && value.layout.length === 2 && value.layout.every(n => Number.isFinite(n) && n > 0 && n < 100) && Math.abs(value.layout[0] + value.layout[1] - 100) < .1 ? [...value.layout] : previous.layout,
   dock,
-  // 阅读位置与思考块展开状态：都是「用户显式做过选择」才记，缺省不写入。
+  // 阅读位置是「用户显式做过选择」才记，缺省不写入。
+  // 思考展开状态在内存里照常记录（当场点开立刻生效），但永不写进 localStorage，
+  // 所以刷新/重开会话后一定从收起开始——由 use-session-view 的持久化处剥离。
   scroll: value?.scroll === null ? null : (normalizeScroll(value?.scroll) ?? previous.scroll ?? null),
   reasoningOpen: normalizeReasoning(value?.reasoningOpen ?? previous.reasoningOpen),
   ...(dock.activeId ? { side: tabSide(dock.tabs.find(t => t.id === dock.activeId)) } : {}),
@@ -50,4 +54,18 @@ export function updateSessionView(views, id, update, fallback = DEFAULT_SESSION_
 export function revealSessionBrowser(views, id, fallback = DEFAULT_SESSION_VIEW) {
   if (sessionView(views, id, fallback).manuallyClosed) return views;
   return updateSessionView(views, id, view => ({ ...selectDockKind(view, 'browser'), sideOpen: true }), fallback);
+}
+/**
+ * 落盘前的视图快照：剥掉 reasoningOpen。
+ *
+ * 思考块的展开状态是运行期状态——内存里记录，所以当场点开立刻生效；
+ * 一旦写进 localStorage 就会跨刷新存活，页面一进来就把整段推理摊开、把对话顶走，
+ * 与 docs/conversation-presentation.md 的「思考过程默认收起」冲突。
+ * 所以持久化版本里恒缺该字段，读回来自然就是收起的。
+ */
+export function persistedSessionViews(views) {
+  return Object.fromEntries(Object.entries(views).map(([id, view]) => {
+    const { reasoningOpen, ...rest } = view;
+    return [id, rest];
+  }));
 }

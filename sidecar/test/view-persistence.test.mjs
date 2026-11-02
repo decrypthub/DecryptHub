@@ -1,10 +1,11 @@
-// 页面状态持久化：阅读位置 + 逐条思考块展开状态。
+// 页面状态持久化：阅读位置会持久化，思考块展开状态**不会**。
 //
-// 用户重开会话时应回到上次读到的地方、思考块保持展开；但如果用户从没往上翻过，
-// 默认仍要贴底（跟上最新进展）。这里验证纯逻辑，DOM 落位另有 scroll-restore 测试。
+// 思考块是「当场点开能看，刷新后收起」：用户主动展开时立刻生效，
+// 但刷新、重开会话后一律从收起开始（见 docs/conversation-presentation.md）。
+// 阅读位置则相反，重开会话要回到上次读到的地方；从没往上翻过时仍贴底。
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readSessionViews, updateSessionView, sessionView, DEFAULT_SESSION_VIEW, SESSION_VIEW_KEY } from '../../ui/src/session-view.js';
+import { readSessionViews, updateSessionView, sessionView, persistedSessionViews, DEFAULT_SESSION_VIEW, SESSION_VIEW_KEY } from '../../ui/src/session-view.js';
 import { reasoningOpen, toggleReasoning, restoreTarget, shouldStick } from '../../ui/src/scroll-stick.js';
 
 const storage = initial => {
@@ -13,15 +14,25 @@ const storage = initial => {
 };
 const SID = 's' + 'a'.repeat(32);
 
-test('阅读位置与思考展开状态会被保存和读回', () => {
+test('阅读位置会被保存和读回，思考展开状态不会', () => {
   const store = storage();
   let views = readSessionViews(store).views;
   views = updateSessionView(views, SID, () => ({ scroll: { top: 1200, at: 111 }, reasoningOpen: ['a', 'b'] }));
-  store.setItem(SESSION_VIEW_KEY, JSON.stringify({ version: 2, sessions: views }));
+  // 内存里当场展开是生效的
+  assert.deepEqual(views[SID].reasoningOpen, ['a', 'b'], '当场展开要立刻生效');
+  // 持久化走产品里那一份 persistedSessionViews，而不是在测试里重写一遍
+  store.setItem(SESSION_VIEW_KEY, JSON.stringify({ version: 2, sessions: persistedSessionViews(views) }));
 
   const restored = readSessionViews(store).views[SID];
   assert.deepEqual(restored.scroll, { top: 1200, at: 111, pinned: false });
-  assert.deepEqual(restored.reasoningOpen, ['a', 'b'], '逐条思考块的展开状态要保留');
+  assert.deepEqual(restored.reasoningOpen, [], '刷新后思考必须默认收起');
+});
+
+test('落盘快照不携带 reasoningOpen，且不改动内存中的视图', () => {
+  const views = updateSessionView(readSessionViews(storage()).views, SID, () => ({ reasoningOpen: ['x'] }));
+  const persisted = persistedSessionViews(views);
+  assert.equal('reasoningOpen' in persisted[SID], false, '持久化版本不应含该字段');
+  assert.deepEqual(views[SID].reasoningOpen, ['x'], '内存里的展开状态不受影响');
 });
 
 test('回到顶部以外的地方才记录；未记录时默认贴底', () => {
