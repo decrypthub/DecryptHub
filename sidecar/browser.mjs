@@ -181,6 +181,11 @@ export class BrowserManager extends EventEmitter {
         .filter((p) => p.type === 'text')
         .map((p) => p.text)
         .join('\n'),
+      // 内核会以 image block 返回截图（take_screenshot 不落盘时）。以前这里被整体丢弃，
+      // 导致模型截图后用户什么也看不到。交给上层登记成附件，UI 再按 id 取图。
+      images: (result.content || [])
+        .filter((p) => p.type === 'image' && p.data)
+        .map((p) => ({ name: '截图.' + /^image\/(\w+)$/.exec(p.mimeType || '')?.[1] || 'png', data: p.data })),
       isError: !!result.isError,
     };
   }

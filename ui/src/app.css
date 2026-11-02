@@ -805,6 +805,16 @@ kbd { font-family: var(--default-font-family); font-size: 10px; font-weight: 400
 .attachment-remove { position: absolute; top: 3px; right: 3px; }
 .image-preview { display: flex; align-items: center; justify-content: center; min-height: 180px; margin-top: 18px; }
 .image-preview img { max-width: 100%; max-height: 72vh; object-fit: contain; }
+/* 回复里的图片：AI 主动给用户看的截图/图表，比用户附件给更大的预览面积。 */
+.reply-images { margin: 10px 0 2px; align-items: flex-start; }
+.reply-image { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.reply-images .attachment-tile.is-image { width: 200px; height: 140px; }
+.tool-images { margin: 6px 0 2px; }
+.tool-images .attachment-tiles { margin-bottom: 0; }
+.tool-images .attachment-tile.is-image { width: 148px; height: 104px; }
+.reply-image-source { font-size: 10px; line-height: 1; color: var(--gray-10); letter-spacing: .02em; }
+.reply-image-caption { font-size: 11px; color: var(--gray-11); max-width: 200px; }
+.reply-md > .md + .md, .reply-md > .attachment-tiles + .md { margin-top: 8px; }
 .composer.drag-over { outline: 2px solid var(--blue-8); outline-offset: 2px; }
 .drop-hint { position: absolute; inset: 0; display: grid; place-items: center; z-index: 2; pointer-events: none; color: var(--blue-11); background: var(--blue-a3); border-radius: inherit; font-size: 14px; backdrop-filter: blur(3px); }
 @container (max-width: 460px) {

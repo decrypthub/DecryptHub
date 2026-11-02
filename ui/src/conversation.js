@@ -11,7 +11,7 @@ export function historyEvents(history, partial = '', partialItem = null, partial
       for (const call of e.calls || []) events.push({ type: 'tool', id: call.id, itemId: call.itemId, turnId: e.turnId, at: e.at, name: call.name, args: call.args });
     } else if (e.t === 'tool') {
       const item = [...events].reverse().find(t => t.type === 'tool' && (e.itemId ? t.itemId === e.itemId : t.id === e.id && t.result === undefined));
-      if (item) Object.assign(item, { result: e.content, isError: !!e.isError, ms: e.ms });
+      if (item) Object.assign(item, { result: e.content, isError: !!e.isError, ms: e.ms, ...(e.images?.length ? { images: e.images } : {}) });
     } else if (e.t === 'continuation') events.push({ ...meta, type: 'continuation', content: String(e.content || ''), source: e.source || null, notice: e.notice || null });
     else if (e.t === 'turn-end') events.push({ ...e, type: 'turn-end' });
     else if (e.t === 'summary') events.push({ ...meta, type: 'compact', stage: 'compressed', summary: e.content, ...e.meta });

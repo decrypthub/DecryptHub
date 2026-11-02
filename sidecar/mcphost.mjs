@@ -160,8 +160,12 @@ export class McpHost {
     } catch (e) {
       return { text: `[MCP:${entry.cfg.name}] 调用失败：${e.message || e}`, isError: true };
     }
+    // image block 以前被替换成「[图片 image/png]」文字，模型和用户都拿不到图。
+    // 现在原样透传，由 Agent 统一登记成附件（历史里只留 id）。
+    const images = (res.content || []).filter(c => c.type === 'image' && c.data)
+      .map(c => ({ name: '图片.' + (/^image\/(\w+)$/.exec(c.mimeType || '')?.[1] || 'png'), data: c.data }));
     const text = (res.content || []).map(c => c.type === 'text' ? c.text : c.type === 'image' ? `[图片 ${c.mimeType || ''}]` : c.type === 'resource' ? `[资源 ${c.resource?.uri || ''}]` : '').filter(Boolean).join('\n');
-    return { text: (res.isError ? '[错误] ' : '') + (text || '（无返回内容）'), isError: !!res.isError };
+    return { text: (res.isError ? '[错误] ' : '') + (text || '（无返回内容）'), isError: !!res.isError, ...(images.length ? { images } : {}) };
   }
 
   async connect(cfg) {

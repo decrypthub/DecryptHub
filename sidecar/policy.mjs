@@ -32,6 +32,7 @@ const READ = new Set([
   'list_network_requests', 'list_scripts', 'get_script_source', 'search_in_sources',
   'list_breakpoints', 'get_request_initiator', 'get_paused_info', 'take_screenshot',
   'get_websocket_messages', 'todo_write', 'ask_user',
+  'reply_image', // 只把工作区里已有的图片交给 UI 展示，不写文件、不联网、不改远端状态
 ]);
 
 const WRITE = new Set([
