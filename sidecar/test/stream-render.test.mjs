@@ -9,6 +9,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { launchBrowser } from './browser-fixture.mjs';
+
 const { chromium } = await import('@zhizhuodemao/patchright');
 
 /** 复刻 renderMd 的入口，但只关心 DOM 结构与高亮次数。 */
@@ -27,10 +29,8 @@ window.highlightHtml = root => {
 `;
 
 test('流式期间不重建高亮，结束后只高亮一次', { timeout: 120000 }, async t => {
-  const browser = await chromium.launch({
-    headless: true,
-    ...(process.env.WDH_TEST_EXECUTABLE ? { executablePath: process.env.WDH_TEST_EXECUTABLE } : {}),
-  });
+  const { browser, reason } = await launchBrowser({ chromium });
+  if (!browser) return t.skip(reason);
   t.after(() => browser.close());
   const page = await browser.newPage();
   await page.setContent('<div id="host"></div>');

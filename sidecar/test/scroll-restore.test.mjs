@@ -7,6 +7,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { shouldStick, settleInto, jumpTo } from '../../ui/src/scroll-stick.js';
 
+import { launchBrowser } from './browser-fixture.mjs';
+
 const { chromium } = await import('@zhizhuodemao/patchright');
 
 /** 复刻 key 变化导致的整容器重建，返回新的 .msgs。 */
@@ -41,10 +43,8 @@ const APPEND_SRC = `(count) => {
 const atBottomOf = el => el.scrollHeight - el.scrollTop - el.clientHeight < 2;
 
 test('重新打开会话时停在最后一条', { timeout: 120000 }, async t => {
-  const browser = await chromium.launch({
-    headless: true,
-    ...(process.env.WDH_TEST_EXECUTABLE ? { executablePath: process.env.WDH_TEST_EXECUTABLE } : {}),
-  });
+  const { browser, reason } = await launchBrowser({ chromium });
+  if (!browser) return t.skip(reason);
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
   await page.setContent('<div id="host"></div>');
@@ -72,10 +72,8 @@ test('重新打开会话时停在最后一条', { timeout: 120000 }, async t => 
 });
 
 test('切换会话后也贴底，即使用户在上一个会话里翻到了顶部', async t => {
-  const browser = await chromium.launch({
-    headless: true,
-    ...(process.env.WDH_TEST_EXECUTABLE ? { executablePath: process.env.WDH_TEST_EXECUTABLE } : {}),
-  });
+  const { browser, reason } = await launchBrowser({ chromium });
+  if (!browser) return t.skip(reason);
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
   await page.setContent('<div id="host"></div>');
@@ -97,10 +95,8 @@ test('切换会话后也贴底，即使用户在上一个会话里翻到了顶�
 });
 
 test('异步历史分批到达后仍然贴底', { timeout: 120000 }, async t => {
-  const browser = await chromium.launch({
-    headless: true,
-    ...(process.env.WDH_TEST_EXECUTABLE ? { executablePath: process.env.WDH_TEST_EXECUTABLE } : {}),
-  });
+  const { browser, reason } = await launchBrowser({ chromium });
+  if (!browser) return t.skip(reason);
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
   await page.setContent('<div id="host"></div>');
@@ -184,10 +180,8 @@ test('settleInto 在会话已切换时停止', () => {
 test('jumpTo 在 scroll-behavior: smooth 下瞬时落位', { timeout: 120000 }, async t => {
   // 回归：.msgs 带 smooth，直接写 scrollTop 会被当作平滑滚动请求，
   // 用户看到整段对话从顶部一路滚到底部（内容越长动画越久）。
-  const browser = await chromium.launch({
-    headless: true,
-    ...(process.env.WDH_TEST_EXECUTABLE ? { executablePath: process.env.WDH_TEST_EXECUTABLE } : {}),
-  });
+  const { browser, reason } = await launchBrowser({ chromium });
+  if (!browser) return t.skip(reason);
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
   await page.setContent('<div id="host"></div>');
