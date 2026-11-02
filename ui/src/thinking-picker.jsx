@@ -8,13 +8,16 @@
 //   · 没有声明推理等级的模型不渲染强度那一块（DSH 里 reasoning === undefined 时该行整个不出现），
 //     而不是留一个拖了没反应的滑杆。
 //
-// 视觉照产品给的设计图：顶部闪电 + 复位，中间大号档位名，其下模型行（带箭头），
-// 再往下是离散分段滑杆与档位刻度，底部如实写出这一档会放进请求体的参数。
+// 视觉照产品给的设计图：大号档位名（右侧复位），其下模型行（带箭头），
+// 再往下是分段进度条与档位刻度，底部如实写出这一档会放进请求体的参数。
+// 设计图顶部的闪电图标已按要求去掉；触发器上也不留。
 //
-// 滑杆自己实现，不引 @radix-ui/react-slider：它只是 Radix Themes 的传递依赖，
-// 直接 import 会在依赖提升变化时突然找不到，而这个控件的语义（离散档位）也不需要完整 slider。
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { Flex, Popover, Text } from '@radix-ui/themes';
+// 档位是「分段进度条」而不是滑杆：条被切成与档位一一对应的等宽小块，点哪块就跳到哪档，
+// 没有可拖的把手，也就不会有「拖到两档之间」这种不存在的状态。
+// 自己实现而不引 @radix-ui/react-slider：它只是 Radix Themes 的传递依赖，
+// 直接 import 会在依赖提升变化时突然找不到，而这里要的恰恰不是 slider 语义。
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Popover, Text } from '@radix-ui/themes';
 import { Icon } from './kit.jsx';
 import { levelLabel, payloadLabel, normalizeThinkingLevels } from '../../sidecar/thinking.mjs';
 
@@ -64,7 +67,6 @@ export function ModelSeat({
   return <Popover.Root open={open} onOpenChange={setOpen}>
     <Popover.Trigger>
       <button type="button" className="seat-trigger" aria-label={aria} title={aria} disabled={disabled}>
-        <Icon n="bolt" size={14} className="seat-bolt" />
         <span className="seat-model">{modelName}</span>
         {hasEffort && current >= 0 && <span className="seat-level">{shown}</span>}
         <Icon n="chevdown" size={12} className="seat-chevron" />
@@ -93,11 +95,10 @@ export function ModelSeat({
             </div>
           </div>
         : <div className="seat-pane">
-            <Flex align="center" justify="between" gap="2">
-              <span className="thinking-bolt" aria-hidden="true"><Icon n="bolt" size={15} /></span>
+            {hasEffort && <div className="seat-head">
+              <Text as="div" className="thinking-level" aria-live="polite">{shown}</Text>
               {isReset && <button type="button" className="thinking-reset" onClick={() => onPickThinking(defaultLevel)} title="恢复模型默认强度" aria-label="恢复模型默认强度"><Icon n="reload" size={13} /></button>}
-            </Flex>
-            {hasEffort && <Text as="div" className="thinking-level" aria-live="polite">{shown}</Text>}
+            </div>}
             <button type="button" className="seat-modelrow" onClick={() => setPane('model')} aria-label={'选择模型，当前 ' + modelName}>
               <span className="seat-modelrow-name">{modelName}</span>
               <Icon n="chevright" size={12} className="seat-chevron" />
@@ -113,8 +114,9 @@ export function ModelSeat({
 }
 
 /**
- * 分段滑杆本身：只在「声明里有的档位」之间移动。
- * value 为空表示跟随默认（没有选中点），此时左右箭头都从第一档开始。
+ * 档位条本身：一张「N 段进度条」，每一段就是一个档位，点哪段跳哪档。
+ * 没有把手、没有拖动，因此不存在「停在两档之间」的状态。
+ * value 为空表示跟随默认（一段都不点亮），此时方向键从第一档开始。
  */
 export function LevelSlider({ levels, value, onChange, label = '默认强度', describedBy }) {
   const list = normalizeThinkingLevels(levels);
@@ -139,21 +141,13 @@ export function LevelSlider({ levels, value, onChange, label = '默认强度', d
     pending.current = target;
     onChange(target);
   };
-  return <>
-    <div className="thinking-slider" role="slider" tabIndex={0} aria-label={label} aria-describedby={describedBy}
-      aria-valuemin={1} aria-valuemax={list.length} aria-valuenow={current >= 0 ? current + 1 : undefined}
-      aria-valuetext={current >= 0 ? levelLabel(list[current]) : '未选择'} onKeyDown={keydown}>
-      <div className="thinking-track" aria-hidden="true">
-        <span className="thinking-fill" style={{ width: current >= 0 ? ((current / Math.max(1, list.length - 1)) * 100) + '%' : '0%' }} />
-      </div>
-      <div className="thinking-stops">
-        {list.map((id, index) => <button type="button" key={id} className={'thinking-stop' + (index === current ? ' on' : '') + (current >= 0 && index < current ? ' passed' : '')}
-          style={{ left: ((index / Math.max(1, list.length - 1)) * 100) + '%' }}
-          onClick={() => pick(index)} title={levelLabel(id)} aria-label={'思考强度 ' + levelLabel(id)} aria-pressed={index === current}>
-          <span className="thinking-dot" />
-        </button>)}
-      </div>
-    </div>
-    <div className="thinking-ticks" aria-hidden="true">{list.map((id, index) => <span key={id} className={'thinking-tick' + (index === current ? ' on' : '')}>{levelLabel(id)}</span>)}</div>
-  </>;
+  return <div className="thinking-steps" role="radiogroup" tabIndex={0} aria-label={label} aria-describedby={describedBy} onKeyDown={keydown}>
+    {list.map((id, index) => <button type="button" role="radio" key={id} tabIndex={-1}
+      className={'thinking-step' + (index === current ? ' on' : '') + (current >= 0 && index < current ? ' done' : '')}
+      aria-checked={index === current} aria-label={'思考强度 ' + levelLabel(id)} title={levelLabel(id)}
+      onClick={() => pick(index)}>
+      <span className="thinking-step-bar" aria-hidden="true" />
+      <span className="thinking-step-name" aria-hidden="true">{levelLabel(id)}</span>
+    </button>)}
+  </div>;
 }
