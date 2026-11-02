@@ -295,7 +295,6 @@ kbd { font-family: var(--default-font-family); font-size: 10px; font-weight: 400
 .thinking-step.on .thinking-step-name { color: var(--ink); font-weight: 500; }
 .thinking-step:focus-visible { outline: none; }
 .thinking-step:focus-visible .thinking-step-bar { outline: 2px solid var(--accent-9); outline-offset: 2px; }
-.thinking-payload { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); font-family: var(--code-font-family); font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; }
 
 .composer-mode { min-width: 0; flex: 0 0 auto; }
 

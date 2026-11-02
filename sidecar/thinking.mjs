@@ -27,9 +27,9 @@ export const THINKING_LEVELS = [
 ];
 
 export const THINKING_TRANSPORTS = [
-  { id: 'effort', label: 'reasoning_effort', desc: 'OpenAI / GPT-5 系：发送强度名' },
-  { id: 'budget', label: 'thinking.budget_tokens', desc: 'Claude 原生：发送思考 token 预算' },
-  { id: 'switch', label: 'thinking.type', desc: 'DeepSeek / GLM 等：只能开关思考' },
+  { id: 'effort', label: '强度', desc: '按档位名发送思考强度（OpenAI / GPT-5 系）' },
+  { id: 'budget', label: '预算', desc: '按档位发送思考 token 预算（Claude 原生）' },
+  { id: 'switch', label: '开关', desc: '只能开启或关闭思考，没有中间档（DeepSeek / GLM 等）' },
   { id: 'none', label: '不发送', desc: '端点自行决定；档位只用于界面提示' },
 ];
 
@@ -58,7 +58,7 @@ export const levelsLabel = levels => normalizeThinkingLevels(levels).map(levelLa
  * 归一一个模型的思考声明。
  * `levels` 是用户声明的「该模型支持哪些档位」——这是本功能的核心，必须可读可编辑；
  * `default` 必须落在 levels 内；`transport` 决定请求怎么发。
- * 声明为空时保留 transport，方便用户先选发送方式再选档位。
+ * 声明为空时保留 transport，方便先写档位、发送方式留待推断。
  *
  * 手写 `{ transport, level }` 也接受：等价于「只支持这一档，默认就是它」。
  * 手工编辑 settings.json 时这是最自然的写法，不该被当成空声明再被推断覆盖。
@@ -91,6 +91,35 @@ export function inferThinking(modelId) {
 export function modelThinking(declared, modelId) {
   const value = normalizeThinking(declared);
   return value.levels.length ? value : inferThinking(modelId);
+}
+
+/**
+ * 发送方式由端点决定，不问用户——这是本控件最容易做错的地方。
+ *
+ * 早期版本让用户在设置页挑「reasoning_effort / thinking.budget_tokens / thinking.type」，
+ * 但那是适配器内部的字段名，不是用户能判断的东西：同一个模型换一个网关就可能要换写法，
+ * 而用户看到的只是「这个模型有几档思考强度」。DSH 也不问：它由协议（api）和
+ * compat.thinkingFormat 决定，表单上只有「推理等级」本身。
+ *
+ * 规则：Claude 原生 → 预算；其余按模型名推断，认不出来就按强度发（这是 OpenAI 兼容端点的通行写法）。
+ * 认错也不会炸：providers/openai.mjs 收到 400 时会去掉该参数重试一次。
+ */
+export function deriveTransport(modelId, providerType) {
+  if (providerType === 'anthropic') return 'budget';
+  const inferred = inferThinking(modelId).transport;
+  return inferred === 'none' ? 'effort' : inferred;
+}
+
+/**
+ * 一次声明实际用哪种发送方式：显式写了「不发送」就尊重它，其余一律按端点推断。
+ *
+ * 保留 none 是有意的边界：手工编辑 settings.json 的人可以用 `{transport:'none'}` 表达
+ * 「界面照常给档位，但请求里一个思考参数都别带」。这是用户的明确意愿，不能因为
+ * 「界面不问了」就把它推断掉 —— 那等于把用户的显式配置改成主动发送。
+ */
+export function effectiveTransport(declaration, modelId, providerType) {
+  if (declaration?.transport === 'none') return 'none';
+  return deriveTransport(modelId, providerType);
 }
 
 /**
@@ -135,8 +164,13 @@ export function requestThinking(settings, type) {
   }
   // 渠道里逐模型的声明优先；旧配置只有 openai/anthropic 两段时读镜像。
   const declared = declaredThinking(modelDecl) || declaredThinking(mirror.thinking);
-  if (declared) return effectiveThinking(declared, settings?.activeThinking);
+  if (declared) {
+    // 发送方式按端点推断，但显式写的「不发送」要尊重（手工配置里这是明确意愿）。
+    return effectiveThinking({ ...declared, transport: effectiveTransport(declared, mirror.model || requested, type) }, settings?.activeThinking);
+  }
   // 未声明：只有当用户在界面上明确选了一档时才发送，发送方式按模型名推断。
+  // 这里仍用 inferThinking 而不是 deriveTransport：没声明就说明我们对这个模型一无所知，
+  // 认不出来就该一个参数都不发，而不是赌它是 effort（赌错只会换来一次 400 重试）。
   const chosen = settings?.activeThinking;
   if (!isThinkingLevel(chosen)) return { transport: 'none', level: '' };
   const inferred = inferThinking(mirror.model || requested);
@@ -150,32 +184,49 @@ export const reasoningEffort = level => thinkingLevel(level)?.effort || null;
 export const thinkingBudget = level => thinkingLevel(level)?.budget || null;
 
 /**
- * 界面上如实显示「这一档会往请求里放什么」。
- * 选择器不能只写「更聪明」——用户需要知道自己的选择到底改了什么，以及有没有真的发出去。
+ * 界面上如实显示「这一档会往请求里放什么」——给人读的说法，不是字段字面量。
+ *
+ * 只出现在设置页：用户在那里声明模型能力，需要知道自己写的东西到底会改掉什么。
+ * 浮层/触发器里一律不显示——点开只想选档位的人不该被 JSON 字段名打扰（DSH 也不显示）。
  */
 export function payloadLabel(transport, level) {
   if (!isThinkingLevel(level)) return '不发送思考参数';
   if (transport === 'none') return '不发送思考参数';
   if (transport === 'budget') {
     const budget = thinkingBudget(level);
-    return budget ? `thinking.budget_tokens: ${budget}` : '不发送思考参数';
+    return budget ? `发思考预算 ${budget} tokens` : '不发送思考参数';
   }
-  if (transport === 'switch') return `thinking.type: ${level === 'off' ? 'disabled' : 'enabled'}`;
   const effort = reasoningEffort(level);
-  return effort ? `reasoning_effort: ${effort}` : '不发送思考参数';
+  if (transport === 'switch') {
+    if (level === 'off') return '只发送「关闭思考」';
+    // 开关型端点现在是「开关 + 强度」两个字段一起发，所以这里必须两个都说。
+    return effort ? `发送「开启思考」加强度 ${effort}` : '只发送「开启思考」';
+  }
+  return effort ? `发送强度 ${effort}` : '不发送思考参数';
 }
 
 /**
- * OpenAI 兼容端点的思考参数片段 `{ field, value }`，没有可发的内容时返回 null。
- * 会话标题这类元数据请求永远不花思考预算：开关型端点显式关闭，强度型端点一律不附加强度。
+ * OpenAI 兼容端点的思考参数片段 `{ field, value }[]`，没有可发的内容时返回空数组。
+ * 返回数组而不是单个字段，是因为开关型端点（DeepSeek / GLM）要发两个字段：
+ *   thinking: {type:'enabled'} 负责「开」，reasoning_effort 负责「开多大」。
+ * 只发前者的老实现会把 low / medium / high 压成同一个请求，进度条就是骗人的。
+ * 这与 DSH 的 compat.thinkingFormat: deepseek 完全一致（它也是 effort 之外再加 thinking 块）。
+ *
+ * 会话标题这类元数据请求永远不花思考预算：开关型端点显式关闭，强度型端点一律不附加。
  */
 export function openAIThinking({ transport, level, requestPurpose } = {}) {
-  if (requestPurpose === 'session-title') return transport === 'switch' ? { field: 'thinking', value: { type: 'disabled' } } : null;
-  if (transport === 'none' || !isThinkingLevel(level)) return null;
-  if (transport === 'switch') return { field: 'thinking', value: { type: level === 'off' ? 'disabled' : 'enabled' } };
-  if (transport !== 'effort') return null;
+  if (requestPurpose === 'session-title') return transport === 'switch' ? [{ field: 'thinking', value: { type: 'disabled' } }] : [];
+  if (transport === 'none' || !isThinkingLevel(level)) return [];
   const effort = reasoningEffort(level);
-  return effort ? { field: 'reasoning_effort', value: effort } : null;
+  if (transport === 'switch') {
+    if (level === 'off') return [{ field: 'thinking', value: { type: 'disabled' } }];
+    // 开：先放开关，再放强度（端点认哪个用哪个，不认的会被 400 兜底剥掉重试）。
+    return effort
+      ? [{ field: 'thinking', value: { type: 'enabled' } }, { field: 'reasoning_effort', value: effort }]
+      : [{ field: 'thinking', value: { type: 'enabled' } }];
+  }
+  if (transport !== 'effort') return [];
+  return effort ? [{ field: 'reasoning_effort', value: effort }] : [];
 }
 
 /**

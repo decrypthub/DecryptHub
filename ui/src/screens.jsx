@@ -4,7 +4,7 @@ import { Box, Flex, Text, Badge, Card, TextField, TextArea, SegmentedControl, Sw
 import { useWorkbench } from './bus.jsx';
 import { fmtK, sessionLabel } from './state.js';
 import { TITLE_PREFIX_MAX } from '../../sidecar/session-titles.mjs';
-import { THINKING_LEVELS, THINKING_TRANSPORTS, normalizeThinking, levelsLabel, levelLabel } from '../../sidecar/thinking.mjs';
+import { THINKING_LEVELS, normalizeThinking, levelsLabel, levelLabel, effectiveTransport, payloadLabel } from '../../sidecar/thinking.mjs';
 import { LevelSlider } from './thinking-picker.jsx';
 import { Button, ActionIcon, NavButton, Icon, LogoMark, EmptyState, askConfirm, Dropdown } from './kit.jsx';
 import { native } from './transport.js';
@@ -96,7 +96,8 @@ function AiTab({ s, setS }) {
     if (!mEdit) return;
     const id = String(mEdit.data.id || '').trim();
     if (!id) return;
-    const entry = { id, name: String(mEdit.data.name || '').trim() || id, contextWindow: Number(mEdit.data.contextWindow) || 0, vision: !!mEdit.data.vision, thinking: normalizeThinking(mEdit.data.thinking, edit.data.type === 'anthropic' ? 'budget' : 'effort') };
+    const transport = effectiveTransport(mEdit.data.thinking, id, edit.data.type);
+    const entry = { id, name: String(mEdit.data.name || '').trim() || id, contextWindow: Number(mEdit.data.contextWindow) || 0, vision: !!mEdit.data.vision, thinking: normalizeThinking({ ...mEdit.data.thinking, transport }, transport) };
     const models = [...(edit.data.models || [])];
     if (mEdit.i >= 0) models[mEdit.i] = entry; else models.push(entry);
     patch({ models });
@@ -241,17 +242,22 @@ function AiTab({ s, setS }) {
 }
 
 // ---------- 思考强度 ----------
-// 逐模型声明「支持哪些档位」，并选择发送方式。声明是唯一的判断依据：
-// 没声明就不发送任何思考参数（端点自己决定），所以这里的文案必须说清「发了什么」，不能只写「更聪明」。
+// 逐模型声明「支持哪些档位」。声明是唯一的判断依据：没声明就不发送任何思考参数（端点自己决定）。
+// 发送方式是自动推断的（deriveTransport），不在这页出现——字段名是适配器的实现细节，
+// 让用户去挑 reasoning_effort / thinking.type 只会逼他先读一遍端点文档。DSH 同样只让用户选档位。
 function ThinkingEditor({ data, type, onChange }) {
-  const value = normalizeThinking(data.thinking, type === 'anthropic' ? 'budget' : 'effort');
+  // 发送方式由端点推断，用户只声明档位。
+  const transport = effectiveTransport(data.thinking, data.id, type);
+  const value = normalizeThinking({ ...data.thinking, transport }, transport);
   const toggleLevel = id => {
     const levels = value.levels.includes(id) ? value.levels.filter(x => x !== id) : THINKING_LEVELS.map(l => l.id).filter(x => x === id || value.levels.includes(x));
     // 取消勾选默认档时，默认档必须跟着落到剩下的某一档，否则会存下「默认不在支持范围内」的矛盾配置。
     const next = levels.includes(value.default) ? value.default : (levels[0] || '');
     onChange({ levels, default: next });
   };
-  const transport = THINKING_TRANSPORTS.find(t => t.id === value.transport) || THINKING_TRANSPORTS[0];
+  // 开关型端点（DeepSeek / GLM）只有「开 / 关」两种状态；强度那一半靠额外的 reasoning_effort 表达，
+  // 但并非所有这类端点都认，所以这里说明清楚，而不是让进度条假装它一定是 5 档。
+  const switching = value.transport === 'switch';
   return <Box mt="4">
     <Text as="div" size="1" color="gray" mb="1">支持的思考强度</Text>
     <Flex gap="1" wrap="wrap">
@@ -263,16 +269,20 @@ function ThinkingEditor({ data, type, onChange }) {
     <Text as="div" size="1" color="gray" mt="2" style={{ lineHeight: 1.6 }}>
       {value.levels.length ? '当前声明：' + levelsLabel(value.levels) : '未声明任何档位：请求里不会带思考参数，由端点自行决定是否思考。'}
     </Text>
+    {/* 「会发什么」只在设置页说清楚：用户在这里声明能力，需要知道改动到底影响了请求的哪一部分。
+        浮层里不显示——那里只该回答「选哪一档」。 */}
+    {value.levels.length > 0 && <Text as="div" size="1" color="gray" mt="1" style={{ lineHeight: 1.6 }}>
+      按当前渠道自动发送：选中「{levelLabel(value.default)}」时{payloadLabel(value.transport, value.default)}。
+    </Text>}
     <Text as="div" size="1" color="gray" mt="4" mb="1">默认强度</Text>
     {value.levels.length
       ? <LevelSlider levels={value.levels} value={value.default} onChange={id => onChange({ default: id })} />
       : <Text as="div" size="1" color="gray">先勾选上面支持的档位，再选默认档。</Text>}
-    <Text as="div" size="1" color="gray" mt="4" mb="1">发送方式</Text>
-    <SegmentedControl.Root size="1" value={value.transport} onValueChange={v => onChange({ transport: v })} style={{ width: '100%' }}>
-      {THINKING_TRANSPORTS.map(t => <SegmentedControl.Item key={t.id} value={t.id} style={{ flex: 1 }}>{t.label}</SegmentedControl.Item>)}
-    </SegmentedControl.Root>
-    <Text as="div" size="1" color="gray" mt="1" style={{ lineHeight: 1.6 }}>{transport.desc}</Text>
-    {value.transport === 'budget' && value.levels.some(id => id !== 'off') && <Text as="div" size="1" color="amber" mt="1" style={{ lineHeight: 1.6 }}>
+    {switching && value.levels.some(id => id !== 'off') && <Text as="div" size="1" color="amber" mt="2" style={{ lineHeight: 1.6 }}>
+      该模型按开关控制思考（如 DeepSeek / GLM）：关闭档只发「关闭」，其余档发「开启」并附带对应强度。
+      若该端点不认强度那一半，会自动退回纯开关。
+    </Text>}
+    {value.transport === 'budget' && value.levels.some(id => id !== 'off') && <Text as="div" size="1" color="amber" mt="2" style={{ lineHeight: 1.6 }}>
       Claude 原生端点要求思考预算小于最大输出、且温度只能为 1；保存后这两项会按所选档位自动调整。
     </Text>}
   </Box>;

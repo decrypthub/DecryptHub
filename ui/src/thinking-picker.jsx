@@ -19,7 +19,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Popover, Text } from '@radix-ui/themes';
 import { Icon } from './kit.jsx';
-import { levelLabel, payloadLabel, normalizeThinkingLevels } from '../../sidecar/thinking.mjs';
+import { levelLabel, normalizeThinkingLevels } from '../../sidecar/thinking.mjs';
 
 const indexOf = (levels, value) => levels.indexOf(value);
 
@@ -31,7 +31,7 @@ function modelGroups(providers) {
 }
 
 export function ModelSeat({
-  providers, providerId, model, levels, value, transport, defaultLevel,
+  providers, providerId, model, levels, value, defaultLevel,
   onPickModel, onPickThinking, disabled,
 }) {
   const [open, setOpen] = useState(false);
@@ -46,7 +46,6 @@ export function ModelSeat({
   const active = (groups.find(g => g.id === providerId)?.models || []).find(m => m.id === model);
   const modelName = active?.name || model || '选择模型';
   const isReset = hasEffort && !!defaultLevel && value !== defaultLevel && list.includes(defaultLevel);
-  const payload = hasEffort ? (current >= 0 ? payloadLabel(transport, list[current]) : '不发送思考参数（由端点决定）') : '';
   const searchable = groups.reduce((n, g) => n + g.models.length, 0) > 4;
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -103,10 +102,7 @@ export function ModelSeat({
               <span className="seat-modelrow-name">{modelName}</span>
               <Icon n="chevright" size={12} className="seat-chevron" />
             </button>
-            {hasEffort && <>
-              <LevelSlider levels={list} value={value} onChange={onPickThinking} label={'思考强度：' + shown} />
-              <Text as="div" size="1" color="gray" className="thinking-payload">{payload}</Text>
-            </>}
+            {hasEffort && <LevelSlider levels={list} value={value} onChange={onPickThinking} label={'思考强度：' + shown} />}
             {!hasEffort && <Text as="div" size="1" color="gray" className="seat-note">该模型没有声明思考强度：请求里不会带思考参数，由端点自行决定。</Text>}
           </div>}
     </Popover.Content>

@@ -13,7 +13,7 @@ import http from 'node:http';
 import {
   THINKING_LEVELS, THINKING_TRANSPORTS, ALL_LEVELS, normalizeThinking, normalizeThinkingLevels,
   levelsLabel, levelLabel, inferThinking, modelThinking, declaredThinking, effectiveThinking, requestThinking,
-  reasoningEffort, thinkingBudget, openAIThinking, anthropicThinking, isThinkingLevel,
+  reasoningEffort, thinkingBudget, openAIThinking, anthropicThinking, isThinkingLevel, deriveTransport,
 } from '../thinking.mjs';
 import { resolveProvider } from '../providers/index.mjs';
 
@@ -70,7 +70,7 @@ test('可选档（xhigh / max）只来自模型显式声明，推断不会带出
   assert.equal(reasoningEffort('max'), 'max');
   assert.equal(thinkingBudget('xhigh'), 32000);
   // 显式声明时，用户在界面上选到的「极高」必须真的发出去。
-  assert.deepEqual(openAIThinking({ transport: 'effort', level: 'xhigh' }), { field: 'reasoning_effort', value: 'xhigh' });
+  assert.deepEqual(openAIThinking({ transport: 'effort', level: 'xhigh' }), [{ field: 'reasoning_effort', value: 'xhigh' }]);
 });
 
 test('生效档位：用户选择优先，越界回落到模型默认，再回落到「不发」', () => {
@@ -88,20 +88,40 @@ test('模型显式声明优先于推断；声明为空才推断', () => {
   assert.equal(modelThinking({ levels: [] }, 'gpt-5').transport, 'effort');
 });
 
-test('OpenAI 片段：effort 发强度名、switch 只发开关、none 什么都不发', () => {
-  assert.deepEqual(openAIThinking({ transport: 'effort', level: 'high' }), { field: 'reasoning_effort', value: 'high' });
-  assert.deepEqual(openAIThinking({ transport: 'switch', level: 'high' }), { field: 'thinking', value: { type: 'enabled' } });
-  assert.deepEqual(openAIThinking({ transport: 'switch', level: 'off' }), { field: 'thinking', value: { type: 'disabled' } });
+test('OpenAI 片段：effort 发强度名、switch 发开关加强度、none 什么都不发', () => {
+  assert.deepEqual(openAIThinking({ transport: 'effort', level: 'high' }), [{ field: 'reasoning_effort', value: 'high' }]);
+  // 开关型端点要两个字段：thinking.type 负责「开」，reasoning_effort 负责「开多大」。
+  // 只发前者会把 low / medium / high 压成同一个请求，界面上的进度条就是骗人的。
+  assert.deepEqual(openAIThinking({ transport: 'switch', level: 'high' }), [
+    { field: 'thinking', value: { type: 'enabled' } },
+    { field: 'reasoning_effort', value: 'high' },
+  ]);
+  assert.deepEqual(openAIThinking({ transport: 'switch', level: 'low' }), [
+    { field: 'thinking', value: { type: 'enabled' } },
+    { field: 'reasoning_effort', value: 'low' },
+  ]);
+  assert.deepEqual(openAIThinking({ transport: 'switch', level: 'off' }), [{ field: 'thinking', value: { type: 'disabled' } }]);
   // 关闭档在 effort 方式下不发参数（端点没有 "off" 这个强度名）。
-  assert.equal(openAIThinking({ transport: 'effort', level: 'off' }), null);
-  assert.equal(openAIThinking({ transport: 'none', level: 'high' }), null);
-  assert.equal(openAIThinking({ transport: 'budget', level: 'high' }), null);
-  assert.equal(openAIThinking({ transport: 'effort', level: '' }), null);
+  assert.deepEqual(openAIThinking({ transport: 'effort', level: 'off' }), []);
+  assert.deepEqual(openAIThinking({ transport: 'none', level: 'high' }), []);
+  assert.deepEqual(openAIThinking({ transport: 'budget', level: 'high' }), []);
+  assert.deepEqual(openAIThinking({ transport: 'effort', level: '' }), []);
+});
+
+test('发送方式由端点推断，不问用户', () => {
+  // Claude 原生端点只能按预算发。
+  assert.equal(deriveTransport('any-model', 'anthropic'), 'budget');
+  // OpenAI 兼容：认得出的按名字走，认不出的回落到强度（这是该协议的通行写法，且 400 时会被剥掉重试）。
+  assert.equal(deriveTransport('gpt-5.1', 'openai'), 'effort');
+  assert.equal(deriveTransport('o3-mini', 'openai'), 'effort');
+  assert.equal(deriveTransport('deepseek-v4.1-flash', 'openai'), 'switch');
+  assert.equal(deriveTransport('gpt-4o', 'openai'), 'effort');
+  assert.equal(deriveTransport('', 'openai'), 'effort');
 });
 
 test('会话标题永不花思考预算：开关型显式关闭，其余一律不附加强度', () => {
-  assert.deepEqual(openAIThinking({ transport: 'switch', level: 'high', requestPurpose: 'session-title' }), { field: 'thinking', value: { type: 'disabled' } });
-  assert.equal(openAIThinking({ transport: 'effort', level: 'high', requestPurpose: 'session-title' }), null);
+  assert.deepEqual(openAIThinking({ transport: 'switch', level: 'high', requestPurpose: 'session-title' }), [{ field: 'thinking', value: { type: 'disabled' } }]);
+  assert.deepEqual(openAIThinking({ transport: 'effort', level: 'high', requestPurpose: 'session-title' }), []);
   assert.equal(anthropicThinking({ transport: 'budget', level: 'high', requestPurpose: 'session-title' }), null);
 });
 
@@ -134,7 +154,7 @@ test('未声明也不选档位时，请求里绝不带思考参数（这是保�
   // DeepSeek V4 默认就思考：不能因为「推断它支持」就替用户改线上请求体。
   const settings = { provider: 'openai', activeProviderId: 'p', activeModel: 'deepseek-v4.1-flash', openai: { model: 'deepseek-v4.1-flash' }, providers: [{ id: 'p', type: 'openai', models: ['deepseek-v4.1-flash'] }] };
   assert.deepEqual(requestThinking(settings, 'openai'), { transport: 'none', level: '' });
-  assert.equal(openAIThinking(requestThinking(settings, 'openai')), null);
+  assert.deepEqual(openAIThinking(requestThinking(settings, 'openai')), []);
   // Claude 同理：没声明就不发 thinking 块，温度也保持用户设置。
   const claude = { provider: 'anthropic', anthropic: { model: 'claude-sonnet-4-5' }, providers: [{ id: 'a', type: 'anthropic', models: ['claude-sonnet-4-5'] }], activeProviderId: 'a', activeModel: 'claude-sonnet-4-5' };
   assert.equal(anthropicThinking(requestThinking(claude, 'anthropic')), null);
@@ -179,6 +199,26 @@ test('openai 端点：声明的档位真的发出去，未声明时一个参数�
   } finally { await srv.close(); }
 });
 
+test('openai 端点：开关型端点的不同档位必须发出不同请求（否则进度条是骗人的）', async () => {
+  const bodies = [];
+  const srv = await serve((_req, body, res) => { bodies.push(body); sse(res, [{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]); });
+  try {
+    const base = { provider: 'openai', openai: { baseUrl: srv.url + '/v1', apiKey: 'k', model: 'deepseek-v4.1-flash' } };
+    for (const level of ['off', 'low', 'high']) {
+      await resolveProvider({ ...base, openai: { ...base.openai, thinking: { transport: 'switch', level } } }).complete([{ role: 'user', content: 'hi' }], [], {});
+    }
+    // 关：只发关闭。
+    assert.deepEqual(bodies[0].thinking, { type: 'disabled' });
+    assert.equal(bodies[0].reasoning_effort, undefined);
+    // 低 / 高：都开，但强度不同 —— 这是老实现丢失的那一半。
+    assert.deepEqual(bodies[1].thinking, { type: 'enabled' });
+    assert.equal(bodies[1].reasoning_effort, 'low');
+    assert.deepEqual(bodies[2].thinking, { type: 'enabled' });
+    assert.equal(bodies[2].reasoning_effort, 'high');
+    assert.notEqual(bodies[1].reasoning_effort, bodies[2].reasoning_effort, '关闭与高档之外，不同档位不能发成同一个请求');
+  } finally { await srv.close(); }
+});
+
 test('openai 端点：不认思考参数时去掉参数重试，而不是整请求失败', async () => {
   const bodies = [];
   let n = 0;
@@ -193,6 +233,27 @@ test('openai 端点：不认思考参数时去掉参数重试，而不是整请�
     assert.equal(r.content, 'ok');
     assert.equal(bodies[0].reasoning_effort, 'high');
     assert.equal(bodies.at(-1).reasoning_effort, undefined, '重试请求必须去掉不被支持的思考参数');
+  } finally { await srv.close(); }
+});
+
+test('openai 端点：开关型端点只认开关时，剥掉强度但保留开关（不能一起扔）', async () => {
+  const bodies = [];
+  let n = 0;
+  const srv = await serve((_req, body, res) => {
+    bodies.push(body);
+    // 真实场景：DeepSeek 兼容网关认 thinking.type，但不认 reasoning_effort。
+    if (n++ === 0) { res.writeHead(400); res.end('{"error":{"message":"Unsupported parameter: reasoning_effort"}}'); return; }
+    sse(res, [{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]);
+  });
+  try {
+    const settings = { provider: 'openai', openai: { baseUrl: srv.url + '/v1', apiKey: 'k', model: 'deepseek-v4.1-flash', thinking: { transport: 'switch', level: 'high' } } };
+    const r = await resolveProvider(settings).complete([{ role: 'user', content: 'hi' }], [], {});
+    assert.equal(r.content, 'ok');
+    assert.equal(bodies[0].reasoning_effort, 'high');
+    // 重试时只丢掉强度，开关必须还在 —— 否则等于把「开启思考」也一起取消了。
+    const last = bodies.at(-1);
+    assert.equal(last.reasoning_effort, undefined);
+    assert.deepEqual(last.thinking, { type: 'enabled' }, '剥掉强度后必须保留开启开关');
   } finally { await srv.close(); }
 });
 
