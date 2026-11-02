@@ -111,21 +111,28 @@ try {
   await trigger.click();
   const pop = page.locator('.seat-pop');
   await pop.waitFor({ timeout: 8000 });
-  const stops = pop.locator('.thinking-stop');
-  ok(await stops.count() === 4, '滑块应只有声明的 4 个档位（实际 ' + await stops.count() + '）');
-  const ticks = await pop.locator('.thinking-tick').allInnerTexts();
-  ok(JSON.stringify(ticks) === JSON.stringify(['关闭', '低', '中', '高']), '刻度应是声明的档位集合（实际 ' + JSON.stringify(ticks) + '）');
-  ok(!ticks.includes('最少'), '不能出现未声明的「最少」档');
+  const steps = pop.locator('.thinking-step');
+  ok(await steps.count() === 4, '档位条应有声明的 4 段（实际 ' + await steps.count() + '）');
+  const names = await pop.locator('.thinking-step-name').allInnerTexts();
+  ok(JSON.stringify(names) === JSON.stringify(['关闭', '低', '中', '高']), '分段名应是声明的档位集合（实际 ' + JSON.stringify(names) + '）');
+  ok(!names.includes('最少'), '不能出现未声明的「最少」档');
+  // 分段进度条：没有可拖的把手，段与段等宽（「拖动」这个交互本身不存在）
+  ok(await pop.locator('.thinking-stop, .thinking-dot, .thinking-fill, .thinking-slider').count() === 0, '不应再有滑杆/把手节点');
+  const widths = await pop.locator('.thinking-step').evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().width)));
+  ok(new Set(widths).size === 1, '各段应等宽（实际 ' + JSON.stringify(widths) + '）');
   // 设计图要求：大号档位名 + 其下带箭头的模型行，两者都在同一个浮层里
   ok((await pop.locator('.thinking-level').innerText()).trim() === '中', '浮层应大字显示当前档位');
   ok(/gpt-5\.1/.test(await pop.locator('.seat-modelrow').innerText()), '档位下方应是可点的模型行');
+  // 顶部闪电已按要求移除（触发器与浮层都不留）
+  ok(await pop.locator('.thinking-bolt').count() === 0, '浮层不应再有闪电图标');
+  ok(await page.locator('.seat-trigger .seat-bolt').count() === 0, '触发器不应再有闪电图标');
   // 底部必须如实说出会发什么，而不是只写「更聪明」
   const payload = await pop.locator('.thinking-payload').innerText();
   ok(/reasoning_effort: medium/.test(payload), '应显示实际发送的参数（实际 ' + JSON.stringify(payload) + '）');
   await page.screenshot({ path: path.join(ROOT, '.thinking-ui-pop.png') });
 
   // 3) 点最高档 → 写入 settings.json，触发器跟着变
-  await stops.nth(3).click();
+  await steps.nth(3).click();
   await page.waitForTimeout(400);
   ok(readSettings().activeThinking === 'high', '选高后应写入 activeThinking=high（实际 ' + JSON.stringify(readSettings().activeThinking) + '）');
   await trigger.waitFor();
@@ -134,18 +141,21 @@ try {
   ok(/reasoning_effort: high/.test(payloadHigh), '高对应 reasoning_effort: high（实际 ' + JSON.stringify(payloadHigh) + '）');
   await page.keyboard.press('Escape');
 
-  // 4) 键盘可达：聚焦滑杆后按 Home/ArrowRight 也能改档
+  // 4) 键盘可达：聚焦档位条后按 Home/ArrowRight 也能改档
   //    注意必须重新打开浮层——上一步按 Escape 已经把它卸载，对已卸载节点 focus() 不会生效。
   await trigger.click();
   await page.locator('.seat-pop').waitFor({ timeout: 8000 });
-  const slider = page.locator('.seat-pop .thinking-slider');
-  await slider.focus();
+  const bar = page.locator('.seat-pop .thinking-steps');
+  await bar.focus();
   await page.keyboard.press('Home');
   await page.waitForTimeout(300);
   ok(readSettings().activeThinking === 'off', 'Home 应选中第一档关闭（实际 ' + JSON.stringify(readSettings().activeThinking) + '）');
   await page.keyboard.press('ArrowRight');
   await page.waitForTimeout(400);
   ok(readSettings().activeThinking === 'low', 'ArrowRight 应前进到下一档（实际 ' + JSON.stringify(readSettings().activeThinking) + '）');
+  await page.keyboard.press('End');
+  await page.waitForTimeout(400);
+  ok(readSettings().activeThinking === 'high', 'End 应跳到最后一档（实际 ' + JSON.stringify(readSettings().activeThinking) + '）');
   await page.keyboard.press('Escape');
 
   // 4b) 模型行是真实入口：从座位里钻取到模型目录并切换模型（不是只显示个名字）
@@ -160,7 +170,7 @@ try {
   // 5) 切到没有声明的模型：强度那部分必须消失，不能留一个拖了没反应的滑杆
   //    座位本身要留着——它仍然是选模型的唯一入口。
   ok(await page.locator('.seat-trigger').count() === 1, '未声明档位的模型仍应有模型座位');
-  ok(await page.locator('.thinking-slider').count() === 0, '未声明档位时不应渲染滑杆');
+  ok(await page.locator('.thinking-steps').count() === 0, '未声明档位时不应渲染档位条');
   await page.locator('.seat-trigger').click();
   await page.locator('.seat-pop').waitFor({ timeout: 8000 });
   ok(await page.locator('.seat-pop .thinking-level').count() === 0, '未声明档位时浮层不应有大号档位名');

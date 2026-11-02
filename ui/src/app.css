@@ -240,23 +240,23 @@ kbd { font-family: var(--default-font-family); font-size: 10px; font-weight: 400
 .composer-seat > div { min-width: 0 !important; }
 
 /* 触发器：闪电 + 模型名 + 当前档位 + 箭头，读作「哪个模型 · 多用力」。 */
-.seat-trigger { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; height: 32px; padding: 0 8px 0 10px; border: 1px solid transparent; border-radius: 9px; background: var(--hover); color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer; white-space: nowrap; }
+.seat-trigger { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; height: 32px; padding: 0 8px; border: 1px solid transparent; border-radius: 9px; background: var(--hover); color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer; white-space: nowrap; }
 .seat-trigger:hover { background: var(--line); color: var(--ink); }
 .seat-trigger:focus-visible { outline: 2px solid var(--accent-9); outline-offset: 2px; }
 .seat-trigger:disabled { cursor: default; opacity: .6; }
 .seat-trigger svg { flex: 0 0 auto; }
-.seat-bolt { color: var(--brand-text); }
 .seat-model { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* 强度先被饿死：名字比档位重要，和 DSH 的 .triggerEffort 收缩优先级一致 */
 .seat-level { flex-shrink: 1000; min-width: 0; overflow: hidden; color: var(--subtle); text-overflow: ellipsis; }
 .seat-chevron { color: var(--subtle); }
 
-/* 浮层：对齐设计图的信息层次——图标行、大号档位名、模型行（带箭头）、分段滑杆、刻度、实际发出的参数 */
+/* 浮层：对齐设计图的信息层次——大号档位名（右侧复位）、模型行（带箭头）、分段进度条、实际发出的参数 */
 .seat-pop { padding: 14px 16px 12px; }
-.seat-pop .thinking-bolt { display: inline-flex; align-items: center; color: var(--brand-text); }
-.thinking-reset { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--subtle); cursor: pointer; }
+.seat-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 24px; }
+.thinking-reset { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--subtle); cursor: pointer; }
 .thinking-reset:hover { background: var(--hover); color: var(--ink); }
-.thinking-level { margin-top: 6px; font-size: 24px; font-weight: 600; letter-spacing: -0.02em; color: var(--brand-text); line-height: 1.25; }
+.thinking-level { min-width: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.02em; color: var(--brand-text); line-height: 1.25; }
+.thinking-level.muted { font-size: 15px; font-weight: 500; color: var(--muted); }
 
 /* 模型行：设计图里档位名下方那行「模型名 + 箭头」，点它钻取到模型目录 */
 .seat-modelrow { display: flex; align-items: center; gap: 4px; max-width: 100%; margin-top: 2px; padding: 2px 4px 2px 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
@@ -282,22 +282,21 @@ kbd { font-family: var(--default-font-family); font-size: 10px; font-weight: 400
 .seat-check { flex: 0 0 auto; margin-left: auto; color: var(--brand-text); }
 .seat-empty { padding: 8px 6px; }
 
-.thinking-slider { position: relative; height: 26px; margin: 16px 8px 0; cursor: pointer; }
-.thinking-slider:focus-visible { outline: 2px solid var(--accent-9); outline-offset: 4px; border-radius: 6px; }
-.thinking-track { position: absolute; top: 50%; left: 0; right: 0; height: 3px; margin-top: -1.5px; border-radius: 2px; background: var(--line-strong); }
-.thinking-fill { display: block; height: 100%; border-radius: inherit; background: var(--brand-text); transition: width .14s ease; }
-.thinking-stops { position: absolute; inset: 0; }
-/* 每个档位是一个真正的按钮：鼠标点，键盘左右箭头走，命中区比圆点大 */
-.thinking-stop { position: absolute; top: 50%; transform: translate(-50%, -50%); display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
-.thinking-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--line-strong); transition: width .14s ease, height .14s ease, background .14s ease; }
-.thinking-stop.passed .thinking-dot { background: var(--brand-text); }
-.thinking-stop.on .thinking-dot { width: 14px; height: 14px; background: var(--color-panel-solid); border: 3px solid var(--brand-text); box-shadow: 0 1px 4px rgba(0,0,0,.18); }
-.thinking-stop:focus-visible { outline: 2px solid var(--accent-9); outline-offset: 1px; }
-
-.thinking-ticks { display: flex; justify-content: space-between; margin: 4px 0 0; }
-.thinking-tick { flex: 1 1 0; text-align: center; font-size: 10px; color: var(--subtle); }
-.thinking-tick:first-child { text-align: left; } .thinking-tick:last-child { text-align: right; }
-.thinking-tick.on { color: var(--ink); }
+/* 档位条：一张 N 段进度条，段与段之间留缝，每一段就是一个档位。
+   没有把手、没有「拖到中间」的可能；已过的段用淡色表示进度，当前段实色。 */
+.thinking-steps { display: flex; gap: 4px; margin: 14px 0 0; border-radius: 8px; }
+.thinking-steps:focus-visible { outline: 2px solid var(--accent-9); outline-offset: 4px; }
+.thinking-step { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 7px; padding: 2px 0; border: 0; background: transparent; color: var(--subtle); font: inherit; cursor: pointer; }
+.thinking-step-bar { display: block; height: 6px; border-radius: 3px; background: var(--line-strong); transition: background .14s ease, opacity .14s ease; }
+.thinking-step-name { font-size: 10px; line-height: 1.2; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.thinking-step:not(.on):not(.done):hover .thinking-step-bar { background: var(--muted); }
+/* 已过的段是「进度」，当前段是「档位」：前者淡、后者实，一眼能看出停在第几档 */
+.thinking-step.done .thinking-step-bar { background: var(--brand-text); opacity: .4; }
+.thinking-step.done .thinking-step-name { color: var(--muted); }
+.thinking-step.on .thinking-step-bar { background: var(--brand-text); }
+.thinking-step.on .thinking-step-name { color: var(--ink); font-weight: 500; }
+.thinking-step:focus-visible { outline: none; }
+.thinking-step:focus-visible .thinking-step-bar { outline: 2px solid var(--accent-9); outline-offset: 2px; }
 .thinking-payload { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); font-family: var(--code-font-family); font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; }
 
 .composer-mode { min-width: 0; flex: 0 0 auto; }
