@@ -16,7 +16,7 @@ import { checkAccountMenu } from './check-account-ui.mjs';
 const ROOT = process.cwd();
 const DIST = path.join(ROOT, 'ui-dist');
 const SHOTS = path.join(ROOT, 'artifacts', 'ui');
-const PORT = 5311, WS_PORT = 5312;
+const PORT = Number(process.env.JSRA_UI_HTTP_PORT || 5311), WS_PORT = Number(process.env.JSRA_UI_WS_PORT || 5312);
 const CHROME = process.env.CHROME_PATH || [
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
@@ -230,6 +230,8 @@ fs.mkdirSync(SHOTS, { recursive: true });
 async function checkWindowChrome(scheme) {
   for (const nativeTitlebar of [false, true]) {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: scheme });
+    // CI runner 上冷启动和首次渲染明显更慢，默认 30 秒的断言窗口不够。
+    context.setDefaultTimeout(60000);
     const page = await context.newPage();
     page.on('pageerror', error => console.error('Window chrome runtime error: ' + error.message));
     try {
