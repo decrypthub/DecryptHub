@@ -13,12 +13,17 @@
 // 本模块同时被 ui/src 直接 import（见 BASELINE「Vite 会把 node:* 打进浏览器产物」），
 // 因此必须保持零 top-level import、纯函数、不触碰 llm.mjs / providers/ / secrets.mjs。
 
+// 档位与顺序照 DeepSeek Harness 的规范升序（off → minimal → low → medium → high → xhigh → max），
+// 不自造词表：DSH 的 pi-ai 目录把 xhigh / max 作为「能力基础档之上」的可选档，只在模型显式声明时出现。
+// 这里同样只做声明载体——模型没声明 xhigh，界面就不会出现「极高」，也就不会把端点不认的值发出去。
 export const THINKING_LEVELS = [
   { id: 'off', label: '关闭', effort: null, budget: null },
   { id: 'minimal', label: '最少', effort: 'minimal', budget: 1024 },
   { id: 'low', label: '低', effort: 'low', budget: 2048 },
   { id: 'medium', label: '中', effort: 'medium', budget: 8192 },
   { id: 'high', label: '高', effort: 'high', budget: 16000 },
+  { id: 'xhigh', label: '极高', effort: 'xhigh', budget: 32000 },
+  { id: 'max', label: '最高', effort: 'max', budget: 64000 },
 ];
 
 export const THINKING_TRANSPORTS = [
@@ -30,7 +35,10 @@ export const THINKING_TRANSPORTS = [
 
 export const ALL_LEVELS = THINKING_LEVELS.map(l => l.id);
 const TRANSPORTS = THINKING_TRANSPORTS.map(t => t.id);
-const FULL = ALL_LEVELS;
+// 「基础档」= DSH 里每个推理模型都有的那一段。xhigh / max 属于可选档，只有模型显式声明才出现，
+// 所以按模型名推断时绝不能带它们：猜错就会把端点不认的 reasoning_effort 发出去。
+const BASE_LEVELS = ['off', 'minimal', 'low', 'medium', 'high'];
+const FULL = BASE_LEVELS;
 const DEFAULT_LEVEL = 'medium';
 
 export const isThinkingLevel = value => ALL_LEVELS.includes(value);

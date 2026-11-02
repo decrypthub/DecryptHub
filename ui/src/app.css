@@ -214,9 +214,7 @@ kbd { font-family: var(--default-font-family); font-size: 10px; font-weight: 400
 @container (max-width: 560px) {
   .composer-mode .perm-label { display: none; }
   .composer-context { display: none; }
-  .composer-model { max-width: 132px; }
-  /* 思考强度是次要控件：极窄时先隐藏它，保住模型选择和发送键 */
-  .composer-thinking { display: none; }
+  .composer-seat { max-width: 150px; }
 }
 .composer:focus-within { border-color: transparent; } /* 输入时不额外描边：焦点由光标和输入内容表达 */
 
@@ -233,29 +231,56 @@ kbd { font-family: var(--default-font-family); font-size: 10px; font-weight: 400
 .composer .composer-input textarea { min-height: 44px !important; max-height: 180px; padding: 4px 8px !important; line-height: 20px !important; background: transparent; box-shadow: none; outline: none; }
 .composer-bar { display: flex; align-items: center; flex-wrap: nowrap; gap: 6px; margin-top: 10px; }
 .composer-bar > * { flex-shrink: 0; }
-.composer-bar .composer-model, .composer-bar .composer-context { flex-shrink: 1; }
+.composer-bar .composer-seat, .composer-bar .composer-context { flex-shrink: 1; }
 .composer-mode { white-space: nowrap; }
 
-.composer-model { min-width: 0; max-width: 200px; }
-.composer-model > div { min-width: 0 !important; }
-/* 思考强度：与模型选择器同宽高，避免在窄窗口挤掉发送键；不声明档位的模型不会渲染它 */
-.composer-thinking { min-width: 0; flex: 0 0 auto; }
-.composer-thinking > div { min-width: 0 !important; }
+/* 模型座位：模型与思考强度合成一个控件（照 DSH 的 ModelSelect —— 一个座位两个面）。
+   宽度必须可收缩，否则窄窗口里会把发送键挤出去。 */
+.composer-seat { min-width: 0; max-width: 240px; }
+.composer-seat > div { min-width: 0 !important; }
 
-/* 触发器：闪电 + 当前档位，和模型选择器同高，读起来像同一排里的一个档位指示 */
-.thinking-trigger { display: inline-flex; align-items: center; gap: 5px; height: 32px; max-width: 118px; padding: 0 10px; border: 1px solid transparent; border-radius: 9px; background: var(--hover); color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer; white-space: nowrap; }
-.thinking-trigger:hover { background: var(--line); color: var(--ink); }
-.thinking-trigger:focus-visible { outline: 2px solid var(--accent-9); outline-offset: 2px; }
-.thinking-trigger span { overflow: hidden; text-overflow: ellipsis; }
-.thinking-trigger svg { flex: 0 0 auto; color: var(--brand-text); }
+/* 触发器：闪电 + 模型名 + 当前档位 + 箭头，读作「哪个模型 · 多用力」。 */
+.seat-trigger { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; height: 32px; padding: 0 8px 0 10px; border: 1px solid transparent; border-radius: 9px; background: var(--hover); color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer; white-space: nowrap; }
+.seat-trigger:hover { background: var(--line); color: var(--ink); }
+.seat-trigger:focus-visible { outline: 2px solid var(--accent-9); outline-offset: 2px; }
+.seat-trigger:disabled { cursor: default; opacity: .6; }
+.seat-trigger svg { flex: 0 0 auto; }
+.seat-bolt { color: var(--brand-text); }
+.seat-model { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* 强度先被饿死：名字比档位重要，和 DSH 的 .triggerEffort 收缩优先级一致 */
+.seat-level { flex-shrink: 1000; min-width: 0; overflow: hidden; color: var(--subtle); text-overflow: ellipsis; }
+.seat-chevron { color: var(--subtle); }
 
-/* 浮层：对齐参考图的信息层次——图标行、大号档位名、模型名、分段滑杆、档位刻度、实际发出的参数 */
-.thinking-pop { padding: 14px 16px 12px; }
-.thinking-pop .thinking-bolt { display: inline-flex; align-items: center; color: var(--brand-text); }
+/* 浮层：对齐设计图的信息层次——图标行、大号档位名、模型行（带箭头）、分段滑杆、刻度、实际发出的参数 */
+.seat-pop { padding: 14px 16px 12px; }
+.seat-pop .thinking-bolt { display: inline-flex; align-items: center; color: var(--brand-text); }
 .thinking-reset { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--subtle); cursor: pointer; }
 .thinking-reset:hover { background: var(--hover); color: var(--ink); }
 .thinking-level { margin-top: 6px; font-size: 24px; font-weight: 600; letter-spacing: -0.02em; color: var(--brand-text); line-height: 1.25; }
-.thinking-model { margin-top: 2px; }
+
+/* 模型行：设计图里档位名下方那行「模型名 + 箭头」，点它钻取到模型目录 */
+.seat-modelrow { display: flex; align-items: center; gap: 4px; max-width: 100%; margin-top: 2px; padding: 2px 4px 2px 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.seat-modelrow:hover { color: var(--ink); }
+.seat-modelrow:focus-visible { outline: 2px solid var(--accent-9); outline-offset: 2px; }
+.seat-modelrow-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seat-note { margin-top: 10px; }
+
+/* 模型目录面 */
+.seat-pane-head { display: flex; align-items: center; margin-bottom: 6px; }
+.seat-back { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px 2px 2px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.seat-back:hover { background: var(--hover); color: var(--ink); }
+.seat-search { width: 100%; height: 28px; margin-bottom: 6px; padding: 0 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--inset); color: var(--ink); font: inherit; font-size: 12px; }
+.seat-search:focus-visible { outline: 2px solid var(--accent-9); outline-offset: 1px; }
+.seat-list { max-height: 260px; overflow-y: auto; }
+.seat-group + .seat-group { margin-top: 6px; }
+.seat-group-name { padding: 4px 6px 2px; color: var(--subtle); font-size: 11px; }
+.seat-item { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.seat-item:hover { background: var(--hover); }
+.seat-item:focus-visible { outline: 2px solid var(--accent-9); outline-offset: -2px; }
+.seat-item.on { color: var(--ink); font-weight: 500; }
+.seat-item-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seat-check { flex: 0 0 auto; margin-left: auto; color: var(--brand-text); }
+.seat-empty { padding: 8px 6px; }
 
 .thinking-slider { position: relative; height: 26px; margin: 16px 8px 0; cursor: pointer; }
 .thinking-slider:focus-visible { outline: 2px solid var(--accent-9); outline-offset: 4px; border-radius: 6px; }
@@ -785,7 +810,7 @@ kbd { font-family: var(--default-font-family); font-size: 10px; font-weight: 400
 @container (max-width: 460px) {
   .composer-context { display: none; }
   .composer-bar { gap: 5px; }
-  .composer-model { max-width: 110px; }
+  .composer-seat { max-width: 120px; }
   .user-message { max-width: 94%; }
   .msgs-in { padding-left: 20px; padding-right: 20px; }
   .tool-count { font-size: 10px; }

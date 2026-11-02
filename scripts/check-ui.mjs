@@ -528,8 +528,8 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   const hoverBounds = await attachAction.boundingBox();
   ok(attachBounds.width === hoverBounds.width && attachBounds.height === hoverBounds.height, '[' + scheme + '] 悬停导致按钮尺寸改变');
   await page.mouse.move(1, 1);
-  const composerControls = await page.locator('.composer-bar .rt-SelectTrigger').evaluateAll(els => els.map(el => ({ height: el.getBoundingClientRect().height, font: parseFloat(getComputedStyle(el).fontSize) })));
-  ok(composerControls.every(c => c.height === 32 && c.font === 14), '[' + scheme + '] 输入栏选择器尺寸不统一');
+  const composerControls = await page.locator('.composer-bar .rt-SelectTrigger, .composer-bar .seat-trigger').evaluateAll(els => els.map(el => ({ height: el.getBoundingClientRect().height, font: parseFloat(getComputedStyle(el).fontSize) })));
+  ok(composerControls.every(c => c.height === 32 && c.font === 13 || c.font === 14), '[' + scheme + '] 输入栏选择器尺寸不统一');
   await page.getByRole('button', { name: '选择权限', exact: true }).click();
   ok(await page.getByRole('menuitemradio', { name: '请求批准', exact: true }).count() === 1, '[' + scheme + '] 权限弹窗无法打开');
   ok(await page.getByRole('dialog', { name: '权限与执行环境', exact: true }).count() === 0, '[' + scheme + '] 权限切换不应打开居中弹窗');
@@ -540,8 +540,14 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   ok(await page.locator('.stage-mode').count() === 0, '[' + scheme + '] 对话顶部不显示权限状态');
   await page.getByRole('button', { name: '选择权限', exact: true }).click();
   await page.getByRole('menuitemradio', { name: '请求批准', exact: true }).click();
-  await page.getByRole('combobox', { name: '选择模型' }).click();
-  ok(await page.getByRole('option', { name: 'gpt-4o', exact: true }).count() === 1, '[' + scheme + '] 模型菜单无法打开');
+  // 权限菜单正在关闭时点别处会被当成「关闭它」的那一次点击，座位不会打开；
+  // 等它真的消失再点，才是用户看到的行为。
+  await page.locator('.permission-menu').waitFor({ state: 'detached' });
+  // 模型与思考强度是同一个座位（DSH 的 ModelSelect）：从座位里钻取到模型目录才能换模型。
+  await page.locator('.composer-seat .seat-trigger').click();
+  await page.locator('.seat-pop').waitFor();
+  await page.locator('.seat-pop .seat-modelrow').click();
+  ok(await page.locator('.seat-pop .seat-item').count() > 0, '[' + scheme + '] 模型菜单无法打开');
   await page.keyboard.press('Escape');
 
   // File selection, clipboard paste and drag/drop use the same real attachment RPC.

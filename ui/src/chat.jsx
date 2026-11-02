@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Flex, Text, Badge, Callout, Spinner, TextArea, Separator, Popover } from '@radix-ui/themes';
 import { useWorkbench } from './bus.jsx';
-import { Button, ActionIcon, Icon, Markdown, Dropdown } from './kit.jsx';
+import { Button, ActionIcon, Icon, Markdown } from './kit.jsx';
 import { fmtK, sessionLabel } from './state.js';
 import { native } from './transport.js';
 import { PermissionPicker, PendingActions } from './workspace.jsx';
@@ -21,7 +21,7 @@ import { Reasoning } from './reasoning.jsx';
 import { processPresentation } from './process-presentation.js';
 import { reasoningOpen, toggleReasoning } from './scroll-stick.js';
 import { QueuedMessages } from './queue-strip.jsx';
-import { ThinkingPicker } from './thinking-picker.jsx';
+import { ModelSeat } from './thinking-picker.jsx';
 import { modelThinking, effectiveThinking } from '../../sidecar/thinking.mjs';
 
 const CTX_PARTS = [['system', '系统提示'], ['tools', '工具定义'], ['summary', '压缩摘要'], ['history', '对话'], ['attachments', '附件'], ['toolResults', '工具结果']];
@@ -126,14 +126,11 @@ export function ChatStage({ railOpen, onExpandRail }) {
           <div className="composer-mode"><PermissionPicker /></div>
           <Box flexGrow="1" />
           <div className="composer-context"><CtxMeter /></div>
-            {declaredThinking.levels.length > 0 && <div className="composer-thinking"><ThinkingPicker
-              levels={declaredThinking.levels} value={thinking.level} transport={declaredThinking.transport}
-              defaultLevel={declaredThinking.default} modelLabel={modelInfo?.name || model}
-              onChange={level => w.pickThinking(level)} /></div>}
-          <div className="composer-model"><Dropdown width={110} label="选择模型" value={(providers.find(p => p.id === settings.activeProviderId)?.id || '') + '|' + model}
-            placeholder={providers.length ? '选择模型' : '选择渠道'}
-            options={providers.map(p => ({ group: p.name, items: (p.models || []).map(m => { const id = typeof m === 'string' ? m : m.id; return { value: p.id + '|' + id, label: (m && m.name) || id }; }) }))}
-            onChange={v => { const i = v.indexOf('|'); if (i > 0) pickModel(v.slice(0, i), v.slice(i + 1)); }} /></div>
+          <div className="composer-seat"><ModelSeat
+            providers={providers} providerId={settings.activeProviderId || ''} model={model}
+            levels={declaredThinking.levels} value={thinking.level} transport={declaredThinking.transport}
+            defaultLevel={declaredThinking.default}
+            onPickModel={(pid, m) => pickModel(pid, m)} onPickThinking={level => w.pickThinking(level)} /></div>
           <ActionIcon icon={responding ? 'stop' : 'send'} className="send-button" variant="solid" onClick={() => responding ? inv('agent-interrupt') : send(false)}
             disabled={!responding && (w.session?.workspace?.availability !== 'ready' || w.sending || w.uploading || (!input.trim() && !atts.length))}
             title={responding ? '停止响应' : w.editTarget ? '重新发送（Enter）' : '发送（Enter）'} />

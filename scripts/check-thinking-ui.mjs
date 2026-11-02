@@ -100,20 +100,25 @@ try {
   await page.reload();
   await page.locator('.composer').waitFor({ timeout: 15000 });
 
-  // 1) 声明了档位的模型：输入坞出现选择器，且默认档来自模型的 default（medium → 中）
-  const trigger = page.locator('.composer-thinking .thinking-trigger');
+  // 1) 声明了档位的模型：模型座位出现，触发器同时写模型名与默认档（medium → 中）
+  const trigger = page.locator('.composer-seat .seat-trigger');
   await trigger.waitFor({ timeout: 8000 });
-  ok((await trigger.innerText()).trim() === '中', '选择器应显示模型默认档「中」（实际 ' + JSON.stringify((await trigger.innerText()).trim()) + '）');
+  const triggerText = (await trigger.innerText()).trim();
+  ok(/gpt-5\.1/.test(triggerText), '触发器应写出模型名（实际 ' + JSON.stringify(triggerText) + '）');
+  ok(/中/.test(triggerText), '触发器应显示模型默认档「中」（实际 ' + JSON.stringify(triggerText) + '）');
 
   // 2) 打开浮层：只能看到声明的四个档位，不能出现声明外的 minimal
   await trigger.click();
-  const pop = page.locator('.thinking-pop');
+  const pop = page.locator('.seat-pop');
   await pop.waitFor({ timeout: 8000 });
   const stops = pop.locator('.thinking-stop');
   ok(await stops.count() === 4, '滑块应只有声明的 4 个档位（实际 ' + await stops.count() + '）');
   const ticks = await pop.locator('.thinking-tick').allInnerTexts();
   ok(JSON.stringify(ticks) === JSON.stringify(['关闭', '低', '中', '高']), '刻度应是声明的档位集合（实际 ' + JSON.stringify(ticks) + '）');
   ok(!ticks.includes('最少'), '不能出现未声明的「最少」档');
+  // 设计图要求：大号档位名 + 其下带箭头的模型行，两者都在同一个浮层里
+  ok((await pop.locator('.thinking-level').innerText()).trim() === '中', '浮层应大字显示当前档位');
+  ok(/gpt-5\.1/.test(await pop.locator('.seat-modelrow').innerText()), '档位下方应是可点的模型行');
   // 底部必须如实说出会发什么，而不是只写「更聪明」
   const payload = await pop.locator('.thinking-payload').innerText();
   ok(/reasoning_effort: medium/.test(payload), '应显示实际发送的参数（实际 ' + JSON.stringify(payload) + '）');
@@ -124,7 +129,7 @@ try {
   await page.waitForTimeout(400);
   ok(readSettings().activeThinking === 'high', '选高后应写入 activeThinking=high（实际 ' + JSON.stringify(readSettings().activeThinking) + '）');
   await trigger.waitFor();
-  ok((await trigger.innerText()).trim() === '高', '选择器应显示「高」（实际 ' + JSON.stringify((await trigger.innerText()).trim()) + '）');
+  ok(/高/.test((await trigger.innerText()).trim()), '触发器应显示「高」（实际 ' + JSON.stringify((await trigger.innerText()).trim()) + '）');
   const payloadHigh = await pop.locator('.thinking-payload').innerText();
   ok(/reasoning_effort: high/.test(payloadHigh), '高对应 reasoning_effort: high（实际 ' + JSON.stringify(payloadHigh) + '）');
   await page.keyboard.press('Escape');
@@ -132,8 +137,8 @@ try {
   // 4) 键盘可达：聚焦滑杆后按 Home/ArrowRight 也能改档
   //    注意必须重新打开浮层——上一步按 Escape 已经把它卸载，对已卸载节点 focus() 不会生效。
   await trigger.click();
-  await page.locator('.thinking-pop').waitFor({ timeout: 8000 });
-  const slider = page.locator('.thinking-pop .thinking-slider');
+  await page.locator('.seat-pop').waitFor({ timeout: 8000 });
+  const slider = page.locator('.seat-pop .thinking-slider');
   await slider.focus();
   await page.keyboard.press('Home');
   await page.waitForTimeout(300);
@@ -143,12 +148,24 @@ try {
   ok(readSettings().activeThinking === 'low', 'ArrowRight 应前进到下一档（实际 ' + JSON.stringify(readSettings().activeThinking) + '）');
   await page.keyboard.press('Escape');
 
-  // 5) 切到没有声明的模型：选择器必须消失，不能留一个按了没反应的控件
-  await page.getByRole('combobox', { name: '选择模型' }).click();
-  await page.getByRole('option', { name: 'gpt-4o', exact: true }).click();
+  // 4b) 模型行是真实入口：从座位里钻取到模型目录并切换模型（不是只显示个名字）
+  await trigger.click();
+  await page.locator('.seat-pop').waitFor({ timeout: 8000 });
+  await page.locator('.seat-pop .seat-modelrow').click();
+  await page.locator('.seat-pop .seat-list').waitFor({ timeout: 8000 });
+  await page.locator('.seat-pop .seat-item', { hasText: 'gpt-4o' }).click();
   await page.waitForTimeout(600);
-  ok(await page.locator('.thinking-trigger').count() === 0, '未声明档位的模型不应渲染思考选择器');
-  ok(readSettings().activeModel === 'gpt-4o', '应已切到 gpt-4o（实际 ' + JSON.stringify(readSettings().activeModel) + '）');
+  ok(readSettings().activeModel === 'gpt-4o', '从座位里应能切到 gpt-4o（实际 ' + JSON.stringify(readSettings().activeModel) + '）');
+
+  // 5) 切到没有声明的模型：强度那部分必须消失，不能留一个拖了没反应的滑杆
+  //    座位本身要留着——它仍然是选模型的唯一入口。
+  ok(await page.locator('.seat-trigger').count() === 1, '未声明档位的模型仍应有模型座位');
+  ok(await page.locator('.thinking-slider').count() === 0, '未声明档位时不应渲染滑杆');
+  await page.locator('.seat-trigger').click();
+  await page.locator('.seat-pop').waitFor({ timeout: 8000 });
+  ok(await page.locator('.seat-pop .thinking-level').count() === 0, '未声明档位时浮层不应有大号档位名');
+  ok(await page.locator('.seat-pop .seat-note').count() === 1, '未声明档位时应说明不发思考参数');
+  await page.keyboard.press('Escape');
 
   // 6) 设置页：模型行显示声明，弹窗能改
   await page.locator('.rail-bottom .rail-account').click();

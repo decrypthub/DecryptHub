@@ -17,8 +17,10 @@ import {
 } from '../thinking.mjs';
 import { resolveProvider } from '../providers/index.mjs';
 
-test('档位表覆盖产品承诺的五个档位，且发送值一一对应', () => {
-  assert.deepEqual(ALL_LEVELS, ['off', 'minimal', 'low', 'medium', 'high']);
+test('档位表照 DSH 规范序，且发送值一一对应', () => {
+  // 顺序与集合都对齐 DeepSeek Harness 的 pi-ai 目录（off → minimal → low → medium → high → xhigh → max），
+  // 不自造词表，也不为了「看起来简洁」删档：声明里能写什么，界面就必须能表达什么。
+  assert.deepEqual(ALL_LEVELS, ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
   assert.deepEqual(THINKING_LEVELS.map(l => l.id), ALL_LEVELS);
   for (const level of THINKING_LEVELS) {
     // 关闭档没有发送值：它表示「不要这个参数」，不是某个更小的值。
@@ -27,6 +29,7 @@ test('档位表覆盖产品承诺的五个档位，且发送值一一对应', ()
     assert.ok(thinkingBudget(level.id) >= 1024, level.id + ' 的思考预算必须 ≥ 1024');
   }
   for (const id of ALL_LEVELS) assert.ok(levelLabel(id).length > 0, id + ' 缺少中文标签');
+  assert.equal(levelLabel('xhigh'), '极高');
   assert.deepEqual(THINKING_TRANSPORTS.map(t => t.id), ['effort', 'budget', 'switch', 'none']);
 });
 
@@ -47,14 +50,27 @@ test('声明归一：档位去重排序、未知值丢弃、默认档必须落�
 
 test('未声明时按模型名推断，认不出来就如实声明「不发送」', () => {
   assert.equal(inferThinking('claude-sonnet-4-5').transport, 'budget');
-  assert.equal(inferThinking('claude-sonnet-4-5').levels.length, ALL_LEVELS.length);
+  // 推断只给「基础档」：xhigh / max 是可选档，DSH 也只在模型显式映射时才提供，
+  // 按名字猜会把端点不认的 reasoning_effort 发出去。
+  assert.deepEqual(inferThinking('claude-sonnet-4-5').levels, ['off', 'minimal', 'low', 'medium', 'high']);
   assert.equal(inferThinking('gpt-5.1').transport, 'effort');
+  assert.deepEqual(inferThinking('gpt-5.1').levels, ['off', 'minimal', 'low', 'medium', 'high']);
   assert.equal(inferThinking('o3-mini').transport, 'effort');
   const ds = inferThinking('deepseek-v4.1-flash');
   assert.equal(ds.transport, 'switch'); assert.deepEqual(ds.levels, ['off', 'high']);
   // 老模型 / 未知模型：不假装支持，避免请求被 400。
   const legacy = inferThinking('gpt-4o');
   assert.equal(legacy.transport, 'none'); assert.equal(legacy.default, '');
+});
+
+test('可选档（xhigh / max）只来自模型显式声明，推断不会带出来', () => {
+  const declared = normalizeThinking({ levels: ['off', 'high', 'xhigh', 'max'], default: 'xhigh', transport: 'effort' });
+  assert.deepEqual(declared.levels, ['off', 'high', 'xhigh', 'max']);
+  assert.equal(levelLabel(declared.default), '极高');
+  assert.equal(reasoningEffort('max'), 'max');
+  assert.equal(thinkingBudget('xhigh'), 32000);
+  // 显式声明时，用户在界面上选到的「极高」必须真的发出去。
+  assert.deepEqual(openAIThinking({ transport: 'effort', level: 'xhigh' }), { field: 'reasoning_effort', value: 'xhigh' });
 });
 
 test('生效档位：用户选择优先，越界回落到模型默认，再回落到「不发」', () => {

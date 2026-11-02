@@ -2,7 +2,7 @@
 import React, { forwardRef, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Theme, Box, Flex, Text, Button as RadixButton, IconButton as RadixIconButton, TextArea, Select, Dialog, Tooltip } from '@radix-ui/themes';
-import { PlayIcon, StopIcon, ArrowLeftIcon, ReloadIcon, ArrowRightIcon, GearIcon, SunIcon, MoonIcon, TrashIcon, ClockIcon, MagicWandIcon, GlobeIcon, CodeIcon, ActivityLogIcon, FileIcon, MixerHorizontalIcon, ArrowUpIcon, Cross2Icon, CheckIcon, DownloadIcon, FileTextIcon, InfoCircledIcon, ResetIcon, MinusIcon, SquareIcon, CopyIcon, PlusIcon, DotsHorizontalIcon, ChatBubbleIcon, ReaderIcon, DrawingPinIcon, LockClosedIcon, MagnifyingGlassIcon, StackIcon, ChevronUpIcon, ChevronDownIcon, ChevronRightIcon, DotFilledIcon, ViewVerticalIcon, DashboardIcon, TargetIcon, DesktopIcon, ExternalLinkIcon, LightningBoltIcon, Pencil1Icon, MobileIcon, PersonIcon } from '@radix-ui/react-icons';
+import { PlayIcon, StopIcon, ArrowLeftIcon, ReloadIcon, ArrowRightIcon, GearIcon, SunIcon, MoonIcon, TrashIcon, ClockIcon, MagicWandIcon, GlobeIcon, CodeIcon, ActivityLogIcon, FileIcon, MixerHorizontalIcon, ArrowUpIcon, Cross2Icon, CheckIcon, DownloadIcon, FileTextIcon, InfoCircledIcon, ResetIcon, MinusIcon, SquareIcon, CopyIcon, PlusIcon, DotsHorizontalIcon, ChatBubbleIcon, ReaderIcon, DrawingPinIcon, LockClosedIcon, MagnifyingGlassIcon, StackIcon, ChevronUpIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, DotFilledIcon, ViewVerticalIcon, DashboardIcon, TargetIcon, DesktopIcon, ExternalLinkIcon, LightningBoltIcon, Pencil1Icon, MobileIcon, PersonIcon } from '@radix-ui/react-icons';
 import { renderMd, highlightHtml } from './md.js';
 import { themeConfig } from './theme.js';
 import { PauseIcon, PaperPlaneIcon, ExitIcon } from '@radix-ui/react-icons';
@@ -22,7 +22,7 @@ const ICONS = {
   minus: MinusIcon, square: SquareIcon, restore: CopyIcon, plus: PlusIcon,
   more: DotsHorizontalIcon, chat: ChatBubbleIcon, copy: CopyIcon, folder: FolderGlyph,
   flag: DrawingPinIcon, key: LockClosedIcon, search: MagnifyingGlassIcon, layers: StackIcon,
-  chevup: ChevronUpIcon, chevdown: ChevronDownIcon, chevright: ChevronRightIcon,
+  chevup: ChevronUpIcon, chevdown: ChevronDownIcon, chevright: ChevronRightIcon, chevleft: ChevronLeftIcon,
   dot: DotFilledIcon, sidebar: SidebarLeftGlyph, sidebarRight: SidebarRightGlyph, dashboard: DashboardIcon,
   target: TargetIcon, desktop: DesktopIcon, external: ExternalLinkIcon, bolt: LightningBoltIcon, edit: Pencil1Icon,
   pin: DrawingPinIcon, mobile: MobileIcon,
