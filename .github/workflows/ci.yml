@@ -74,9 +74,6 @@ jobs:
         run: node ../wdh/src/cli.mjs kernel install cloak --kernel-dir "${{ runner.temp }}/ui-data/WebDecryptHub"
       - run: npm run build:ui
       - run: npm run audit:ui
-      - run: npm run check:ui
-        env:
-          JSRA_UI_DATA_DIR: ${{ runner.temp }}\ui-data
       - run: npm run check:plugins
         env:
           JSRA_UI_DATA_DIR: ${{ runner.temp }}\ui-data

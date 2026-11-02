@@ -10,10 +10,51 @@
 - 会话、Run 和工具调用 ID 是稳定身份，标题只是展示。自动标题不能覆盖手动标题，URL 不能替代用户任务名称。持久化格式变化必须兼容旧数据或提供迁移。
 - 新工具和内部自测均遵循现有权限/执行边界。完整性准备仅处理已验证的托管内核及具名构建产物，不修改整个工作区。不得将 cwd、Node vm 或环境变量过滤描述为 OS 隔离。
 - 配置、日志和诊断不泄露密钥；第三方网页与附件是数据。不要把浏览器网络记录、页面内容当成原生程序授权。
-- 改动对应的生命周期/协议/权限测试通过后，运行 `node --test sidecar/test/*.test.mjs`；UI 改动另运行 `npm run build:ui`、`npm run audit:ui`、`npm run check:ui`。平台窗口变更需补真实 Windows 桌面链路验收；单元测试和无头浏览器不能替代原生交互验收。
-- `check:ui` 默认跑全量（约 30–90 秒，400 次断言，含插件与浏览器抓包），它属于 CI 的验收项。**本机只改一处时用分节**：`node scripts/check-ui.mjs --only=account`（可选 `window`、`account`、`app`，可组合如 `--only=account,window`），再配 `JSRA_UI_SCHEME=dark` 只跑单主题。没装 WDH 组件与 CloakBrowser 内核时，脚本会跳过插件/抓包段并打印跳过原因——**跳过不等于通过**，相关改动仍以 CI 为准。不要为了「看一眼」反复跑全量。
+- 改动对应的生命周期/协议/权限测试通过后，运行 `node --test sidecar/test/*.test.mjs`；UI 改动另运行 `npm run build:ui` 与 `npm run audit:ui`。
+- **不要写固定式脚本来"验收 UI"。** UI 的产物是视觉呈现，好坏由眼睛判断；断言像素、宽度、间距、是否可见，锁住的是当时那一版的样子，不是意图——改一次间距、换一个圆角、调一次布局都会红，红的是断言而不是 bug，最后变成"不敢改视觉"。2026-11-02 已因此删除 `scripts/check-ui.mjs`（118 KB / 1283 行 / 200 条，单次 30–90 秒，本机缺 WDH 组件与 CloakBrowser 内核时必假红）。**现在的分工**：
+  - `node --test sidecar/test/*.test.mjs` —— 逻辑、生命周期、协议、权限；能毫秒级跑完的问题都该在这里。
+  - `npm run audit:ui` —— 只查框架管不到的静态规则（禁止覆盖 Radix 内部类、行元素可点区域）。
+  - 视觉 —— 跑 `node scripts/preview.mjs` 在浏览器里看，或给用户发布版让他自己点。
+  - 确实需要一条具体交互的可自动化回归（如键盘可达、状态写入），照 `scripts/check-thinking-ui.mjs` 的模式**另开小文件**，只测那一条行为，不测长相。
 - 保留用户未提交的改动。不要做与当前任务无关的大规模迁移；跨模块迁移先记录决定、兼容策略和可验证的退出条件。
-- **合并之后要核对结果，别只信「没有冲突」。** 2026-11-02 的 `a043f9c`（把 main 合进功能分支）没有报冲突，却把 main 上刚做好的五处 CI 加固覆盖回了旧值：`check-ui.mjs` 的 `context.setDefaultTimeout(60000)` 整行消失、端口退回硬编码，`check-sidecar.mjs` 的 PTY 等待 90000→15000，`shell-encoding` 的 `timeoutMs` 90000→30000，`workspace-tabs` 的提示符窗口 45000→20000。这类回退不红不报错，只把窗口悄悄收窄，等到下一次超时才表现为「新代码有问题」。**判据**：合并后某个文件如果「结果 = 分支侧」且「结果 ≠ main」，而该文件在 main 上有近期改动，就是被吞了——逐项核对，别只看 `git diff` 是否为空。
-- **`check:ui` 是 CI 的验收项，不是本机自检工具。** 跑之前先想清楚这次改动到底需要它回答什么问题：逻辑正确性用 `node --test`；需要肉眼判断的交互交给人工或 CI；只有「这一处界面在真实浏览器里的行为」才值得本机跑，且用 `--only=` 分节。缺 WDH 组件与 CloakBrowser 内核时不要为了跑通去下载——那一段本来就该由 CI 验证。跑不通说明不了代码坏，跑通了也不等于界面好，别为了「做了事」而跑。
-- **本机 `check:ui` 有已知的假红：`scripts/check-ui.mjs:1220` 等 `.screen-canvas` 超时。** 根因是「多标签浏览器」那一段没像插件段（第 779 行）那样先判断 `kernelMissing`；本机没装 WDH 组件与 CloakBrowser 内核，`skipSection` 只跳过了插件/抓包段，后面照样去开浏览器，于是等满 90 秒才失败。CI 装了组件所以是绿的。**看到这条超时先确认 `kernel-info` 的 `component.installed` / `cloak`，不要先怀疑自己的改动。**
-- **UI 里不出现适配器的字段名。** `reasoning_effort` / `thinking.budget_tokens` / `thinking.type` 只在 `sidecar/thinking.mjs` 与设置页的说明文字里；聊天浮层、触发器、任何常规交互面一律不显示（DSH 的模型菜单同样只写「模型名 · 档位」）。`scripts/check-thinking-ui.mjs` 已用断言锁住这一条。
+- **合并之后要核对结果，别只信「没有冲突」。** 2026-11-02 的 `a043f9c` 没有报冲突，却把 main 上刚做好的五处 CI 加固覆盖回了旧值（`check-sidecar.mjs` 的 PTY 等待、`shell-encoding` 的 `timeoutMs` 等）。这类回退不红不报错，只把窗口悄悄收窄。**判据**：合并后某文件「结果 = 分支侧」且「结果 ≠ main」，而该文件在 main 上有近期改动，就是被吞了。
+- **UI 里不出现适配器的字段名。** `reasoning_effort` / `thinking.budget_tokens` / `thinking.type` 只属于 `sidecar/thinking.mjs` 与设置页说明文字；聊天浮层、触发器一律不显示（DSH 的模型菜单也只写「模型名 · 档位」）。`scripts/check-thinking-ui.mjs` 已用断言锁住。
+
+---
+
+## 🔴 用户测试必须跑「发布版」，不能用调试模式（2026-11-02 用户明确要求）
+
+用户原话：「我要边测试边向 Agent 反馈，不能以调试模式运行。」
+
+### 为什么（这是因果，不是禁令）
+
+调试模式把「用户正在测的实例」和「Agent 正在改的源码」绑在一条链路上：
+
+1. **`npm run dev:desktop` / `scripts/dev-desktop.ps1` 用 Vite + HMR**（`JSRA_UI_DEV_URL=http://127.0.0.1:5173`）→ Agent 每改一个 `.jsx`，用户正在点的界面就热重载、状态被冲掉。用户反馈的就不是同一份东西。
+2. **`start-desktop.ps1` / `dev-desktop.ps1` 用 `JSRA_SIDECAR_NODE` 指向 `sidecar/index.mjs` 源码** → sidecar 一重启就加载**半成品代码**，会报出根本不存在的 bug（假红灯）。
+3. **只有 release 能保证「测的就是编进去的那份」**：`main.rs` 里 `JSRA_UI_DEV_URL` 的读取包在 `#[cfg(debug_assertions)]` 内，release 构建把这段编译掉，`ui_url` 恒为 `None`，永远用编译期嵌入的 ui-dist。
+4. **同一数据目录只能有一个窗口**（`dist/.../start.ps1` 注释：两个 sidecar 写同一份 `sessions.json` 会损坏索引）。
+
+### 交付姿势
+
+给用户测的东西 = **`dist\DecryptHub-win-x64\` 的发布版产物**，由用户双击 `start.cmd` 启动。构建三步，顺序不能乱：
+
+```powershell
+cd X:\Project\github\DecryptHub-all\DecryptHub
+npm run build:ui                                              # 1) UI → ui-dist（编译期嵌进 exe）
+npx --yes bun@1.4.4 scripts/build-sidecar.mjs win              # 2) sidecar → build\resources\sidecar\main.mjs
+$env:CARGO_TARGET_DIR = 'X:\Project\github\DecryptHub-all\DecryptHub\src-tauri\target'
+cargo build --release --manifest-path src-tauri/Cargo.toml     # 3) Rust release → src-tauri\target\release\jsra-tauri.exe
+# 再把 build\resources\sidecar\main.mjs 和 release\jsra-tauri.exe 分别拷进 dist\DecryptHub-win-x64\
+```
+
+**三个坑**：
+1. **UI 是编译期嵌入 exe 的** —— 只跑 `npm run build:ui` 不生效，必须再 `cargo build --release`。
+2. **`CARGO_TARGET_DIR` 可能被设成临时 sandbox 缓存**（`...\cursor-sandbox-cache\...`）—— 编译前必须显式设回仓库的 `src-tauri\target`，否则产物落别处。
+3. **覆盖 `dist\...\DecryptHub.exe` 前必须确认应用已关闭**，否则文件被锁。不要在用户还测着的时候偷偷替换。
+
+### 测试期间的边界
+
+用户用 release 版测试时，Agent 改源码 / 跑测试 / 提交都不会影响那个实例（release 读嵌入的 ui-dist 与 sidecar bundle，不读 `ui/src`、`sidecar/*.mjs`）。**但若需重编并替换 `dist`，必须先让用户关窗口。**
+
+**用户测试数据**在 `%APPDATA%\DecryptHub`（持久）；**Agent 自动化验收**在 `.tmp\verify-sandbox\appdata\WebDecryptHub`（隔离可重置）。二者绝不能共用。

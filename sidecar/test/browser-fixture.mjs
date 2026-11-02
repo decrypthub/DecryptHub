@@ -6,7 +6,7 @@
 //
 // 优先级：
 //   1. WDH_TEST_EXECUTABLE：显式指定，CI 或特殊机器用。
-//   2. CHROME_PATH：与 scripts/check-ui.mjs 同一个约定，本机开发保持一致。
+//   2. CHROME_PATH：与各定向脚本（check-*.mjs）同一个约定，本机开发保持一致。
 //   3. 常见系统 Chrome/Edge 安装位置。
 // 都找不到时调用方应跳过用例并说明原因，而不是报失败。
 import fs from 'node:fs';
