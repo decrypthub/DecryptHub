@@ -12,6 +12,7 @@ import { shouldStick, settleInto, jumpTo } from './scroll-stick.js';
 import { sessionView } from './session-view.js';
 import { rememberPreview } from './attachments.jsx';
 import { parseCommand, extensionRequest } from './commands.js';
+import { guessPasteName } from './paste-drop.js';
 import { BrowserSurface } from './browser-surface.js';
 import { BrowserFrames } from './browser-frames.js';
 import { useSessionView } from './use-session-view.jsx';
@@ -39,6 +40,8 @@ export function Workbench({ children }) {
   const [commandForm, setCommandForm] = useState(null), [extensionBrowser, setExtensionBrowser] = useState(null), [commandFeedback, setCommandFeedback] = useState({});
   const [automationDraft, setAutomationDraft] = useState(false);
   const [editTarget, setEditTarget] = useState(null); // { sid, turnId } 编辑已发送消息
+  // 项目概念出现之前的历史会话（无 projectId）：只提示、不自动处理，删不删由用户决定。
+  const [legacySessions, setLegacySessions] = useState([]);
   useEffect(() => api.on('projects', setProjects), []);
 
   const sid = sessions.focused;
@@ -83,6 +86,7 @@ export function Workbench({ children }) {
   const [uploads, setUploads] = useState({});
   const [sending, setSending] = useState({});
   const attsRef = useRef(atts); attsRef.current = atts;
+  const draftsRef = useRef(drafts); draftsRef.current = drafts;
   const approvalChain = useRef(Promise.resolve());
   const seen = useRef(new Set());
   const settingsRef = useRef(settings); settingsRef.current = settings;
@@ -117,6 +121,23 @@ export function Workbench({ children }) {
     setView('chat');
     setTimeout(() => inputRef.current?.focus(), 40);
   }, []);
+  // 长文本粘贴：内容写成工作区文件，输入框只留一行引用。
+  // 不在输入框里塞正文，是因为这条路径的目的就是让长文本不进入消息体。
+  const dropPaste = useCallback(async (text) => {
+    const target = sidRef.current;
+    if (!target) return;
+    setUploads(m => ({ ...m, [target]: (m[target] || 0) + 1 }));
+    try {
+      const saved = await api.invoke('paste-save', { sessionId: target, text, name: guessPasteName(text) });
+      const ref = `【粘贴长文本】${saved.path}（${saved.lines} 行 / ${saved.chars} 字符），请读取该文件后再继续。`;
+      // setInput 只接受值（见上面 useCallback 的签名），不能传更新函数。
+      const prev = draftsRef.current[target] || '';
+      setInput(prev ? prev + '\n' + ref : ref);
+      toast(`已存为 ${saved.path}（${saved.lines} 行），正文未发送`, 'ok');
+    } catch (e) { toast('长文本保存失败：' + e.message, 'err'); }
+    finally { setUploads(m => ({ ...m, [target]: Math.max(0, (m[target] || 1) - 1) })); }
+  }, []);
+
   const rmAtt = useCallback(key => setAtts(m => ({ ...m, [sidRef.current]: (m[sidRef.current] || []).filter(x => x.key !== key) })), []);
   async function addFiles(files) {
     const target = sidRef.current, available = 8 - (attsRef.current[target] || []).length;
@@ -193,6 +214,17 @@ export function Workbench({ children }) {
   // ---- 画面帧 ----
   const drawFrame = useCallback(f => {
     frames.current.receive(frameTargetRef.current, f);
+  }, []);
+
+  // 历史会话（无项目归属）在启动时清点一次。它们是本地残留数据，不做任何自动处理。
+  useEffect(() => { api.invoke('legacy-sessions').then(v => setLegacySessions(Array.isArray(v) ? v : [])).catch(() => {}); }, []);
+  const discardLegacySessions = useCallback(async ids => {
+    try {
+      const r = await api.invoke('legacy-sessions-discard', { ids });
+      setLegacySessions(list => list.filter(x => !(r?.removed || []).includes(x.id)));
+      toast('已删除历史会话', 'ok');
+      return true;
+    } catch (e) { toast('删除失败：' + e.message, 'err'); return false; }
   }, []);
 
   // ---- 事件订阅 ----
@@ -639,6 +671,7 @@ export function Workbench({ children }) {
     projects, setProjects, projectFilter, setProjectFilter, projectEditor, setProjectEditor, moveSession, setMoveSession, workspacePrompt, setWorkspacePrompt,
     isCurrentSession: id => sidRef.current === id,
     commandForm, setCommandForm, extensionBrowser, setExtensionBrowser, automationDraft, setAutomationDraft,
+    legacySessions, discardLegacySessions,
     commandFeedback: commandFeedback[sid], clearCommandFeedback: () => setCommandFeedback(m => ({ ...m, [sid]: null })),
     settings, saveSettings, setSettings, firstRun, setFirstRun,
     sessions, sid, session, cur, dispatch, focusSession,
@@ -646,7 +679,7 @@ export function Workbench({ children }) {
     presentation,
     launching, launch, go, newSession, closeSession, pinSession, cleanRetry,
     input, setInput, editTarget: editTarget?.sid === sid ? editTarget : null, startEdit, cancelEdit, rate,
-    atts: atts[sid] || [], addAtt, rmAtt, addFiles, uploading: !!uploads[sid], sending: !!sending[sid], enableImages,
+    atts: atts[sid] || [], addAtt, rmAtt, addFiles, dropPaste, uploading: !!uploads[sid], sending: !!sending[sid], enableImages,
     send, sendInput, compactNow, pickModel, pickThinking, inv,
     setTheme,
     refs: { viewRef: bindViewport, canvasRef: bindCanvas, urlRef, inputRef, chatRef },

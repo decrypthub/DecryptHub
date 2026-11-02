@@ -8,6 +8,7 @@ import { native } from './transport.js';
 import { PermissionPicker, PendingActions } from './workspace.jsx';
 import { AttachmentTiles } from './attachments.jsx';
 import { conversationTurns, toolPresentation, elapsedLabel } from './conversation.js';
+import { shouldDropPaste } from './paste-drop.js';
 import { TurnTrigger } from './turn-trigger.jsx';
 import { commandMatches } from './commands.js';
 import { CommandMenu, CommandFeedback, CommandDialogs } from './harness.jsx';
@@ -111,7 +112,7 @@ export function ChatStage({ railOpen, onExpandRail }) {
         {atts.some(a => a.image) && !vision && <Flex gap="2" align="center" mb="2" wrap="wrap"><Text size="1" color="amber">当前模型未启用图片输入</Text><Button size="1" variant="ghost" color="gray" onClick={w.enableImages} title="仅在该模型支持图片时启用">启用图片输入</Button></Flex>}
         {dragging && <div className="drop-hint">松开以添加图片或文件</div>}
         <TextArea className="composer-input" size="2" variant="soft" color="gray" resize="none" ref={refs.inputRef} value={input} rows={2}
-          onPaste={e => { const files = Array.from(e.clipboardData?.items || []).filter(item => item.kind === 'file').map(item => item.getAsFile()).filter(Boolean); if (files.length) { e.preventDefault(); w.addFiles(files); } }}
+          onPaste={e => { const files = Array.from(e.clipboardData?.items || []).filter(item => item.kind === 'file').map(item => item.getAsFile()).filter(Boolean); if (files.length) { e.preventDefault(); w.addFiles(files); return; } const text = e.clipboardData?.getData('text/plain') || ''; if (shouldDropPaste(text)) { e.preventDefault(); w.dropPaste(text); } }}
           onChange={e => { setInput(e.target.value); setCommandIndex(0); setCommandDismissed(false); e.target.style.height = 'auto'; e.target.style.height = Math.min(180, e.target.scrollHeight) + 'px'; }}
           onKeyDown={composerKey}
           aria-controls={commands.length ? commandId : undefined} aria-activedescendant={commands.length ? commandId + '-' + Math.min(commandIndex, commands.length - 1) : undefined} aria-autocomplete="list" aria-expanded={commands.length > 0}

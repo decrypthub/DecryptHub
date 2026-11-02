@@ -64,3 +64,7 @@ updater-test/
 
 /artifacts/
 /.tmp-*
+
+# 长文本粘贴落盘目录（sidecar/paste-drop.mjs）：写在用户项目根下，
+# 属于会话运行产物而非源码，不应进入任何仓库。
+.dh-paste/

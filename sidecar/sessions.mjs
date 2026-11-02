@@ -11,13 +11,14 @@ import { browserPresentation, KERNEL } from './settings.mjs';
 import { DEFAULT_TODOS, normalizeSteps } from './todos.mjs';
 import { normalizeMode, normalizeReview, autoReview } from './policy.mjs';
 import { validateAttachments } from './attachments.mjs';
+import { PASTE_LIMIT, savePastedText, pasteNotice } from './paste-drop.mjs';
 import { workspaceFileSize, killAllJobs } from './workspace.mjs';
 import { WorkspaceStore } from './workspaces.mjs';
 import { ProjectStore } from './projects.mjs';
 import { RunStore } from './runs.mjs';
 import { ChangeStore, contentHash } from './changes.mjs';
 import { executor } from './executor.mjs';
-import { atomicJson, resolveIn } from './paths.mjs';
+import { atomicJson, resolveIn, pathKey } from './paths.mjs';
 import { ResearchAgents } from './subagents.mjs';
 import { ComponentStore } from './components.mjs';
 import { promptTitle, cleanTitle, SessionTitleService } from './session-titles.mjs';
@@ -429,6 +430,14 @@ class Session {
     if (this.mgr.projectsBusy) return { ok: false, error: '正在更新项目目录，请稍候' };
     if (this.mgr.plugins?.applying) return { ok:false, error:'正在切换插件，请稍后发送任务' };
     if (source === 'user' && this.goal?.status === 'active') source = 'goal';
+    // 长文本守门：UI 已经在粘贴时落盘，这里兜住绕过 UI 的路径（脚本、恢复、队列重发）。
+    // 正文写成工作区文件，消息只保留引用，避免一条 100 万字符的消息再次撑爆上下文与渲染。
+    if (!continuation && typeof text === 'string' && text.length > PASTE_LIMIT) {
+      try {
+        const saved = savePastedText(this.toolCtx(), text);
+        text = pasteNotice(saved);
+      } catch (e) { return { ok: false, error: '长文本保存失败：' + e.message }; }
+    }
     const s = this.mgr.getSettings();
     try { attachments = validateAttachments(this.projectDir, attachments || [], { workRoot: this.workspace.root, vision: !!((s.provider === 'anthropic' ? s.anthropic : s.openai) || {}).vision }); }
     catch (e) { return { ok: false, error: e.message }; }
@@ -564,18 +573,62 @@ export class SessionManager {
     this.projects = new ProjectStore(userDataDir);
     this.sessions = new Map(); this.focusedId = null; this.seq = 0;
     this.stateFile = path.join(userDataDir, 'sessions.json');
+    // 无项目归属的历史会话：不恢复、不自动迁移，也不从索引里抹掉。
+    // 它们属于「项目」概念出现之前的数据；是否删除由用户在界面上明确决定
+    // （见 UI 的 legacy-sessions 提示与下面的 discardLegacySessions）。
+    // 这里只是把它们原样留在索引里，避免 emitList 写盘时顺手把用户数据写成「已删除」。
+    this.legacyEntries = [];
     // 恢复上次的会话标签（标题、最后访问的网址、对话上下文；浏览器按需再启动）
     let saved = null; try { saved = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')); } catch {}
     if (saved?.sessions?.length) {
       for (const x of saved.sessions.slice(0, MAX_SESSIONS)) {
         if (!/^(?:main|s(?:[0-9a-f]{6}|[0-9a-f]{32}))$/.test(x.id) || !!x.primary !== (x.id === 'main')) throw Error('会话索引身份无效');
-        const state = JSON.parse(fs.readFileSync(path.join(userDataDir, 'projects', x.primary ? 'default' : x.id, '.agent-state.json'), 'utf8'));
-        if (!state.projectId) throw Error('开发数据包含无项目会话，请先清理开发数据');
+        const stateFile = path.join(userDataDir, 'projects', x.primary ? 'default' : x.id, '.agent-state.json');
+        let state = null; try { state = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
+        if (!state?.projectId) { this.legacyEntries.push({ ...x }); continue; }
         this.create({ id: x.id, title: x.title, titleSource: x.titleSource, primary: x.primary, lastUrl: x.url, updatedAt: x.updatedAt, pinned: x.pinned, quiet: true, projectId: state.projectId });
       }
       if (saved.focused && this.sessions.has(saved.focused)) this.focusedId = saved.focused;
+      if (!this.focusedId) this.focusedId = this.sessions.values().next().value?.id || null;
       this.seq = Math.max(this.seq, saved.seq || 0);
     }
+  }
+  /** 等待用户决定如何处理的历史会话（项目概念之前创建、没有 projectId）。 */
+  legacySessions() {
+    return this.legacyEntries.map(x => ({
+      id: x.id,
+      title: String(x.title || x.id || ''),
+      primary: !!x.primary,
+      updatedAt: Number(x.updatedAt) || 0,
+      url: String(x.url || ''),
+    }));
+  }
+  /**
+   * 删除用户明确要求清理的历史会话。
+   * 只删这些会话自己的数据目录：共享的 chrome-profile 不清空，
+   * 因为新建的主会话仍然使用同一个 browser profile 路径。
+   */
+  async discardLegacySessions(ids) {
+    const wanted = new Set((Array.isArray(ids) ? ids : []).map(String));
+    const targets = this.legacyEntries.filter(x => wanted.has(x.id));
+    if (!targets.length) return { removed: [] };
+    const root = fs.realpathSync.native(this.userDataDir);
+    const parent = path.join(root, 'projects');
+    const removed = new Set();
+    for (const x of targets) {
+      const target = path.join(parent, x.primary ? 'default' : x.id);
+      const info = fs.lstatSync(target, { throwIfNoEntry: false });
+      // 与正常删除同一条底线：不跟随被链接替换的目录。
+      if (info && !info.isSymbolicLink() && pathKey(fs.realpathSync.native(target)) === pathKey(target)) {
+        await fs.promises.rm(target, { recursive: true, force: false, maxRetries: 3, retryDelay: 100 });
+      } else if (info) {
+        throw Error('拒绝删除被链接替换的会话目录');
+      }
+      removed.add(x.id);
+    }
+    this.legacyEntries = this.legacyEntries.filter(x => !removed.has(x.id));
+    this.emitList();
+    return { removed: [...removed] };
   }
   list() {
     // 置顶优先；同组内保持原有顺序（sort 稳定）
@@ -585,7 +638,8 @@ export class SessionManager {
   }
   emitList() {
     const l = this.list(); this.broadcast('sessions', l);
-    atomicJson(this.stateFile, { focused: l.focused, seq: this.seq, sessions: l.sessions.map(s => ({ id: s.id, title: s.title, titleSource: this.sessions.get(s.id).titleSource, primary: s.primary, url: s.url, updatedAt: s.updatedAt, pinned: s.pinned })) });
+    // 历史会话（无项目归属）原样写回索引：它们没被恢复，但也没有被用户删除。
+    atomicJson(this.stateFile, { focused: l.focused, seq: this.seq, sessions: [...l.sessions.map(s => ({ id: s.id, title: s.title, titleSource: this.sessions.get(s.id).titleSource, primary: s.primary, url: s.url, updatedAt: s.updatedAt, pinned: s.pinned })), ...this.legacyEntries] });
   }
   create({ title, titleSource, primary, id: wantId, lastUrl, updatedAt, pinned, quiet, projectId = this.focused()?.projectId } = {}) {
     if (this.projectsBusy) throw new Error('正在更新项目目录，请稍候创建会话');

@@ -9,6 +9,14 @@ export { childEnv };
 const buckets = new Map(), ignored = new Set(['.git', '.ctx', '.chats', '.exec', '.capture', 'node_modules']);
 const ctxOf = v => typeof v === 'string' ? { projectDir: v } : v;
 const slash = v => v.split(path.sep).join('/');
+/** path 是目录、file 是文件名；只传一个时即那个相对路径，两个都给则拼接。 */
+function workspaceRel(a) {
+  const p = a.path ? String(a.path).replace(/\\/g, '/') : '';
+  const f = a.file ? String(a.file).replace(/\\/g, '/') : '';
+  if (!p) return f;
+  if (!f) return p;
+  return path.posix.join(p, f);
+}
 function walk(ctx, rel = '.', { depth = 8, includeModules = false, max = 10000 } = {}) {
   const root = workRoot(ctx), base = workspacePath(ctx, rel), out = [];
   function visit(dir, level) {
@@ -61,20 +69,35 @@ function write(ctx, rel, content, expectedHash) {
   return { text: `已写入 ${slash(path.relative(root, file))}（${Buffer.byteLength(content)} 字节）`, wrote: [file] };
 }
 async function wsWrite(a, ctx) {
-  const rel = a.path || a.file; if (!rel) throw new Error('需要 path');
+  const rel = workspaceRel(a); if (!rel) throw new Error('需要 path 或 file');
   const file = workspacePath(ctx, rel, { write: true }), expected = a.expectedHash || ctx.readHashes?.get(file);
   if (fs.existsSync(file) && ctx.readHashes && !expected) throw new Error('覆盖已有文件前请先 workspace_read，或使用 workspace_edit 精确替换');
   return write(ctx, rel, String(a.content ?? ''), expected);
 }
 async function wsRead(a, ctx) {
   ctx = selectReadRoot(ctx, a.root);
-  const rel = a.path || a.file; if (!rel) throw new Error('需要 path');
-  const file = workspacePath(ctx, rel), size = fs.statSync(file).size; if (size > 8 * 1024 * 1024) throw new Error('文件超过 8MB，请用搜索或分段读取');
+  const rel = workspaceRel(a); if (!rel) throw new Error('需要 path 或 file');
+  const file = workspacePath(ctx, rel), st = fs.statSync(file);
+  if (!st.isFile()) throw new Error('不是文件：' + rel + (a.path && a.file ? '（path 是目录、file 是文件名，两者会拼接）' : ''));
+  const size = st.size; if (size > 8 * 1024 * 1024) throw new Error('文件超过 8MB，请用搜索或分段读取');
   const buf = fs.readFileSync(file); ctx.readHashes?.set(file, contentHash(buf));
   const max = Math.min(300000, Math.max(1, Number(a.max) || 30000));
   // PowerShell 5.1 的 -Encoding utf8 会写 BOM，这里剥掉，否则正文开头会多出一个不可见字符。
   const text = a.binary ? buf.toString('base64') : buf.toString('utf8').replace(/^\uFEFF/, '');
-  return { text: `文件 ${rel}（${size} 字节，sha256=${contentHash(buf)}）：\n` + text.slice(0, max) + (text.length > max ? '\n…(已截断)' : '') };
+  const head = `文件 ${rel}（${size} 字节，sha256=${contentHash(buf)}）`;
+  // offset/limit 按行切片：长文本落盘后模型必须能读到中间，只靠 max 从头截断是取不到第 N 行的。
+  const all = text.split('\n');
+  const from = a.offset == null ? 1 : Math.max(1, Math.floor(Number(a.offset) || 1));
+  const want = a.limit == null ? null : Math.max(1, Math.floor(Number(a.limit) || 1));
+  if (from > 1 || want != null) {
+    if (from > all.length) throw new Error(`${rel} 只有 ${all.length} 行，offset=${from} 超出范围`);
+    const end = want == null ? all.length : Math.min(all.length, from - 1 + want);
+    const body = all.slice(from - 1, end).join('\n');
+    const head2 = `${head}，第 ${from}–${end} 行（共 ${all.length} 行）`;
+    const clipped = body.length > max ? body.slice(0, max) : body;
+    return { text: `${head2}：\n${clipped}${body.length > max ? '\n…(本次输出已按 max 截断，请缩小 limit)' : ''}${end < all.length ? `\n…(还有 ${all.length - end} 行，用 offset=${end + 1} 继续)` : ''}` };
+  }
+  return { text: `${head}：\n` + text.slice(0, max) + (text.length > max ? `\n…(已截断，共 ${all.length} 行，用 offset/limit 读取后续)` : '') };
 }
 async function wsList(a, ctx) {
   const roots = (ctx.projectRoots || []).map(r => `${r.id} · ${r.label}${r.primary ? '（主目录，可写）' : '（附加目录，只读）'}`).join('\n');
@@ -85,7 +108,7 @@ async function wsList(a, ctx) {
 export function workspaceFileSize(v, rel) { try { return fs.statSync(workspacePath(ctxOf(v), rel)).size; } catch { return 0; } }
 export function editWorkspace(v, a) {
   try {
-    const ctx = ctxOf(v), rel = a.path || a.file; if (!rel) throw new Error('需要 path');
+    const ctx = ctxOf(v), rel = workspaceRel(a); if (!rel) throw new Error('需要 path 或 file');
     const old = String(a.old_string ?? a.old ?? ''), next = a.new_string ?? a.new;
     if (!old) throw new Error('old_string 不能为空'); if (next == null) throw new Error('需要 new_string'); if (old === String(next)) throw new Error('old_string 与 new_string 相同，没有改动');
     const file = workspacePath(ctx, rel, { write: true }); if (fs.statSync(file).size > 4 * 1024 * 1024) throw new Error('文件太大，请分段处理');
@@ -145,7 +168,7 @@ export function jobOutput(v, a) {
 export function jobKill(v, a) { const j = bucket(ctxOf(v)).get(String(a.id)); if (!j) return { text: '没有这个后台任务：' + a.id, isError: true }; j.kill(); return { text: '已请求结束任务 ' + j.id }; }
 export function killAllJobs(v) { const ctx = ctxOf(v); for (const [key, jobs] of buckets) if (key.startsWith(ctx.projectDir + ':')) for (const j of jobs.values()) if (j.status === 'running') j.kill(); }
 async function wsRun(a, ctx) {
-  const file = a.eval ? null : workspacePath(ctx, a.file || a.path || 'index.js');
+  const file = a.eval ? null : workspacePath(ctx, workspaceRel(a) || 'index.js');
   const code = a.eval ? String(a.eval) : fs.readFileSync(file, 'utf8');
   if (Buffer.byteLength(code) > 8 * 1024 * 1024) throw new Error('脚本超过 8MB，请拆分后执行');
   const args = a.eval ? ['-e', code] : [file, ...(a.args || [])];
@@ -165,7 +188,7 @@ const S = (properties, required) => ({ type: 'object', properties, additionalPro
 const str = { type: 'string' }, num = { type: 'number' }, bool = { type: 'boolean' };
 export const WORKSPACE_TOOLS = [
   { name: 'workspace_list', description: '列出工作目录与项目授权根 ID。root 可选择附加目录；默认主目录。跳过敏感文件与链接。', schema: S({ root: str, path: str, depth: num, includeModules: bool }), run: wsList },
-  { name: 'workspace_read', description: '读取工作文件并返回版本 hash。root 可选项目附加目录 ID；写入只作用于主目录。', schema: S({ root: str, path: str, file: str, max: num, binary: bool }), run: wsRead },
+  { name: 'workspace_read', description: '读取工作文件并返回版本 hash。root 可选项目附加目录 ID；写入只作用于主目录。长文件用 offset/limit 按行分段读取，不要一次读完。', schema: S({ root: str, path: str, file: str, max: num, binary: bool, offset: num, limit: num }), run: wsRead },
   { name: 'workspace_write', description: '创建或覆盖文本文件。覆盖前先读取；修改已有代码优先 workspace_edit。改动可在界面审阅和撤销。', schema: S({ path: str, file: str, content: str, expectedHash: str }, ['content']), run: wsWrite },
   { name: 'workspace_edit', description: '精确替换已有文件，old_string 默认必须唯一；replace_all 可替换全部。', schema: S({ path: str, old_string: str, new_string: str, replace_all: bool }, ['path', 'old_string', 'new_string']), run: (a, ctx) => editWorkspace(ctx, a) },
   { name: 'workspace_grep', description: '检索代码，返回相对路径和行号。root 可选项目附加目录 ID；支持 glob、子目录和正则。', schema: S({ root: str, pattern: str, path: str, glob: str, literal: bool, ignoreCase: bool, max: num, includeModules: bool }, ['pattern']), run: (a, ctx) => grepWorkspace(ctx, a) },

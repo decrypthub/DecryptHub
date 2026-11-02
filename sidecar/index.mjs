@@ -38,6 +38,7 @@ async function startServer() {
   const { SYSTEM_MEMORY_SOURCES } = await import('./system-memory.mjs');
   const { publicSettings, decryptSecrets, mirrorProvider } = await import('./secrets.mjs');
   const { registerAttachment, attachmentPreview } = await import('./attachments.mjs');
+  const { savePastedText } = await import('./paste-drop.mjs');
   const { conversationMarkdown } = await import('./transcript.mjs');
   const { searchSessions } = await import('./session-search.mjs');
   const { openFeedback } = await import('./feedback.mjs');
@@ -124,6 +125,9 @@ async function startServer() {
     'mcp-restart': async a => { await mcpHost.restart(String(a?.name || '')); return mcpHost.status(); },
     'mcp-save': a => extensions.saveMcp(a?.servers || {}, a?.approveNames || []),
     'projects-list': () => sessions.projects.list(),
+    // 没有项目归属的历史会话：只报告，不自动处理。删除必须由用户在界面上明确选择。
+    'legacy-sessions': () => sessions.legacySessions(),
+    'legacy-sessions-discard': a => sessions.discardLegacySessions(a?.ids),
     'project-save': a => projects.save(a.project || {}, a.scope || a.sessionId),
     'projects-check': () => projects.checkDirectories(),
     'project-attach': a => projects.attach(S(a).id, a.projectId || null),
@@ -329,6 +333,9 @@ async function startServer() {
       return registerAttachment(S(a).projectDir, { name: path.basename(p), data: fs.readFileSync(p) });
     },
     'attach-upload': a => registerAttachment(S(a).projectDir, { name: a?.name, data: a?.data, mime: String(a?.mime || '') }),
+    // 长文本落盘：粘贴内容超过阈值时不进对话历史，写成工作区文件让模型按需读取。
+    // 返回相对路径，UI 把它作为提示而不是消息正文发送。
+    'paste-save': a => savePastedText(S(a).toolCtx(), String(a?.text ?? ''), a?.name),
     'attachment-preview': a => attachmentPreview(S(a).projectDir, a?.id),
     // 自动化任务
     'tasks-list': () => tasks.list().map(t => ({ ...t, nextAt: tasks.nextAt(t) })),
