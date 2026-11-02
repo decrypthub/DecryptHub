@@ -191,14 +191,18 @@ test('jumpTo 在 scroll-behavior: smooth 下瞬时落位', { timeout: 120000 }, 
     msgs.style.scrollBehavior = 'smooth';
   }, { MOUNT_SRC });
 
-  // 先证明直接赋值确实会动画（否则这条回归测试就没有意义）
+  // 先证明直接赋值确实会动画（否则这条回归测试就没有意义）。
+  // 但 Windows 的 headless Chromium 不一定播放 smooth 动画，此时这个前提本身不成立 ——
+  // 那是运行环境的差异，不是产品的回归，跳过而不是让整条用例假红。
   const direct = await page.evaluate(async () => {
     const msgs = document.querySelector('.msgs');
     msgs.scrollTop = msgs.scrollHeight;
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     return msgs.scrollTop;
   });
-  assert.ok(direct < 100, '前提：smooth 下直接赋值会从顶部开始动画，实际 scrollTop=' + direct);
+  if (!(direct < 100)) {
+    return t.skip('该浏览器不播放 smooth 滚动动画（实际 scrollTop=' + direct + '），本用例的前提不成立');
+  }
 
   const jumped = await page.evaluate(async ({ src }) => {
     const jumpTo = new Function('return (' + src + ')')();

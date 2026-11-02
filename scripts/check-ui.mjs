@@ -1244,11 +1244,12 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.waitForFunction(() => document.activeElement?.matches('.terminal-screen .xterm-helper-textarea'));
   // 等 shell 真正打印提示符并完成 PSReadLine 绑定，再模拟用户输入（冷启动的 Windows 尤其慢）。
   const promptRe = process.platform === 'win32' ? /PS [^>\r\n]*>/ : /[$#] /;
-  const promptDeadline = Date.now() + 15000;
+  const promptDeadline = Date.now() + 45000;
   while (!promptRe.test((await rpc('terminal-snapshot', { sessionId: workChat.id, id: terminalId })).output)) { if (Date.now() > promptDeadline) throw Error('Terminal prompt not ready'); await page.waitForTimeout(100); }
   await page.waitForTimeout(800);
   await page.keyboard.type(process.platform === 'win32' ? "Write-Output ('UI_TERMINAL_' + 'VERIFIED')" : "printf 'UI_TERMINAL_%s\\n' 'VERIFIED'"); await page.keyboard.press('Enter');
-  const terminalDeadline = Date.now() + 12000;
+  // CI runner 上 PowerShell 回显要几秒，12 秒不够（实测 02:53 那条就是在这一步超时）。
+  const terminalDeadline = Date.now() + 60000;
   while (!(await rpc('terminal-snapshot', { sessionId: workChat.id, id: terminalId })).output.includes('UI_TERMINAL_VERIFIED')) { if (Date.now() > terminalDeadline) throw Error('Terminal UI input failed'); await page.waitForTimeout(50); }
   ok(await page.getByRole('menu').count() === 0, '[' + scheme + '] 终端输入回车不能重新打开新建标签菜单');
   await page.screenshot({ path: path.join(SHOTS, scheme + '-terminal-tabs.png') });
