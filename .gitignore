@@ -42,6 +42,8 @@ wdh.key.password
 **/llm-e2e/
 **/screens/
 shot.png
+# 本地 UI 检查的临时截图（scripts/check-thinking-ui.mjs 落点），不是源码。
+/.thinking-ui-*.png
 PROGRESS.md
 PROGRESS-*.json
 CHANGES.md
