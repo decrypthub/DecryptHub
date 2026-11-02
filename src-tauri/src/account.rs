@@ -17,6 +17,9 @@ use std::{
 use tauri::State;
 
 const COMMUNITY: &str = "https://decrypthub.cn";
+/// 测试服：devserver 上的容器部署，经 frp 隧道对外提供 HTTPS。
+/// 只对 debug 构建开放（见 `development_origin`），发布版永远连 `COMMUNITY`。
+const TEST_COMMUNITY: &str = "https://decrypthub.taisuii.cn";
 const VAULT_USER: &str = "community-account";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -26,6 +29,14 @@ pub struct Profile {
     handle: String,
     nickname: String,
     avatar_url: Option<String>,
+    /// 积分余额：只来自别人对你文章的关注、点赞、评论与浏览。
+    /// 旧版凭据记录里没有这个字段，缺省为 `None`（未知），
+    /// 这样升级后不会把用户踢出登录态，也不会把 0 分当成真实余额显示。
+    #[serde(default)]
+    points: Option<i64>,
+    /// 经验余额：只来自签到与任务。与积分分开记账，绝不相加。
+    #[serde(default)]
+    experience: Option<i64>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -140,7 +151,7 @@ fn pkce(verifier: &str) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
 }
 fn development_origin(raw: &str) -> Result<String, String> {
-    if raw == COMMUNITY {
+    if raw == COMMUNITY || raw == TEST_COMMUNITY {
         return Ok(raw.into());
     }
     let u = Url::parse(raw).map_err(|_| "社区开发地址无效")?;
@@ -153,7 +164,7 @@ fn development_origin(raw: &str) -> Result<String, String> {
         || u.query().is_some()
         || u.fragment().is_some()
     {
-        return Err("社区开发地址仅支持本机 127.0.0.1 HTTP 来源".into());
+        return Err("社区开发地址仅支持 127.0.0.1 HTTP 来源或测试服".into());
     }
     Ok(u.origin().ascii_serialization())
 }
@@ -227,7 +238,13 @@ fn profile(origin: &str, token: &str) -> Result<Profile, RequestError> {
     let value = request(origin, "/auth/desktop/me", Some(token), None)?;
     let p: Profile = serde_json::from_value(value)
         .map_err(|_| RequestError::Other("社区账号资料无效".into()))?;
-    if p.id.is_empty() || p.id.len() > 191 || p.handle.len() > 191 || p.nickname.len() > 1000 {
+    if p.id.is_empty()
+        || p.id.len() > 191
+        || p.handle.len() > 191
+        || p.nickname.len() > 1000
+        || p.points.is_some_and(|v| v < 0)
+        || p.experience.is_some_and(|v| v < 0)
+    {
         return Err(RequestError::Other("社区账号资料无效".into()));
     }
     Ok(p)
@@ -326,12 +343,27 @@ fn fetch_avatar(raw: &str) -> Option<String> {
         )
     })
 }
+#[cfg(windows)]
+fn open_browser(url: &str) -> Result<(), String> {
+    use windows::core::HSTRING;
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let operation = HSTRING::from("open");
+    let file = HSTRING::from(url);
+    // 返回值 > 32 表示成功（MSDN ShellExecute 约定）。
+    let result = unsafe { ShellExecuteW(None, &operation, &file, None, None, SW_SHOWNORMAL) };
+    if result.0 as usize > 32 {
+        Ok(())
+    } else {
+        Err("无法打开系统浏览器，请检查默认浏览器设置".into())
+    }
+}
+
+#[cfg(not(windows))]
 fn open_browser(url: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let mut cmd = Command::new("open");
-    #[cfg(windows)]
-    let mut cmd = Command::new("explorer.exe");
-    #[cfg(all(not(windows), not(target_os = "macos")))]
+    #[cfg(all(not(target_os = "macos"), not(windows)))]
     let mut cmd = Command::new("xdg-open");
     cmd.arg(url)
         .stdin(Stdio::null())
@@ -631,6 +663,8 @@ impl AccountManager {
                 handle: String::new(),
                 nickname: String::new(),
                 avatar_url: None,
+                points: None,
+                experience: None,
             },
         };
         let result = profile(origin, &c.token).map_err(error_text).and_then(|p| {
@@ -793,6 +827,7 @@ pub async fn account_open_page(
     let path = match page.as_str() {
         "profile" => "/settings/profile",
         "security" => "/settings/security",
+        "points" => "/points",
         "home" => "/",
         _ => return Err("无效的社区页面".into()),
     };
@@ -1009,6 +1044,8 @@ mod tests {
                 handle: "alice".into(),
                 nickname: "Alice".into(),
                 avatar_url: None,
+                points: Some(42),
+                experience: Some(7),
             },
         }
     }
@@ -1104,6 +1141,30 @@ mod tests {
         let raw = serde_json::to_string(&m.snapshot()).unwrap();
         assert!(!raw.contains(&c.token));
         assert!(!raw.contains("code_verifier"));
+        // 余额是设置页要显示的账号信息，但不是凭据，随快照一起出去。
+        assert!(raw.contains("\"points\":42"));
+        assert!(raw.contains("\"experience\":7"));
+    }
+    #[test]
+    fn legacy_credential_without_points_still_restores_signed_in() {
+        // 1.4.0 之前写入的凭据没有 points 字段；升级后必须继续登录，
+        // 且余额显示为未知而不是伪造的 0 分。
+        let (m, v) = fixture();
+        let legacy = format!(
+            r#"{{"origin":"{COMMUNITY}","token":"dhd_{}","expires_at":{},"profile":{{"id":"u1","handle":"alice","nickname":"Alice","avatarUrl":null}}}}"#,
+            "a".repeat(43),
+            now() + 3600
+        );
+        v.record.lock().unwrap().replace(
+            serde_json::from_str(&legacy).expect("legacy record must deserialize"),
+        );
+        m.initialize().unwrap();
+        let snapshot = m.snapshot();
+        assert_eq!(snapshot.phase, "signed-in");
+        let profile = snapshot.profile.unwrap();
+        // 两个余额都是「未知」，而不是伪造的 0。
+        assert_eq!(profile.points, None);
+        assert_eq!(profile.experience, None);
     }
     #[test]
     fn development_endpoint_is_loopback_only() {
@@ -1119,6 +1180,26 @@ mod tests {
             "http://127.0.0.1:39217?x=1",
         ] {
             assert!(development_origin(raw).is_err());
+        }
+    }
+    #[test]
+    fn development_endpoint_allows_test_community_exactly() {
+        // 测试服（frp 隧道）与生产社区一样按完整 origin 精确匹配。
+        assert_eq!(
+            development_origin(TEST_COMMUNITY).unwrap(),
+            "https://decrypthub.taisuii.cn"
+        );
+        // 近似地址一律拒绝：带路径、带尾点、大写主机、其他子域、明文。
+        for raw in [
+            "https://decrypthub.taisuii.cn/",
+            "https://decrypthub.taisuii.cn/path",
+            "https://decrypthub.taisuii.cn:443",
+            "https://DECRYPTUB.TAISUII.CN",
+            "https://taisuii.cn",
+            "https://evil.decrypthub.taisuii.cn",
+            "http://decrypthub.taisuii.cn",
+        ] {
+            assert!(development_origin(raw).is_err(), "{raw} 不应被接受");
         }
     }
 }

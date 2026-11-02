@@ -11,16 +11,18 @@ import { browserPresentation, KERNEL } from './settings.mjs';
 import { DEFAULT_TODOS, normalizeSteps } from './todos.mjs';
 import { normalizeMode, normalizeReview, autoReview } from './policy.mjs';
 import { validateAttachments } from './attachments.mjs';
+import { PASTE_LIMIT, savePastedText, pasteNotice } from './paste-drop.mjs';
 import { workspaceFileSize, killAllJobs } from './workspace.mjs';
 import { WorkspaceStore } from './workspaces.mjs';
 import { ProjectStore } from './projects.mjs';
 import { RunStore } from './runs.mjs';
 import { ChangeStore, contentHash } from './changes.mjs';
 import { executor } from './executor.mjs';
-import { atomicJson, resolveIn } from './paths.mjs';
+import { atomicJson, resolveIn, pathKey } from './paths.mjs';
 import { ResearchAgents } from './subagents.mjs';
 import { ComponentStore } from './components.mjs';
 import { promptTitle, cleanTitle, SessionTitleService } from './session-titles.mjs';
+import { chat } from './llm.mjs';
 import { restoreGoal, createGoal, updateGoal, finishGoalRound, GoalDriver } from './goals.mjs';
 import { deleteSessionData, waitForSessionWriters, sessionDataPaths } from './session-data.mjs';
 import { SessionTerminals } from './terminals.mjs';
@@ -68,6 +70,9 @@ class Session {
     this.ratings = st.ratings && typeof st.ratings === 'object' && !Array.isArray(st.ratings) ? { ...st.ratings } : {};
     // 「本会话始终允许」只在这次运行的内存里有效。磁盘上的旧 allows 不恢复。
     this.allows = new Set();
+    // 域名组授权：{ key: { host, until, ports } }。按主机（含端口）记住，避免扫几百个目标时逐域弹窗。
+    // 同样只存在内存，切权限/换工作区/退出应用即失效。
+    this.netGrants = new Map();
     this.todos = this.readTodos(st.todos);
     this.subagentNotices = Array.isArray(st.notices) ? st.notices.slice(-10) : [];
     this.goal = restoreGoal(st.goal);
@@ -102,6 +107,7 @@ class Session {
       for (const p of this.pending.values()) p.finish(false);
       killAllJobs(this.projectDir);
       this.allows.clear();
+      this.netGrants.clear();
     }
     this.mode = next;
     this.review = nextReview;
@@ -150,7 +156,7 @@ class Session {
     const next = binding;
     this.mgr.workspaces.verify(next);
     for (const p of this.pending.values()) p.finish(false);
-    killAllJobs(this.projectDir); this.allows.clear(); this.readHashes.clear();
+    killAllJobs(this.projectDir); this.allows.clear(); this.netGrants.clear(); this.readHashes.clear();
     this.workspace = next; this.projectId = next.projectId || null; this.saveState(); this.emit('subagents', this.subagents.list(this.workspace.id));
     this.agent?.hist.append({ t: 'user', content: `【工作区已切换】${this.workspace.root}。后续文件操作以此目录为准，旧产出不自动迁移。` });
     this.agent?.persist(); this.emit('workspace', this.workspace); this.mgr.emitList(); return this.publicState();
@@ -163,12 +169,25 @@ class Session {
     if (network.some(h => !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]+)?$/i.test(h))) throw new Error('联网范围必须是明确域名，不能使用通配符');
     const capability = await executor.probe(); const isolated = this.mode !== 'full-access' && capability.available;
     const scopeKey = contentHash(JSON.stringify({ file: spec.file, args: spec.args, input: spec.input, guardFiles: spec.guardFiles, cwd: spec.cwd, network, workspace: this.workspace, isolated }));
-    if ((!isolated && this.mode !== 'full-access') || (network.length && this.mode !== 'full-access')) {
-      const ok = await this.approve({ name: 'process.exec', category: 'shell', scopeKey, canRemember: isolated,
-        summary: isolated ? '此命令申请访问以下网络目的地。' : '执行隔离不可用。允许后，此命令将以当前系统用户权限运行，可访问工作文件夹以外的文件和网络。',
-        command: [spec.file, ...(spec.args || [])].join('\n'), cwd: spec.cwd, isolated, network,
+    // 联网审批按「域名」而非「本次命令的全部域名集合」判定：
+    // 扫几百个目标时，每个主机都不该因为域名列表变了就重批一次。已授权的域名直接放行，
+    // 只把还没授权的域名一次性列给用户，并可选择「记住这些域名」在本会话内复用。
+    const ungranted = network.filter(h => !this.netGranted(h));
+    if ((!isolated && this.mode !== 'full-access') || (ungranted.length && this.mode !== 'full-access')) {
+      const canRemember = isolated && !ungranted.length ? true : (network.length > 0 && (isolated || !ungranted.length));
+      const ok = await this.approve({ name: 'process.exec', category: 'shell', scopeKey, canRemember,
+        summary: isolated
+          ? (ungranted.length ? '此命令申请访问以下网络目的地。' : '此命令申请访问以下网络目的地。')
+          : '执行隔离不可用。允许后，此命令将以当前系统用户权限运行，可访问工作文件夹以外的文件和网络。',
+        command: [spec.file, ...(spec.args || [])].join('\n'), cwd: spec.cwd, isolated, network: ungranted.length ? ungranted : network,
         code: spec.preview || spec.input || '', trustedPurpose: spec.trustedPurpose }, signal);
-      if (!ok) throw new Error('用户未批准执行，命令没有启动。需要批准的是：' + (isolated ? '网络访问 ' + network.join(', ') : '未隔离的系统进程执行') + '。请说明原因、改用只读步骤，或让用户切换权限后重试。');
+      if (!ok) {
+        const hint = ungranted.length
+          ? `需要授权的域名：${ungranted.join('、')}。在批准卡片上选择「本对话允许相同动作」后，这些域名在本会话内不再重复询问；也可以让我缩小扫描范围，或改用不需要联网的步骤。`
+          : '这个命令需要以系统用户权限运行（执行隔离不可用）。选择「本对话允许相同动作」可在本会话内复用，或让我改用工作区内的只读步骤。';
+        throw new Error('用户未批准执行，命令没有启动。' + hint);
+      }
+      if (ungranted.length) for (const host of ungranted) this.grantNet(host);
     }
     if (signal?.aborted) throw new Error('任务已取消');
     this.mgr.workspaces.verify(this.workspace);
@@ -182,6 +201,22 @@ class Session {
     if (this.activeRun) { const run = this.activeRun; job.done.then(r => this.runs.event(run.id, 'process-completed', { invocationId, code: r.code, reason: r.reason || null })); }
     return job;
   }
+  /** 域名是否已在本次会话中获得联网授权（按主机+端口精确匹配，不做通配） */
+  netGranted(host) {
+    const grant = this.netGrants.get(String(host || '').toLowerCase());
+    if (!grant) return false;
+    if (grant.until && grant.until < Date.now()) { this.netGrants.delete(String(host).toLowerCase()); return false; }
+    return true;
+  }
+  /** 记录一个域名授权；默认随会话结束失效，不落盘 */
+  grantNet(host) {
+    const key = String(host || '').toLowerCase();
+    if (!key) return false;
+    this.netGrants.set(key, { host: key, until: null, grantedAt: Date.now() });
+    return true;
+  }
+  netGrantList() { for (const key of [...this.netGrants.keys()]) if (!this.netGranted(key)) this.netGrants.delete(key); return [...this.netGrants.values()].map(g => g.host); }
+
   async approve(req, signal, { detached = false } = {}) {
     const run = detached ? null : this.activeRun;
     if (signal?.aborted) return false;
@@ -210,29 +245,62 @@ class Session {
   replyApproval(id, { allow, always } = {}) {
     const p = this.pending.get(String(id || ''));
     if (!p) return false;
-    if (allow && always && p.request.canRemember && p.request.scopeKey) this.allows.add(p.request.scopeKey);
+    if (allow && always && p.request.scopeKey) {
+      if (p.request.canRemember) this.allows.add(p.request.scopeKey);
+      // 联网审批记的是域名而不是整条命令：这样下一次扫描换一批目标时不必重批。
+      if (Array.isArray(p.request.network)) for (const host of p.request.network) this.grantNet(host);
+    }
     p.finish(!!allow);
     return true;
   }
-  /** 模型主动向用户提问：等界面回答；用户跳过/超时/中断都返回空串（让模型自行决定） */
+  /**
+   * 模型主动向用户提问：等界面回答。
+   *
+   * 「没有答案」有三种完全不同的原因，必须分开返回，否则模型会把
+   * 「用户明确跳过」当成「用户授权我自己决定」（参考 DSH skippedAnswerGuidance）：
+   *   answered   —— 用户选了选项或输入了文字
+   *   skipped    —— 用户明确点了「跳过」：不要复用这条信息，不要重复问，更不是授权
+   *   timed-out  —— 等不到回答：可以继续做互不影响的工作，用户之后仍可回答
+   *   cancelled  —— 任务被中断或本身是自动化：不要沿这一支继续
+   */
   async ask(req, signal) {
-    if (signal?.aborted || this.activeRun?.source === 'automation') { this.permissionBlocked = true; return ''; }
+    const outcome = (status, answer = '') => ({ status, answer, question: String(req.question || ''), options: Array.isArray(req.options) ? req.options : [] });
+    if (signal?.aborted) return outcome('cancelled');
+    if (this.activeRun?.source === 'automation') { this.permissionBlocked = true; return outcome('cancelled'); }
     const id = 'q' + (++this.askSeq);
     return await new Promise(resolve => {
       let settled = false;
-      const finish = v => { if (settled) return; settled = true; clearTimeout(timer); signal?.removeEventListener?.('abort', onAbort); this.askPending.delete(id); this.emit('question-resolved', { id }); resolve(String(v ?? '')); };
-      const timer = setTimeout(() => finish(''), 10 * 60 * 1000);
-      const onAbort = () => finish('');
+      const finish = value => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener?.('abort', onAbort);
+        this.askPending.delete(id);
+        this.emit('question-resolved', { id });
+        // 兼容旧调用方：仍然接受纯字符串，但不再把它当成唯一形态。
+        if (value && typeof value === 'object') resolve(value);
+        else resolve(outcome(value ? 'answered' : 'skipped', String(value ?? '')));
+      };
+      const timer = setTimeout(() => finish(outcome('timed-out')), 10 * 60 * 1000);
+      const onAbort = () => finish(outcome('cancelled'));
       signal?.addEventListener?.('abort', onAbort, { once: true });
       timer.unref?.();
       this.askPending.set(id, { finish, request: { ...req, id } });
       this.emit('agent-question', { id, question: req.question, detail: req.detail || '', options: req.options || [], kind: req.kind || 'question', todos: this.todos });
     });
   }
-  answerAsk(id, answer) {
+  answerAsk(id, answer, { skipped = false } = {}) {
     const p = this.askPending.get(String(id || ''));
     if (!p) return false;
-    p.finish(answer);
+    const text = String(answer ?? '').trim();
+    // UI 的「跳过」按钮明确标记 skipped；没有标记但内容为空，也按跳过处理。
+    // 原问题一并带回，模型才知道跳过的是哪一条，避免重复问同一件事。
+    p.finish({
+      status: skipped || !text ? 'skipped' : 'answered',
+      answer: text,
+      question: String(p.request?.question || ''),
+      options: Array.isArray(p.request?.options) ? p.request.options : [],
+    });
     return true;
   }
   info() {
@@ -362,6 +430,14 @@ class Session {
     if (this.mgr.projectsBusy) return { ok: false, error: '正在更新项目目录，请稍候' };
     if (this.mgr.plugins?.applying) return { ok:false, error:'正在切换插件，请稍后发送任务' };
     if (source === 'user' && this.goal?.status === 'active') source = 'goal';
+    // 长文本守门：UI 已经在粘贴时落盘，这里兜住绕过 UI 的路径（脚本、恢复、队列重发）。
+    // 正文写成工作区文件，消息只保留引用，避免一条 100 万字符的消息再次撑爆上下文与渲染。
+    if (!continuation && typeof text === 'string' && text.length > PASTE_LIMIT) {
+      try {
+        const saved = savePastedText(this.toolCtx(), text);
+        text = pasteNotice(saved);
+      } catch (e) { return { ok: false, error: '长文本保存失败：' + e.message }; }
+    }
     const s = this.mgr.getSettings();
     try { attachments = validateAttachments(this.projectDir, attachments || [], { workRoot: this.workspace.root, vision: !!((s.provider === 'anthropic' ? s.anthropic : s.openai) || {}).vision }); }
     catch (e) { return { ok: false, error: e.message }; }
@@ -433,12 +509,13 @@ class Session {
     this.saveState(); this.emit('goal', this.goal); return { ok: true };
   }
   updateGoal(value, { revision } = {}) {
-    if (!this.goal) throw new Error('当前没有目标；请先用 /goal 建立目标');
+    // 三种失败原因差别很大，分开报：否则模型会把「目标已 blocked」误读成「你不是 /goal 启动的」。
+    if (!this.goal) throw new Error('当前没有长期目标。目标只能由用户用 /goal 启动，我不能自行创建。可以直接继续做当前任务，或用 goal_update 之外的普通回复汇报进展。');
     if (this.goal.status !== 'active') {
       const label = { paused: '已暂停', needs_attention: '需要你处理', complete: '已完成' }[this.goal.status] || this.goal.status;
-      throw new Error(`目标当前${label}，不在执行中；请先点「继续目标」再更新进展`);
+      throw new Error(`当前目标状态是 ${label}，不在执行中；请先点「继续目标」再更新进展${this.goal.stopReason ? '（' + this.goal.stopReason + '）' : ''}`);
     }
-    if (!this.activeRun) throw new Error('目标更新只能发生在目标执行轮次中；当前没有正在运行的目标轮次');
+    if (this.activeRun?.source !== 'goal') throw new Error('当前这一轮不是目标续跑轮次，不能更新目标。等本轮结束后目标会自动接续，届时再记录进展。');
     if (revision !== undefined && revision !== null && Number(revision) !== (Number(this.goal.revision) || 0)) throw new Error('目标已在别处更新，请刷新后重试');
     if (value.status === 'complete' && this.subagents.jobs.size) throw new Error('请先等待或取消研究子代理，并核验其结果，再完成目标');
     this.goal = updateGoal(this.goal, value, { runId: this.activeRun.id });
@@ -482,31 +559,76 @@ class Session {
     return { ok: true, ratings: this.ratings };
   }
   async closeBrowser() { this.agent?.interrupt(); await this.mcp.stop(); await this.browser.close(); this.mgr.emitList(); }
-  async dispose() { this.closing = true; this.goalDriver.cancel(); clearTimeout(this.queueTimer); this.titleRevision++; this.titleController?.abort(); this.subagents.cancelAll(); if (this.goal?.status === 'active') this.goal.status = 'paused'; this.agent?.interrupt(); killAllJobs(this.projectDir); this.saveState(); for (const p of this.pending.values()) p.finish(false); for (const p of this.askPending.values()) p.finish(''); if (this.completion) await Promise.race([this.completion.catch(() => {}), new Promise(r => setTimeout(r, 2500))]); await this.terminals.closeAll(); await this.closeBrowser().catch(() => {}); }
+  async dispose() { this.closing = true; this.goalDriver.cancel(); clearTimeout(this.queueTimer); this.titleRevision++; this.titleController?.abort(); this.subagents.cancelAll(); if (this.goal?.status === 'active') this.goal.status = 'paused'; this.agent?.interrupt(); killAllJobs(this.projectDir); this.saveState(); for (const p of this.pending.values()) p.finish(false); for (const p of this.askPending.values()) p.finish({ status: 'cancelled', answer: '' }); if (this.completion) await Promise.race([this.completion.catch(() => {}), new Promise(r => setTimeout(r, 2500))]); await this.terminals.closeAll(); await this.closeBrowser().catch(() => {}); }
 }
 
 export class SessionManager {
   constructor({ userDataDir, getSettings, broadcast, chromeMod, mcpHost, titleGenerator }) {
     Object.assign(this, { userDataDir, getSettings, broadcast, chromeMod, mcpHost });
-    const titleService = new SessionTitleService();
+    // 模型入口在这里注入：session-titles.mjs 对 UI 保持零 Node 依赖，不自己 import providers。
+    const titleService = new SessionTitleService({ complete: chat });
     this.titleGenerator = titleGenerator || titleService.generate.bind(titleService);
     this.components = new ComponentStore(userDataDir);
     this.workspaces = new WorkspaceStore(userDataDir);
     this.projects = new ProjectStore(userDataDir);
     this.sessions = new Map(); this.focusedId = null; this.seq = 0;
     this.stateFile = path.join(userDataDir, 'sessions.json');
+    // 无项目归属的历史会话：不恢复、不自动迁移，也不从索引里抹掉。
+    // 它们属于「项目」概念出现之前的数据；是否删除由用户在界面上明确决定
+    // （见 UI 的 legacy-sessions 提示与下面的 discardLegacySessions）。
+    // 这里只是把它们原样留在索引里，避免 emitList 写盘时顺手把用户数据写成「已删除」。
+    this.legacyEntries = [];
     // 恢复上次的会话标签（标题、最后访问的网址、对话上下文；浏览器按需再启动）
     let saved = null; try { saved = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')); } catch {}
     if (saved?.sessions?.length) {
       for (const x of saved.sessions.slice(0, MAX_SESSIONS)) {
         if (!/^(?:main|s(?:[0-9a-f]{6}|[0-9a-f]{32}))$/.test(x.id) || !!x.primary !== (x.id === 'main')) throw Error('会话索引身份无效');
-        const state = JSON.parse(fs.readFileSync(path.join(userDataDir, 'projects', x.primary ? 'default' : x.id, '.agent-state.json'), 'utf8'));
-        if (!state.projectId) throw Error('开发数据包含无项目会话，请先清理开发数据');
+        const stateFile = path.join(userDataDir, 'projects', x.primary ? 'default' : x.id, '.agent-state.json');
+        let state = null; try { state = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
+        if (!state?.projectId) { this.legacyEntries.push({ ...x }); continue; }
         this.create({ id: x.id, title: x.title, titleSource: x.titleSource, primary: x.primary, lastUrl: x.url, updatedAt: x.updatedAt, pinned: x.pinned, quiet: true, projectId: state.projectId });
       }
       if (saved.focused && this.sessions.has(saved.focused)) this.focusedId = saved.focused;
+      if (!this.focusedId) this.focusedId = this.sessions.values().next().value?.id || null;
       this.seq = Math.max(this.seq, saved.seq || 0);
     }
+  }
+  /** 等待用户决定如何处理的历史会话（项目概念之前创建、没有 projectId）。 */
+  legacySessions() {
+    return this.legacyEntries.map(x => ({
+      id: x.id,
+      title: String(x.title || x.id || ''),
+      primary: !!x.primary,
+      updatedAt: Number(x.updatedAt) || 0,
+      url: String(x.url || ''),
+    }));
+  }
+  /**
+   * 删除用户明确要求清理的历史会话。
+   * 只删这些会话自己的数据目录：共享的 chrome-profile 不清空，
+   * 因为新建的主会话仍然使用同一个 browser profile 路径。
+   */
+  async discardLegacySessions(ids) {
+    const wanted = new Set((Array.isArray(ids) ? ids : []).map(String));
+    const targets = this.legacyEntries.filter(x => wanted.has(x.id));
+    if (!targets.length) return { removed: [] };
+    const root = fs.realpathSync.native(this.userDataDir);
+    const parent = path.join(root, 'projects');
+    const removed = new Set();
+    for (const x of targets) {
+      const target = path.join(parent, x.primary ? 'default' : x.id);
+      const info = fs.lstatSync(target, { throwIfNoEntry: false });
+      // 与正常删除同一条底线：不跟随被链接替换的目录。
+      if (info && !info.isSymbolicLink() && pathKey(fs.realpathSync.native(target)) === pathKey(target)) {
+        await fs.promises.rm(target, { recursive: true, force: false, maxRetries: 3, retryDelay: 100 });
+      } else if (info) {
+        throw Error('拒绝删除被链接替换的会话目录');
+      }
+      removed.add(x.id);
+    }
+    this.legacyEntries = this.legacyEntries.filter(x => !removed.has(x.id));
+    this.emitList();
+    return { removed: [...removed] };
   }
   list() {
     // 置顶优先；同组内保持原有顺序（sort 稳定）
@@ -516,7 +638,8 @@ export class SessionManager {
   }
   emitList() {
     const l = this.list(); this.broadcast('sessions', l);
-    atomicJson(this.stateFile, { focused: l.focused, seq: this.seq, sessions: l.sessions.map(s => ({ id: s.id, title: s.title, titleSource: this.sessions.get(s.id).titleSource, primary: s.primary, url: s.url, updatedAt: s.updatedAt, pinned: s.pinned })) });
+    // 历史会话（无项目归属）原样写回索引：它们没被恢复，但也没有被用户删除。
+    atomicJson(this.stateFile, { focused: l.focused, seq: this.seq, sessions: [...l.sessions.map(s => ({ id: s.id, title: s.title, titleSource: this.sessions.get(s.id).titleSource, primary: s.primary, url: s.url, updatedAt: s.updatedAt, pinned: s.pinned })), ...this.legacyEntries] });
   }
   create({ title, titleSource, primary, id: wantId, lastUrl, updatedAt, pinned, quiet, projectId = this.focused()?.projectId } = {}) {
     if (this.projectsBusy) throw new Error('正在更新项目目录，请稍候创建会话');

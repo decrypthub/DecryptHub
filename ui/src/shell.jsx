@@ -3,7 +3,7 @@ import { Flex, Text, TextField, Spinner, Dialog, DropdownMenu } from '@radix-ui/
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { useWorkbench } from './bus.jsx';
 import { Button, ActionIcon, NavButton, Icon, LogoMark } from './kit.jsx';
-import { relTime, sessionLabel } from './state.js';
+import { relTime, sessionLabel, sessionTitle } from './state.js';
 import { native } from './transport.js';
 import { ChatStage } from './chat.jsx';
 import { Dock } from './dock.jsx';
@@ -57,10 +57,12 @@ function WindowControls({ nativeTitlebar }) {
 
 function Rail({ searchRequest, onSearchHandled, onCollapse }) {
   const w = useWorkbench();
-  const { sessions, sid, focusSession, newSession, closeSession, pinSession, view, setView, api, toast, projects, projectFilter, setProjectFilter, setProjectEditor, setMoveSession } = w;
+  const { sessions, sid, focusSession, newSession, closeSession, pinSession, view, setView, api, toast, projects, projectFilter, setProjectFilter, setProjectEditor, setMoveSession, settings } = w;
   const [rename, setRename] = useState(null);
   const [renaming, setRenaming] = useState(false);
   const [menuSession, setMenuSession] = useState(null);
+  // 展示前缀只在这里读一次；它永远不进入 title（见 state.js 的 sessionTitle）。
+  const prefix = settings?.titlePrefix;
   async function copySession(session, markdown = false) {
     try {
       const text = markdown ? (await api.invoke('session-export-markdown', { sessionId: session.id })).markdown : session.id;
@@ -92,9 +94,9 @@ function Rail({ searchRequest, onSearchHandled, onCollapse }) {
     </nav>
     <SidebarBrowser searchRequest={searchRequest} onSearchHandled={onSearchHandled} renderSession={(s, showProject) => <div key={s.id} data-session-id={s.id} className={'session-item' + (showProject ? ' has-project' : '') + (s.id === sid && view === 'chat' ? ' on' : '') + (menuSession === s.id ? ' menu-open' : '')}
       onContextMenu={event => { event.preventDefault(); setMenuSession(s.id); }} onKeyDown={event => { if (event.shiftKey && event.key === 'F10') { event.preventDefault(); setMenuSession(s.id); } }}>
-        <button className="session-focus" onClick={() => focusSession(s.id)} onDoubleClick={() => setRename({ id: s.id, title: sessionLabel(s) })} title={s.title} aria-current={s.id === sid && view === 'chat' ? 'page' : undefined}>
+        <button className="session-focus" onClick={() => focusSession(s.id)} onDoubleClick={() => setRename({ id: s.id, title: sessionTitle(s) })} title={sessionLabel(s, prefix)} aria-current={s.id === sid && view === 'chat' ? 'page' : undefined}>
           <span className={'session-glyph' + (s.agentRunning ? ' running' : '')} title={s.agentRunning ? '正在分析' : undefined}>{s.agentRunning ? <Spinner size="1" /> : <Icon n="chat" size={16} />}</span>
-          <span className="session-text"><strong>{sessionLabel(s)}</strong>{showProject && <small>{projects.find(p => p.id === s.projectId)?.name}</small>}</span>
+          <span className="session-text"><strong>{sessionLabel(s, prefix)}</strong>{showProject && <small>{projects.find(p => p.id === s.projectId)?.name}</small>}</span>
           {s.pinned && <span className="session-pin" title="已置顶"><Icon n="pin" size={12} /></span>}
           <span className="session-time">{relTime(s.updatedAt)}</span>
         </button>
@@ -102,7 +104,7 @@ function Rail({ searchRequest, onSearchHandled, onCollapse }) {
           <DropdownMenu.Root open={menuSession === s.id} onOpenChange={open => setMenuSession(open ? s.id : null)}>
             <DropdownMenu.Trigger><ActionIcon icon="more" title="会话操作" /></DropdownMenu.Trigger>
             <DropdownMenu.Content align="end" sideOffset={6} size="2" className="session-menu">
-              <DropdownMenu.Item onSelect={() => setRename({ id: s.id, title: sessionLabel(s) })}><Icon n="edit" />重命名会话</DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={() => setRename({ id: s.id, title: sessionTitle(s) })}><Icon n="edit" />重命名会话</DropdownMenu.Item>
               <DropdownMenu.Item onSelect={() => copySession(s)}><Icon n="copy" />复制会话 ID</DropdownMenu.Item>
               <DropdownMenu.Item onSelect={() => copySession(s, true)}><Icon n="report" />复制为 Markdown</DropdownMenu.Item>
               <DropdownMenu.Item onSelect={() => setMoveSession(s.id)}><Icon n="folder" />移动到项目…</DropdownMenu.Item>

@@ -16,8 +16,7 @@ function fixture(t) {
   t.after(async () => { await manager.closeAll(); assert.equal(path.dirname(directory), os.tmpdir()); assert.ok(path.basename(directory).startsWith('dh-tabs-')); fs.rmSync(directory, { recursive: true, force: true }); });
   return { s, manager, directory };
 }
-const wait = async (check, message = 'Terminal verification timed out', budget = 20000) => {
-  const end = Date.now() + budget; while (!check()) { if (Date.now() > end) throw Error(message); await new Promise(r => setTimeout(r, 25)); } };
+const wait = async (check, message = 'Terminal verification timed out', budget = 20000) => { const end = Date.now() + budget; while (!check()) { if (Date.now() > end) throw Error(message); await new Promise(r => setTimeout(r, 25)); } };
 // CI runner 上 PowerShell 冷启动要 20s 以上，提示符窗口必须单独放宽，否则内层比用例的 timeout 还短。
 const waitPrompt = async (s, id) => { if (process.platform !== 'win32') return; await wait(() => /PS [^>\r\n]*>/.test(s.terminals.snapshot(id).output), 'PowerShell prompt timed out', 45000); await new Promise(r => setTimeout(r, 800)); };
 const expectOutput = async (check, s, id) => { try { await wait(check, 'Terminal verification timed out', 40000); } catch (error) { const tail = s.terminals.snapshot(id).output.slice(-600); throw Error(error.message + '; output tail=' + JSON.stringify(tail)); } };

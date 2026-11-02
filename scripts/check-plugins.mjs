@@ -188,6 +188,8 @@ try {
   const rail = page.getByRole('button', { name: '展开会话列表' });
   if (await rail.count()) await rail.first().click();
   await page.locator('.rail-nav').getByRole('button', { name: '插件', exact: true }).click();
+  // 页签选择会被记住，回归测试先显式停在「官方插件」。
+  await page.getByRole('tab', { name: '官方插件', exact: true }).click();
   await page.locator('[data-plugin-id="wdh"]').waitFor();
   if ((await page.getByRole('tab').allInnerTexts()).join('|') !== '官方插件|自定义 MCP')
     throw Error('插件页应分为「官方插件」和「自定义 MCP」两个页签');
@@ -238,11 +240,19 @@ try {
   if (statuses.some((s) => s.state === 'ready' && !s.version)) throw Error('Connected MCP version missing');
   const shots = path.resolve('artifacts/plugins');
   fs.mkdirSync(shots, { recursive: true });
-  await page.locator('.plugins-page').evaluate((e) => (e.scrollTop = 0));
-  await page.screenshot({ path: path.join(shots, 'light.png') });
-  await page.emulateMedia({ colorScheme: 'dark' });
-  await page.waitForTimeout(100);
-  await page.screenshot({ path: path.join(shots, 'dark.png') });
+  for (const scheme of ['light', 'dark']) {
+    await page.emulateMedia({ colorScheme: scheme });
+    for (const [tab, name] of [
+      ['官方插件', 'official'],
+      ['自定义 MCP', 'mcp'],
+    ]) {
+      await page.getByRole('tab', { name: tab, exact: true }).click();
+      await page.locator('.plugins-page').evaluate((e) => (e.scrollTop = 0));
+      await page.waitForTimeout(100);
+      await page.screenshot({ path: path.join(shots, scheme + '-' + name + '.png') });
+    }
+  }
+  await page.getByRole('tab', { name: '官方插件', exact: true }).click();
   const preferences = await invoke('get-settings');
   await invoke('save-settings', {
     ...preferences,

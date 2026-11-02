@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { normalizeThinking } from './thinking.mjs';
 export function publicSettings(settings) {
   const out = JSON.parse(JSON.stringify(settings));
   for (const type of ['openai', 'anthropic']) if (out[type]) { out[type].hasKey = !!out[type].apiKey; out[type].apiKey = ''; }
@@ -21,4 +22,7 @@ export function mirrorProvider(settings) {
   settings.activeModel = selected;
   settings.provider = p.type;
   settings[p.type] = { ...settings[p.type], baseUrl: p.baseUrl, model: selected, apiKey: p.apiKey || '', contextWindow: Number(model?.contextWindow) || Number(p.contextWindow) || 0, vision: !!model?.vision };
+  // 思考声明跟着模型走；模型没声明时清掉镜像，避免上一次选择（另一个模型）的声明残留到当前模型。
+  const declared = typeof model === 'object' && model?.thinking && typeof model.thinking === 'object' ? normalizeThinking(model.thinking, p.type === 'anthropic' ? 'budget' : 'effort') : null;
+  if (declared?.levels?.length) settings[p.type].thinking = declared; else delete settings[p.type].thinking;
 }

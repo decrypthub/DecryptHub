@@ -35,8 +35,10 @@ async function startServer() {
   const { selectReadRoot } = await import('./workspaces.mjs');
   const { ProjectService } = await import('./project-service.mjs');
   const { ExtensionStore } = await import('./extensions.mjs');
+  const { SYSTEM_MEMORY_SOURCES } = await import('./system-memory.mjs');
   const { publicSettings, decryptSecrets, mirrorProvider } = await import('./secrets.mjs');
   const { registerAttachment, attachmentPreview } = await import('./attachments.mjs');
+  const { savePastedText } = await import('./paste-drop.mjs');
   const { conversationMarkdown } = await import('./transcript.mjs');
   const { searchSessions } = await import('./session-search.mjs');
   const { openFeedback } = await import('./feedback.mjs');
@@ -123,6 +125,9 @@ async function startServer() {
     'mcp-restart': async a => { await mcpHost.restart(String(a?.name || '')); return mcpHost.status(); },
     'mcp-save': a => extensions.saveMcp(a?.servers || {}, a?.approveNames || []),
     'projects-list': () => sessions.projects.list(),
+    // 没有项目归属的历史会话：只报告，不自动处理。删除必须由用户在界面上明确选择。
+    'legacy-sessions': () => sessions.legacySessions(),
+    'legacy-sessions-discard': a => sessions.discardLegacySessions(a?.ids),
     'project-save': a => projects.save(a.project || {}, a.scope || a.sessionId),
     'projects-check': () => projects.checkDirectories(),
     'project-attach': a => projects.attach(S(a).id, a.projectId || null),
@@ -130,6 +135,56 @@ async function startServer() {
     'project-move': a => projects.move(a.id, a.beforeId),
     'extensions-list': a => { const s = S(a); return extensions.list(a.kind, { sessionId: s.id, projectId: s.projectId }); },
     'extension-read': a => { const s = S(a); return extensions.read(a.kind, a, { sessionId: s.id, projectId: s.projectId }); },
+    // 设置页的「记忆与技能」：跨项目、跨会话的只读清点 + 删除。
+    // 与工具通道分开：这里没有当前会话，必须由调用方明确 scope 和 scopeId，不做猜测。
+    // 系统记忆不在此列——它是产品内置与插件声明的事实，设置页不展示也不可编辑。
+    'extensions-admin': a => {
+      const kind = a?.kind;
+      if (!['skill', 'memory'].includes(kind)) throw Error('未知扩展类型');
+      const scope = a?.scope, scopeId = a?.scopeId;
+      // 条目必须带回 scopeId：设置页后续的 read/remove 要靠它定位到同一个作用域，
+      // 缺了它就只能拿到 undefined，被下面的校验拒绝。
+      const at = id => ({ admin: true, scopeId: String(id), sessionId: String(id), projectId: scope === 'project' ? String(id) : null });
+      if (scope === 'user') return extensions.list(kind, at('global')).map(x => ({ ...x, scope: 'user', scopeId: 'global' }));
+      if (scope && scopeId) return extensions.list(kind, at(scopeId)).map(x => ({ ...x, scope, scopeId: String(scopeId) }));
+      // 未指定作用域：把所有用户级、项目级、会话级的目录合并清点
+      const roots = [];
+      try {
+        const base = path.join(settingsMod.userDataDir(), 'extensions');
+        for (const s of ['user', 'project', 'session']) {
+          const dir = path.join(base, s);
+          if (!fs.existsSync(dir)) continue;
+          for (const entry of fs.readdirSync(dir, { withFileTypes: true }).slice(0, 200)) {
+            if (!entry.isDirectory() || !/^[a-zA-Z0-9-]+$/.test(entry.name)) continue;
+            roots.push({ scope: s, id: entry.name });
+          }
+        }
+      } catch { /* 目录不可读时返回已发现的条目，不抛出 */ }
+      const merged = [];
+      for (const r of roots) {
+        try {
+          for (const item of extensions.list(kind, { admin: true, scopeId: r.id, sessionId: r.id, projectId: r.scope === 'project' ? r.id : null }))
+            merged.push({ ...item, scope: r.scope, scopeId: r.id });
+        } catch { /* 单个作用域失败不影响其他条目 */ }
+      }
+      return merged;
+    },
+    'extension-admin-read': a => {
+      if (!['skill', 'memory'].includes(a?.kind)) throw Error('未知扩展类型');
+      if (!a?.scope || !a?.scopeId) throw Error('读取需要明确 scope 和 scopeId');
+      return extensions.read(a.kind, a, { admin: true, scopeId: String(a.scopeId), sessionId: String(a.scopeId), projectId: a.scope === 'project' ? String(a.scopeId) : null });
+    },
+    'extension-admin-remove': a => {
+      if (!['skill', 'memory'].includes(a?.kind)) throw Error('未知扩展类型');
+      if (!a?.scope || !a?.scopeId) throw Error('删除需要明确 scope 和 scopeId');
+      const ctx = { admin: true, scopeId: String(a.scopeId), sessionId: String(a.scopeId), projectId: a.scope === 'project' ? String(a.scopeId) : null };
+      return extensions.remove(a.kind, { ...a, scope: a.scope }, ctx);
+    },
+    'system-memory-sources': () => ({
+      // 只报告来源与容量，不返回正文：系统记忆由产品与插件拥有，界面不提供查看或编辑。
+      sources: SYSTEM_MEMORY_SOURCES.map(label => ({ label, editable: false })),
+      pluginInstructions: (mcpHost.status() || []).filter(x => x.instructions).map(({ name, version }) => ({ name, version, editable: false })),
+    }),
     'component-info': () => sessions.components.info(),
     'doctor': async () => ({runtime:runtimeInfo,hostIntegrity:await windowsRuntime.hostIntegrity(),component:sessions.components.info(),chrome:[],chromeOk:sessions.components.info().installed,downloading:!!downloading,version:process.env.JSRA_APP_VERSION||''}),
     'kernel-info': async () => {
@@ -249,7 +304,7 @@ async function startServer() {
     },
     'session-set-mode': a => S(a).setMode(a?.mode, a?.review),
     'agent-approval-reply': a => ({ ok: S(a).replyApproval(a?.id, { allow: !!a?.allow, always: !!a?.always }) }),
-    'agent-answer': a => ({ ok: S(a).answerAsk(a?.id, a?.answer) }),
+    'agent-answer': a => ({ ok: S(a).answerAsk(a?.id, a?.answer, { skipped: a?.skipped === true }) }),
     'debug-paused': async a => {
       const s = S(a);
       if (!s.browser.running || !s.mcp?.has?.('get_paused_info')) return { paused: false, text: '浏览器分析内核未连接，无法读取断点。' };
@@ -278,6 +333,9 @@ async function startServer() {
       return registerAttachment(S(a).projectDir, { name: path.basename(p), data: fs.readFileSync(p) });
     },
     'attach-upload': a => registerAttachment(S(a).projectDir, { name: a?.name, data: a?.data, mime: String(a?.mime || '') }),
+    // 长文本落盘：粘贴内容超过阈值时不进对话历史，写成工作区文件让模型按需读取。
+    // 返回相对路径，UI 把它作为提示而不是消息正文发送。
+    'paste-save': a => savePastedText(S(a).toolCtx(), String(a?.text ?? ''), a?.name),
     'attachment-preview': a => attachmentPreview(S(a).projectDir, a?.id),
     // 自动化任务
     'tasks-list': () => tasks.list().map(t => ({ ...t, nextAt: tasks.nextAt(t) })),

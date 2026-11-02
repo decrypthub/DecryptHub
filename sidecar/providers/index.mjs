@@ -3,14 +3,15 @@
 import { completeOpenAI } from './openai.mjs';
 import { completeAnthropic } from './anthropic.mjs';
 import { withModelRetries } from '../model-retry.mjs';
+import { requestThinking } from '../thinking.mjs';
 
 export const PROVIDERS = {
   openai: {
-    cfg: s => ({ ...s.openai, temperature: s.temperature, maxTokens: s.openaiMaxTokens, idleTimeoutMs: s.idleTimeoutMs }),
+    cfg: s => ({ ...s.openai, temperature: s.temperature, maxTokens: s.openaiMaxTokens, idleTimeoutMs: s.idleTimeoutMs, thinking: requestThinking(s, 'openai') }),
     complete: completeOpenAI,
   },
   anthropic: {
-    cfg: s => ({ ...s.anthropic, temperature: s.temperature, maxTokens: s.maxTokens, idleTimeoutMs: s.idleTimeoutMs }),
+    cfg: s => ({ ...s.anthropic, temperature: s.temperature, maxTokens: s.maxTokens, idleTimeoutMs: s.idleTimeoutMs, thinking: requestThinking(s, 'anthropic') }),
     complete: completeAnthropic,
   },
 };

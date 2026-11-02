@@ -2,12 +2,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Flex, Text, Badge, Callout, Spinner, TextArea, Separator, Popover } from '@radix-ui/themes';
 import { useWorkbench } from './bus.jsx';
-import { Button, ActionIcon, Icon, Markdown, Dropdown } from './kit.jsx';
+import { Button, ActionIcon, Icon, Markdown } from './kit.jsx';
 import { fmtK, sessionLabel } from './state.js';
 import { native } from './transport.js';
 import { PermissionPicker, PendingActions } from './workspace.jsx';
-import { AttachmentTiles } from './attachments.jsx';
+import { AttachmentTiles, ReplyImages } from './attachments.jsx';
+import { ReplyMarkdown } from './reply-markdown.jsx';
 import { conversationTurns, toolPresentation, elapsedLabel } from './conversation.js';
+import { shouldDropPaste } from './paste-drop.js';
 import { TurnTrigger } from './turn-trigger.jsx';
 import { commandMatches } from './commands.js';
 import { CommandMenu, CommandFeedback, CommandDialogs } from './harness.jsx';
@@ -18,7 +20,10 @@ import { PlanButton } from './plan.jsx';
 import { GoalDetails, GoalResumeBanner } from './goal-details.jsx';
 import { Reasoning } from './reasoning.jsx';
 import { processPresentation } from './process-presentation.js';
+import { reasoningOpen, toggleReasoning } from './scroll-stick.js';
 import { QueuedMessages } from './queue-strip.jsx';
+import { ModelSeat } from './thinking-picker.jsx';
+import { modelThinking, effectiveThinking } from '../../sidecar/thinking.mjs';
 
 const CTX_PARTS = [['system', '系统提示'], ['tools', '工具定义'], ['summary', '压缩摘要'], ['history', '对话'], ['attachments', '附件'], ['toolResults', '工具结果']];
 
@@ -35,6 +40,9 @@ export function ChatStage({ railOpen, onExpandRail }) {
   const model = settings.activeModel || '';
   const modelInfo = (activeProvider?.models || []).find(m => (typeof m === 'string' ? m : m.id) === model);
   const vision = typeof modelInfo === 'object' && modelInfo?.vision;
+  // 思考档位：只有当前模型确实声明了档位时才给选择器，否则不摆一个切换无效的控件。
+  const declaredThinking = modelThinking(typeof modelInfo === 'object' ? modelInfo?.thinking : null, model);
+  const thinking = effectiveThinking(declaredThinking, settings.activeThinking);
   const commands = commandDismissed ? [] : commandMatches(input), commandId = 'composer-commands-' + w.sid;
   const chooseCommand = c => { setInput('/' + c.name + ' '); setCommandDismissed(true); setTimeout(() => refs.inputRef.current?.focus(), 0); };
   const composerKey = e => {
@@ -58,7 +66,7 @@ export function ChatStage({ railOpen, onExpandRail }) {
     <header className="stage-head" data-window-drag-region onMouseDown={e => handleWindowDrag(e, native)}>
       {!railOpen && <ActionIcon icon="sidebar" variant="soft" color="gray" onClick={onExpandRail} title="展开会话列表" />}
       <div className="stage-identity">
-        <strong className="ellipsis" title={sessionLabel(session || {})}>{sessionLabel(session || {})}</strong>
+        <strong className="ellipsis" title={sessionLabel(session || {}, settings.titlePrefix)}>{sessionLabel(session || {}, settings.titlePrefix)}</strong>
       </div>
       <Box flexGrow="1" />
       <div className="stage-progress" aria-label="目标、计划与子代理">
@@ -105,7 +113,7 @@ export function ChatStage({ railOpen, onExpandRail }) {
         {atts.some(a => a.image) && !vision && <Flex gap="2" align="center" mb="2" wrap="wrap"><Text size="1" color="amber">当前模型未启用图片输入</Text><Button size="1" variant="ghost" color="gray" onClick={w.enableImages} title="仅在该模型支持图片时启用">启用图片输入</Button></Flex>}
         {dragging && <div className="drop-hint">松开以添加图片或文件</div>}
         <TextArea className="composer-input" size="2" variant="soft" color="gray" resize="none" ref={refs.inputRef} value={input} rows={2}
-          onPaste={e => { const files = Array.from(e.clipboardData?.items || []).filter(item => item.kind === 'file').map(item => item.getAsFile()).filter(Boolean); if (files.length) { e.preventDefault(); w.addFiles(files); } }}
+          onPaste={e => { const files = Array.from(e.clipboardData?.items || []).filter(item => item.kind === 'file').map(item => item.getAsFile()).filter(Boolean); if (files.length) { e.preventDefault(); w.addFiles(files); return; } const text = e.clipboardData?.getData('text/plain') || ''; if (shouldDropPaste(text)) { e.preventDefault(); w.dropPaste(text); } }}
           onChange={e => { setInput(e.target.value); setCommandIndex(0); setCommandDismissed(false); e.target.style.height = 'auto'; e.target.style.height = Math.min(180, e.target.scrollHeight) + 'px'; }}
           onKeyDown={composerKey}
           aria-controls={commands.length ? commandId : undefined} aria-activedescendant={commands.length ? commandId + '-' + Math.min(commandIndex, commands.length - 1) : undefined} aria-autocomplete="list" aria-expanded={commands.length > 0}
@@ -119,10 +127,11 @@ export function ChatStage({ railOpen, onExpandRail }) {
           <div className="composer-mode"><PermissionPicker /></div>
           <Box flexGrow="1" />
           <div className="composer-context"><CtxMeter /></div>
-          <div className="composer-model"><Dropdown width={110} label="选择模型" value={(providers.find(p => p.id === settings.activeProviderId)?.id || '') + '|' + model}
-            placeholder={providers.length ? '选择模型' : '选择渠道'}
-            options={providers.map(p => ({ group: p.name, items: (p.models || []).map(m => { const id = typeof m === 'string' ? m : m.id; return { value: p.id + '|' + id, label: (m && m.name) || id }; }) }))}
-            onChange={v => { const i = v.indexOf('|'); if (i > 0) pickModel(v.slice(0, i), v.slice(i + 1)); }} /></div>
+          <div className="composer-seat"><ModelSeat
+            providers={providers} providerId={settings.activeProviderId || ''} model={model}
+            levels={declaredThinking.levels} value={thinking.level} transport={declaredThinking.transport}
+            defaultLevel={declaredThinking.default}
+            onPickModel={(pid, m) => pickModel(pid, m)} onPickThinking={level => w.pickThinking(level)} /></div>
           <ActionIcon icon={responding ? 'stop' : 'send'} className="send-button" variant="solid" onClick={() => responding ? inv('agent-interrupt') : send(false)}
             disabled={!responding && (w.session?.workspace?.availability !== 'ready' || w.sending || w.uploading || (!input.trim() && !atts.length))}
             title={responding ? '停止响应' : w.editTarget ? '重新发送（Enter）' : '发送（Enter）'} />
@@ -158,7 +167,7 @@ function TurnFiles({ turn }) {
 }
 
 function TurnProcess({ turn }) {
-  const { cur } = useWorkbench();
+  const { cur, presentation: view } = useWorkbench();
   const [expanded, setExpanded] = useState(null), [now, setNow] = useState(Date.now());
   const presentation = processPresentation(turn), open = expanded ?? presentation.defaultOpen, hasReasoning = turn.process.some(e => e.type === 'reasoning');
   useEffect(() => { if (!turn.active) return; const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, [turn.active]);
@@ -173,7 +182,7 @@ function TurnProcess({ turn }) {
   const count = [hasReasoning && '思考', kindSummary.join(' · ') || (turn.tools.length ? `${turn.tools.length} 项操作` : ''), turn.subagents.length && `子代理 ${turn.subagents.length}`, turn.failures && `失败 ${turn.failures}`].filter(Boolean).join(' · ');
   if (!turn.process.length && !turn.subagents.length) return turn.active ? <div className="turn-meta" role="status"><span className="tool-state run"><Spinner size="1" /></span><span className="turn-process-label" title={label}>{label}</span></div> : null;
   const header = <><span className={'tool-state ' + (turn.active ? 'run' : turn.failures ? 'err' : 'ok')}>{turn.active ? <Spinner size="1" /> : <Icon n={turn.failures ? 'info' : 'check'} size={13} />}</span><span className="turn-process-label" title={label}>{label}</span>{turn.active && elapsed && <span className="turn-process-elapsed">{elapsed}</span>}{count && <span className="tool-count" title={count}>{count}</span>}</>;
-  const content = <div className="turn-process-items">{turn.process.map((e, i) => e.type === 'tool' ? <ToolEvent key={e.itemId || i} e={e} /> : e.type === 'reasoning' ? <Reasoning key={e.id} event={e} /> : e.type === 'assistant' ? <div className="process-message" key={e.id || i}><Markdown text={e.content} /></div> : <Event key={e.id || i} e={e} />)}<TurnSubagents agents={turn.subagents} /></div>;
+  const content = <div className="turn-process-items">{turn.process.map((e, i) => e.type === 'tool' ? <ToolEvent key={e.itemId || i} e={e} /> : e.type === 'reasoning' ? <Reasoning key={e.id} event={e} open={reasoningOpen(view, e)} onToggle={ev => { const next = toggleReasoning(view, ev); if (next) view.setReasoningOpen(next); }} /> : e.type === 'assistant' ? <div className="process-message" key={e.id || i}><Markdown text={e.content} streaming={e.phase === 'streaming'} /></div> : <Event key={e.id || i} e={e} />)}<TurnSubagents agents={turn.subagents} /></div>;
   // Keep the same parent as a short live turn grows, preserving open tool details.
   return <details className={'turn-process tool-group' + (!presentation.foldable ? ' turn-process-inline' : '')} open={!presentation.foldable || open}>
     <summary hidden={!presentation.foldable} aria-label="执行过程" onClick={e => { e.preventDefault(); setExpanded(!open); }}>{header}<Icon n={open ? 'chevup' : 'chevdown'} size={12} /></summary>
@@ -184,6 +193,7 @@ function TurnProcess({ turn }) {
 
 function ToolEvent({ e }) {
   const [open, setOpen] = useState(false);
+  const w = useWorkbench();
   const st = e.result === undefined ? 'run' : e.isError ? 'err' : e.cancelled ? 'cancelled' : 'ok';
   const format = value => typeof value === 'string' ? value : JSON.stringify(value, null, 2);
   const duration = e.ms == null ? '' : e.ms < 1000 ? `${e.ms} ms` : `${(e.ms / 1000).toFixed(1)} s`;
@@ -197,6 +207,8 @@ function ToolEvent({ e }) {
       <Icon n={open ? 'chevup' : 'chevdown'} size={11} />
     </button>
     {open && <div className="tool-body"><div className="tool-section-label">{e.name}<span>{duration}</span></div><ToolPayload label="输入" text={format(e.args || {})} /><ToolPayload label="输出" text={e.result === undefined ? '执行中…' : format(e.result)} /></div>}
+    {/* 截图等工具产出的图片：折叠状态下也贴在工具条下方，用户和模型都不用再转述。 */}
+    {!!e.images?.length && <div className="tool-images"><ReplyImages items={e.images} sessionId={w.sid} invoke={w.api.invoke} /></div>}
   </div>;
 }
 
@@ -211,8 +223,11 @@ function AssistantMessage({ e, turn, copy }) {
   const complete = e.phase === 'final_answer' && !!turn?.endedAt;
   const time = complete ? new Date(turn.endedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '';
   const final = e.phase === 'final_answer';
+  // 本轮所有工具产出的图片（截图、reply_image）。正文里用 image:<id> 指过位置的会被排除，
+  // 剩下的附在回复末尾——否则模型把图发在中间步骤时，用户只看得到一句「已发送图片」。
+  const images = useMemo(() => final ? (turn?.tools || []).flatMap(t => t.images || []) : [], [final, turn]);
   return <article aria-label="模型回复" className={'msg assistant' + (final ? '' : ' commentary') + (e.phase === 'streaming' ? ' is-streaming' : '')}>
-    <div className="bubble"><Markdown text={e.content} /></div>
+    <div className="bubble"><ReplyMarkdown text={e.content} images={images} sessionId={w.sid} invoke={w.api.invoke} streaming={e.phase === 'streaming'} /></div>
     {final && <div className="message-foot">
       <ActionIcon icon="copy" size="1" variant="ghost" color="gray" onClick={copy} title="复制回复" aria-label="复制回复" />
       <ActionIcon icon="thumbup" size="1" variant="ghost" color={rating === 'up' ? 'tomato' : 'gray'} onClick={() => w.rate(e.id, 'up')} title={rating === 'up' ? '取消“有帮助”' : '标记为有帮助'} aria-label="有帮助" aria-pressed={rating === 'up'} />

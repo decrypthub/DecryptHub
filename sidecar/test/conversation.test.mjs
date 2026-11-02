@@ -19,6 +19,26 @@ test('turn presentation keeps progress text interleaved with tools inside the fo
   assert.deepEqual(turns[0].answers.map(a => a.content), ['最终回复']);
   assert.equal(toolPresentation(turns[0].tools[0]).detail, 'a.js');
 });
+// 用户报的现象：AI 思考完先回一句正文，那句话在正文区闪一下就消失。
+// 原因是流式时 phase 还是 streaming，被当成最终答复渲染；assistant-end 落定成 commentary 后
+// 又改投执行过程，等于从正文区被摘走。流式期间一律先进执行过程就不会再闪现。
+test('streaming text enters the folded process instead of the answer area, so a commentary line never flashes', () => {
+  const streaming = { type: 'assistant', id: 'a1', turnId: 'r', content: '我先读一下入口文件。', reasoning: '需要先看入口', phase: 'streaming', finished: false };
+  const live = conversationTurns([{ type: 'user', id: 'u', turnId: 'r', content: '改代码' }, streaming], { id: 'r', status: 'running' }, true)[0];
+  assert.deepEqual(live.answers, [], '流式正文不能先占用正文区');
+  assert.deepEqual(live.process.map(e => e.type), ['reasoning', 'assistant'], '思考与开场句同在执行过程里按顺序排');
+
+  // 落定成 commentary：仍在过程里，正文区始终为空——位置没变，所以看不到跳变。
+  const settled = { ...streaming, phase: 'commentary', finished: true };
+  const after = conversationTurns([{ type: 'user', id: 'u', turnId: 'r', content: '改代码' }, settled, { type: 'tool', id: 'c1', itemId: 'i1', turnId: 'r', name: 'workspace_read', args: { path: 'a.js' } }], { id: 'r', status: 'running' }, true)[0];
+  assert.deepEqual(after.answers, []);
+  assert.deepEqual(after.process.map(e => e.type), ['reasoning', 'assistant', 'tool']);
+
+  // 最终答复仍然进正文区。
+  const done = conversationTurns([{ type: 'user', id: 'u', turnId: 'r', content: '改代码' }, settled, { type: 'assistant', id: 'a2', turnId: 'r', phase: 'final_answer', content: '改好了。', finished: true }, { type: 'turn-end', turnId: 'r', stop: 'completed', endedAt: 2000 }], null, false)[0];
+  assert.deepEqual(done.answers.map(a => a.content), ['改好了。']);
+});
+
 test('stream updates address a specific message instead of the latest assistant', () => {
   let state = { s: blankSession() };
   for (const id of ['old', 'new']) state = sessionReducer(state, { sid: 's', t: 'assistant-start', v: { id, turnId: id } });

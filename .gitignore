@@ -42,6 +42,8 @@ wdh.key.password
 **/llm-e2e/
 **/screens/
 shot.png
+# 本地 UI 检查的临时截图（scripts/check-thinking-ui.mjs 落点），不是源码。
+/.thinking-ui-*.png
 PROGRESS.md
 PROGRESS-*.json
 CHANGES.md
@@ -64,3 +66,7 @@ updater-test/
 
 /artifacts/
 /.tmp-*
+
+# 长文本粘贴落盘目录（sidecar/paste-drop.mjs）：写在用户项目根下，
+# 属于会话运行产物而非源码，不应进入任何仓库。
+.dh-paste/

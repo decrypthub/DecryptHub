@@ -18,7 +18,7 @@ export function normalizeMode(mode) {
 }
 
 const READ = new Set([
-  'component_list', 'browser_open', 'browser_new_tab', 'browser_tabs', 'browser_select', 'browser_snapshot',
+  'component_list', 'browser_open', 'browser_new_tab', 'browser_reset', 'browser_tabs', 'browser_select', 'browser_snapshot',
   'browser_requests', 'browser_request_detail', 'browser_capture',
   'context_ref_read',
   'agent_spawn', 'agent_message', 'agent_wait', 'agent_list', 'agent_cancel', 'goal_update',
@@ -32,6 +32,7 @@ const READ = new Set([
   'list_network_requests', 'list_scripts', 'get_script_source', 'search_in_sources',
   'list_breakpoints', 'get_request_initiator', 'get_paused_info', 'take_screenshot',
   'get_websocket_messages', 'todo_write', 'ask_user',
+  'reply_image', // 只把工作区里已有的图片交给 UI 展示，不写文件、不联网、不改远端状态
 ]);
 
 const WRITE = new Set([

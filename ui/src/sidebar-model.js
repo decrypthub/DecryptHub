@@ -1,4 +1,4 @@
-import { sessionLabel } from './state.js';
+import { sessionLabel, sessionTitle } from './state.js';
 
 const normalized = value => String(value || '').normalize('NFKC').toLowerCase();
 export const searchTerms = query => normalized(query).trim().split(/\s+/).filter(Boolean);
@@ -10,7 +10,7 @@ export function readSidebarView(storage) {
 export function orderSidebarSessions(sessions, sort) {
   return [...sessions].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || (sort === 'recent' ? (b.updatedAt || 0) - (a.updatedAt || 0) : 0));
 }
-export function sidebarResults(projects, sessions, query, history = []) {
+export function sidebarResults(projects, sessions, query, history = [], prefix = '') {
   const projectMap = new Map(projects.map(p => [p.id, p])), results = [], found = new Set();
   for (const project of projects) {
     const paths = (project.folders || []).map(f => f.root).join(' ');
@@ -18,14 +18,15 @@ export function sidebarResults(projects, sessions, query, history = []) {
   }
   for (const session of sessions) {
     const project = projectMap.get(session.projectId); if (!project) continue;
-    if (sidebarMatches([sessionLabel(session), project.name, ...(project.folders || []).map(f => f.root)].join(' '), query)) {
-      found.add(session.id); results.push({ key: 's:' + session.id, kind: 'session', id: session.id, title: sessionLabel(session), project, subtitle: project.name });
+    // 匹配用「原标题 + 展示名」两个都试：加不加前缀都能搜到，且搜索本身不会改写任何标题。
+    if (sidebarMatches([sessionTitle(session), sessionLabel(session, prefix), project.name, ...(project.folders || []).map(f => f.root)].join(' '), query)) {
+      found.add(session.id); results.push({ key: 's:' + session.id, kind: 'session', id: session.id, title: sessionLabel(session, prefix), project, subtitle: project.name });
     }
   }
   for (const hit of history) {
     const session = sessions.find(s => s.id === hit.sessionId), project = session && projectMap.get(session.projectId);
     if (!session || !project || project.id !== hit.projectId || found.has(session.id)) continue;
-    found.add(session.id); results.push({ key: 's:' + session.id, kind: 'session', id: session.id, title: sessionLabel(session), project, subtitle: project.name, excerpt: hit.excerpt, turnId: hit.turnId });
+    found.add(session.id); results.push({ key: 's:' + session.id, kind: 'session', id: session.id, title: sessionLabel(session, prefix), project, subtitle: project.name, excerpt: hit.excerpt, turnId: hit.turnId });
   }
   return results;
 }

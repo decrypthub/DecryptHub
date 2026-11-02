@@ -2,14 +2,17 @@
 // 界面组件只从这里取状态和动作，不自己发 RPC。
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
 import { toast as notify } from 'sonner';
-import { blankSession, sessionReducer, mod, isApi } from './state.js';
+import { blankSession, sessionReducer, mod, isApi, sessionLabel } from './state.js';
 import { askConfirm, askQuestion, DocumentLinks } from './kit.jsx';
 import { onConnState, native } from './transport.js';
 import { normalizeTargetUrl } from '../../sidecar/url.mjs';
 import { scheduleStartupCheck } from './updater.js';
 import { historyEvents } from './conversation.js';
+import { shouldStick, settleInto, jumpTo } from './scroll-stick.js';
+import { sessionView } from './session-view.js';
 import { rememberPreview } from './attachments.jsx';
 import { parseCommand, extensionRequest } from './commands.js';
+import { guessPasteName } from './paste-drop.js';
 import { BrowserSurface } from './browser-surface.js';
 import { BrowserFrames } from './browser-frames.js';
 import { useSessionView } from './use-session-view.jsx';
@@ -37,6 +40,8 @@ export function Workbench({ children }) {
   const [commandForm, setCommandForm] = useState(null), [extensionBrowser, setExtensionBrowser] = useState(null), [commandFeedback, setCommandFeedback] = useState({});
   const [automationDraft, setAutomationDraft] = useState(false);
   const [editTarget, setEditTarget] = useState(null); // { sid, turnId } 编辑已发送消息
+  // 项目概念出现之前的历史会话（无 projectId）：只提示、不自动处理，删不删由用户决定。
+  const [legacySessions, setLegacySessions] = useState([]);
   useEffect(() => api.on('projects', setProjects), []);
 
   const sid = sessions.focused;
@@ -81,6 +86,7 @@ export function Workbench({ children }) {
   const [uploads, setUploads] = useState({});
   const [sending, setSending] = useState({});
   const attsRef = useRef(atts); attsRef.current = atts;
+  const draftsRef = useRef(drafts); draftsRef.current = drafts;
   const approvalChain = useRef(Promise.resolve());
   const seen = useRef(new Set());
   const settingsRef = useRef(settings); settingsRef.current = settings;
@@ -115,6 +121,23 @@ export function Workbench({ children }) {
     setView('chat');
     setTimeout(() => inputRef.current?.focus(), 40);
   }, []);
+  // 长文本粘贴：内容写成工作区文件，输入框只留一行引用。
+  // 不在输入框里塞正文，是因为这条路径的目的就是让长文本不进入消息体。
+  const dropPaste = useCallback(async (text) => {
+    const target = sidRef.current;
+    if (!target) return;
+    setUploads(m => ({ ...m, [target]: (m[target] || 0) + 1 }));
+    try {
+      const saved = await api.invoke('paste-save', { sessionId: target, text, name: guessPasteName(text) });
+      const ref = `【粘贴长文本】${saved.path}（${saved.lines} 行 / ${saved.chars} 字符），请读取该文件后再继续。`;
+      // setInput 只接受值（见上面 useCallback 的签名），不能传更新函数。
+      const prev = draftsRef.current[target] || '';
+      setInput(prev ? prev + '\n' + ref : ref);
+      toast(`已存为 ${saved.path}（${saved.lines} 行），正文未发送`, 'ok');
+    } catch (e) { toast('长文本保存失败：' + e.message, 'err'); }
+    finally { setUploads(m => ({ ...m, [target]: Math.max(0, (m[target] || 1) - 1) })); }
+  }, []);
+
   const rmAtt = useCallback(key => setAtts(m => ({ ...m, [sidRef.current]: (m[sidRef.current] || []).filter(x => x.key !== key) })), []);
   async function addFiles(files) {
     const target = sidRef.current, available = 8 - (attsRef.current[target] || []).length;
@@ -163,10 +186,11 @@ export function Workbench({ children }) {
         s.activeProviderId = s.providers[0].id;
         s.activeModel = (s.providers[0].models || [])[0] || '';
       }
-      // 模型从「字符串数组」升级成对象：{ id, name, contextWindow, vision }
+      // 模型从「字符串数组」升级成对象：{ id, name, contextWindow, vision, thinking }
+      // thinking 必须原样带过：它是用户逐模型声明的思考档位，丢了界面就无从知道该模型支持哪些档。
       for (const p of s.providers) {
         p.models = (p.models || []).map(m => typeof m === 'string' ? { id: m, name: m }
-          : (m && m.id ? { id: String(m.id), name: m.name || String(m.id), contextWindow: Number(m.contextWindow) || 0, vision: !!m.vision } : null)).filter(Boolean);
+          : (m && m.id ? { id: String(m.id), name: m.name || String(m.id), contextWindow: Number(m.contextWindow) || 0, vision: !!m.vision, ...(m.thinking ? { thinking: m.thinking } : {}) } : null)).filter(Boolean);
       }
       if (s.activeModel && typeof s.activeModel === 'object') s.activeModel = s.activeModel.id;
       if (!s.activeProviderId || !s.providers.some(x => x.id === s.activeProviderId)) s.activeProviderId = s.providers[0]?.id || '';
@@ -190,6 +214,17 @@ export function Workbench({ children }) {
   // ---- 画面帧 ----
   const drawFrame = useCallback(f => {
     frames.current.receive(frameTargetRef.current, f);
+  }, []);
+
+  // 历史会话（无项目归属）在启动时清点一次。它们是本地残留数据，不做任何自动处理。
+  useEffect(() => { api.invoke('legacy-sessions').then(v => setLegacySessions(Array.isArray(v) ? v : [])).catch(() => {}); }, []);
+  const discardLegacySessions = useCallback(async ids => {
+    try {
+      const r = await api.invoke('legacy-sessions-discard', { ids });
+      setLegacySessions(list => list.filter(x => !(r?.removed || []).includes(x.id)));
+      toast('已删除历史会话', 'ok');
+      return true;
+    } catch (e) { toast('删除失败：' + e.message, 'err'); return false; }
   }, []);
 
   // ---- 事件订阅 ----
@@ -277,7 +312,52 @@ export function Workbench({ children }) {
     }
   }, [sessions]);
 
-  useEffect(() => { const el = chatRef.current; if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight; }, [cur.events]);
+  // 会话切换或历史异步加载完成后，必须贴到最后一条；之后才启用「用户往上翻就不打扰」的粘性逻辑。
+  // 原实现只有一个 scrollHeight 判断：切会话时 .msgs 因 key 变化重建、scrollTop=0，
+  // 历史加载后距离底部远大于 160px，被误判成「用户正在阅读」而放弃滚动，于是停在顶部。
+  const stickTo = useRef({ sid: null, settled: false });
+  const viewsRef = useRef(presentation.views); viewsRef.current = presentation.views;
+  const setScrollRef = useRef(presentation.setScroll); setScrollRef.current = presentation.setScroll;
+  useEffect(() => {
+    const el = chatRef.current; if (!el) return;
+    const { stick, fresh } = shouldStick(el, stickTo.current, sid);
+    if (!stick) return;
+    if (!fresh) { jumpTo(el, el.scrollHeight); return; }
+    // 首次进入：用户上次主动往上翻过就回到原位，否则贴底。
+    settleInto({
+      read: () => chatRef.current,
+      apply: top => jumpTo(chatRef.current, top),
+      alive: () => stickTo.current.sid === sid,
+      saved: sessionView(viewsRef.current, sid)?.scroll || null,
+      schedule: fn => requestAnimationFrame(fn),
+      onSettled: () => { stickTo.current.settled = true; },
+    });
+  }, [cur.events, sid]);
+
+  // 记录阅读位置：用户主动往上翻才保存；回到底部则清掉记录，恢复时继续贴底。
+  // 用 rAF 节流，避免滚动时频繁写 localStorage。
+  // 注意：这里通过 ref 读最新 views，避免把 views 放进依赖导致每次保存都重绑监听。
+  useEffect(() => {
+    const el = chatRef.current; if (!el) return;
+    const target = sid;
+    let frame = 0;
+    const save = () => {
+      frame = 0;
+      const node = chatRef.current;
+      if (!node || sidRef.current !== target) return;
+      // 还没 settle（正在贴底/恢复中）时不记录，否则会把恢复过程本身写回去。
+      if (!stickTo.current.settled || stickTo.current.sid !== target) return;
+      const atBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 160;
+      const previous = sessionView(viewsRef.current, target)?.scroll || null;
+      if (atBottom) { if (previous) setScrollRef.current(null, target); return; }
+      // 位置没变就不写，减少 localStorage 抖动。
+      if (previous && Math.abs(previous.top - Math.round(node.scrollTop)) < 24) return;
+      setScrollRef.current({ top: Math.round(node.scrollTop), at: Date.now() }, target);
+    };
+    const onScroll = () => { if (!frame) frame = requestAnimationFrame(save); };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => { el.removeEventListener('scroll', onScroll); if (frame) cancelAnimationFrame(frame); };
+  }, [sid]);
 
   // 画面区尺寸变化 → 通知 sidecar 调整无头视口
   const runningNow = !!cur?.status?.running;
@@ -397,7 +477,7 @@ export function Workbench({ children }) {
 
   async function closeSession(id) {
     const s = sessions.sessions.find(x => x.id === id);
-    if (!s || !await askConfirm(`删除「${s.title || '对话'}」？聊天记录、附件、浏览器数据及会话内的托管工作区会永久删除。外部项目文件保留，关联自动化将暂停。`, { ok: '删除对话', danger: true })) return;
+    if (!s || !await askConfirm(`删除「${sessionLabel(s, settings?.titlePrefix)}」？聊天记录、附件、浏览器数据及会话内的托管工作区会永久删除。外部项目文件保留，关联自动化将暂停。`, { ok: '删除对话', danger: true })) return;
     try { await api.invoke('session-delete', { sessionId: id }); }
     catch (e) { toast('删除失败：' + e.message, 'err'); return; }
     await surface.current.release(id).catch(() => {});
@@ -538,13 +618,15 @@ export function Workbench({ children }) {
     const model = models.find(m => m.id === requested)?.id || models[0]?.id || requested || '';
     const mObj = models.find(m => m.id === model);
     const out = { ...s, provider: p.type, activeModel: model, providers: list };
-    // 上下文窗口 / 图片能力跟着「模型」走，而不是渠道
+    // 上下文窗口 / 图片能力 / 思考声明跟着「模型」走，而不是渠道
     out[p.type] = {
       ...(s[p.type] || {}), baseUrl: p.baseUrl, model,
       apiKey: p.apiKey || (s[p.type] || {}).apiKey || '',
       contextWindow: Number(mObj?.contextWindow) || Number(p.contextWindow) || 0,
       vision: !!mObj?.vision,
     };
+    // 只有模型显式声明了档位才镜像；否则删掉，避免把上一个模型的声明带过去。
+    if (mObj?.thinking?.levels?.length) out[p.type].thinking = mObj.thinking; else delete out[p.type].thinking;
     return out;
   }
 
@@ -561,6 +643,8 @@ export function Workbench({ children }) {
   }
 
   const pickModel = (pid, m) => saveSettings({ ...settings, activeProviderId: pid, activeModel: m }, true);
+  // 切换思考强度：与选模型同一条保存通道，立刻对下一次请求生效（settings 是请求时的快照来源）。
+  const pickThinking = level => saveSettings({ ...settings, activeThinking: level }, true);
   const enableImages = () => saveSettings({ ...settings, providers: (settings.providers || []).map(p => p.id !== settings.activeProviderId ? p : { ...p, models: (p.models || []).map(m => (typeof m === 'string' ? m : m.id) !== settings.activeModel ? m : { ...(typeof m === 'string' ? { id: m, name: m } : m), vision: true }) }) }, true);
 
   // ---- 快捷键 ----
@@ -587,14 +671,16 @@ export function Workbench({ children }) {
     projects, setProjects, projectFilter, setProjectFilter, projectEditor, setProjectEditor, moveSession, setMoveSession, workspacePrompt, setWorkspacePrompt,
     isCurrentSession: id => sidRef.current === id,
     commandForm, setCommandForm, extensionBrowser, setExtensionBrowser, automationDraft, setAutomationDraft,
+    legacySessions, discardLegacySessions,
     commandFeedback: commandFeedback[sid], clearCommandFeedback: () => setCommandFeedback(m => ({ ...m, [sid]: null })),
     settings, saveSettings, setSettings, firstRun, setFirstRun,
     sessions, sid, session, cur, dispatch, focusSession,
     view, setView, side, setSide, sideOpen, setSideOpen, openSide, panelLayout: presentation.layout, setPanelLayout: presentation.setPanelLayout, tabs,
+    presentation,
     launching, launch, go, newSession, closeSession, pinSession, cleanRetry,
     input, setInput, editTarget: editTarget?.sid === sid ? editTarget : null, startEdit, cancelEdit, rate,
-    atts: atts[sid] || [], addAtt, rmAtt, addFiles, uploading: !!uploads[sid], sending: !!sending[sid], enableImages,
-    send, sendInput, compactNow, pickModel, inv,
+    atts: atts[sid] || [], addAtt, rmAtt, addFiles, dropPaste, uploading: !!uploads[sid], sending: !!sending[sid], enableImages,
+    send, sendInput, compactNow, pickModel, pickThinking, inv,
     setTheme,
     refs: { viewRef: bindViewport, canvasRef: bindCanvas, urlRef, inputRef, chatRef },
     embedOn, embedCovered,
