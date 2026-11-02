@@ -15,7 +15,7 @@ npm run build:ui
 node --test sidecar/test/*.test.mjs
 ```
 
-Windows 调试：先运行 `scripts/build-desktop.cmd`，然后 `npm run dev:desktop`。脚本使用 `.tmp/desktop-appdata/WebDecryptHub` 保存开发聊天，与日常数据分开。开发模式需要 Node 在 PATH 中。
+Windows 调试：先运行 `scripts/build-desktop.cmd`，然后 `npm run dev:desktop`。脚本使用产品正式数据目录 `%APPDATA%\DecryptHub`，与安装版共用同一份对话；需要隔离调试时显式设 `DECRYPTHUB_DATA_DIR` 为绝对路径。开发模式需要 Node 在 PATH 中。
 
 macOS 源码开发与串流验证见 [Mac 开发说明](docs/macos-development.md)。目前只验证 Apple Silicon 源码路径，不代表已有正式 Mac 安装包或原生浏览器嵌入支持。
 
@@ -43,6 +43,6 @@ node scripts/check-sidecar.mjs
 
 IDH / ADH 已通过各自官方 CLI/MCP 网关接入插件中心，支持版本检查、下载、校验、配置和启停；Python 3.10+ 及设备插件/Host 服务由用户准备。详见 [插件管理](docs/plugins.md)。
 
-旧桌面应用的应用标识、凭据库和默认 `WebDecryptHub` 数据目录暂时保留，以兼容已有配置与会话。产品名称和更新源改为 DecryptHub；网页分析项目保留 WebDecryptHub 名称。
+旧桌面应用的应用标识和凭据库暂时保留，以兼容已有配置；数据目录已改为产品名 `%APPDATA%\DecryptHub`（旧的 `WebDecryptHub` 目录会在启动时自动整体迁移）。产品名称和更新源为 DecryptHub；网页分析项目保留 WebDecryptHub 名称。
 
 MIT。源自 decrypthub/WebDecryptHub 的桌面开发快照，原始仓库和用户未提交的工作保持不变。

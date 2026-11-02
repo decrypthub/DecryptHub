@@ -9,6 +9,11 @@ import { normalizeThinking, ALL_LEVELS } from './thinking.mjs';
 // Chrome for Testing 不再作为选项：load 与 save 都归一到这里，旧的 settings.json 会被静默迁移。
 export const KERNEL = 'cloak';
 
+// 应用数据目录名 = 产品名。不要写成 WebDecryptHub：那是浏览器组件 WDH 的仓库名，不是本产品。
+export const DATA_DIR_NAME = 'DecryptHub';
+// 旧目录名，按从新到旧排列；只在 DATA_DIR_NAME 不存在时逐个前移迁移。
+export const LEGACY_DATA_DIR_NAMES = ['WebDecryptHub', 'JSReverseAgent'];
+
 const DEFAULTS = {
   provider: 'openai',
   openai: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o' },
@@ -36,9 +41,13 @@ export function userDataDir() {
   const base = process.platform === 'win32' ? (process.env.APPDATA || os.homedir())
     : process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Application Support')
     : (process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'));
-  const d = path.join(base, 'WebDecryptHub');
-  const legacy = path.join(base, 'JSReverseAgent');
-  try { if (!fs.existsSync(d) && fs.existsSync(legacy)) fs.renameSync(legacy, d); } catch {}
+  // 产品正式名是 DecryptHub。目录名历史上的演变是 JSReverseAgent → WebDecryptHub → DecryptHub，
+  // 每次只往前挪一格，且只在目标不存在时搬，避免把用户刚建的空目录当成"已迁移"而丢数据。
+  const d = path.join(base, DATA_DIR_NAME);
+  for (const name of LEGACY_DATA_DIR_NAMES) {
+    const legacy = path.join(base, name);
+    try { if (!fs.existsSync(d) && fs.existsSync(legacy)) fs.renameSync(legacy, d); } catch {}
+  }
   fs.mkdirSync(d, { recursive: true });
   return d;
 }

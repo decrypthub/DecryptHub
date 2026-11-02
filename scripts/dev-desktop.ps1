@@ -44,7 +44,9 @@ if (-not (Test-Port $vitePort)) {
 $before = @{ Node = $env:JSRA_SIDECAR_NODE; AppData = $env:DECRYPTHUB_DATA_DIR; DevUrl = $env:JSRA_UI_DEV_URL; Community = $env:DECRYPTHUB_COMMUNITY_URL }
 try {
   $env:JSRA_SIDECAR_NODE = $sidecarEntry
-  $env:DECRYPTHUB_DATA_DIR = Join-Path $root '.tmp\desktop-appdata\WebDecryptHub'
+  # 开发版默认也用产品正式数据目录，避免「同一个软件换个入口就是另一份空工作台」。
+  # 需要与日常数据隔离时显式传 DECRYPTHUB_DATA_DIR=<绝对路径>。
+  if (-not $env:DECRYPTHUB_DATA_DIR) { $env:DECRYPTHUB_DATA_DIR = Join-Path $env:APPDATA 'DecryptHub' }
   $env:JSRA_UI_DEV_URL = "http://127.0.0.1:$vitePort/"
   # DECRYPTHUB_COMMUNITY_URL 只影响 debug 构建；留空则连生产社区 decrypthub.cn。
   # 连测试服：$env:DECRYPTHUB_COMMUNITY_URL = 'https://decrypthub.taisuii.cn'

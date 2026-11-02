@@ -107,12 +107,13 @@ export function ProjectDialogs() {
 
 /**
  * 项目概念之前留下的历史会话（没有 projectId）。
- * 它们是本地残留数据，产品不做自动迁移，也不替用户删——这里只如实报告并询问。
+ * 它们是本地残留数据，产品不做自动迁移，也不替用户删——这里如实报告，并让用户选择恢复或删除。
  */
 function LegacySessionsNotice() {
   const w = useWorkbench(), [busy, setBusy] = useState(false), [dismissed, setDismissed] = useState(false);
   const list = w.legacySessions || [];
   if (!list.length || dismissed) return null;
+  const restorable = list.filter(s => s.restorable !== false);
   const names = list.slice(0, 3).map(s => `「${s.title || s.id}」`).join('、');
   const more = list.length > 3 ? ` 等 ${list.length} 个` : '';
   const remove = async () => {
@@ -121,16 +122,25 @@ function LegacySessionsNotice() {
     setBusy(false);
     if (ok) setDismissed(true);
   };
+  const restore = async () => {
+    setBusy(true);
+    // 恢复后列表里剩下的就是恢复失败的，保留弹窗让用户看见原因。
+    const r = await w.restoreLegacySessions(list.map(s => s.id));
+    setBusy(false);
+    if (r && !(r.skipped || []).length) setDismissed(true);
+  };
   return <Dialog.Root open onOpenChange={open => { if (!open && !busy) setDismissed(true); }}>
     <Dialog.Content maxWidth="480px" data-overlay>
       <Dialog.Title>历史会话没有项目归属</Dialog.Title>
       <Dialog.Description size="2" color="gray">
         找到 {list.length} 个创建于「项目」功能之前的会话：{names}{more}。它们不会被载入，也不会被自动迁移或删除。
+        「恢复到会话列表」会为它们建立项目归属，之后可以正常打开查看。<br />
         删除会同时清理这些会话的记录、附件和浏览器数据；目录与源码文件不受影响。
       </Dialog.Description>
       <Flex justify="end" gap="2" mt="5">
         <Button variant="soft" color="gray" disabled={busy} onClick={() => setDismissed(true)}>稍后处理</Button>
-        <Button color="red" disabled={busy} onClick={remove}>{busy ? '删除中…' : '删除这些历史会话'}</Button>
+        <Button color="red" disabled={busy} onClick={remove}>{busy ? '处理中…' : '删除这些历史会话'}</Button>
+        <Button disabled={busy || !restorable.length} onClick={restore}>{busy ? '处理中…' : `恢复 ${restorable.length} 个`}</Button>
       </Flex>
     </Dialog.Content>
   </Dialog.Root>;

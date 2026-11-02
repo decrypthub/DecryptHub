@@ -94,3 +94,81 @@ test('browserPresentation: macOS 默认串流；停靠模式有头且不串流',
   assert.deepEqual(mod.browserPresentation({ headless: true, embedMode: 'docked' }, 'darwin', {}), { embed: false, headless: true, dock: false });
   assert.deepEqual(mod.browserPresentation({ headless: false, embedMode: 'docked' }, 'win32', {}), { embed: true, headless: false, dock: false });
 });
+
+/** 清掉 DECRYPTHUB_DATA_DIR，让 userDataDir() 走真实的 APPDATA 分支 */
+async function withBase(fn) {
+  const prev = { data: process.env.DECRYPTHUB_DATA_DIR, appdata: process.env.APPDATA, xdg: process.env.XDG_CONFIG_HOME };
+  delete process.env.DECRYPTHUB_DATA_DIR;
+  try { return await fn(); } finally {
+    for (const [k, v] of [['DECRYPTHUB_DATA_DIR', prev.data], ['APPDATA', prev.appdata], ['XDG_CONFIG_HOME', prev.xdg]]) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  }
+}
+
+test('默认数据目录用产品名 DecryptHub，不再叫 WebDecryptHub', async () => {
+  const base = tmp();
+  process.env.APPDATA = base; process.env.XDG_CONFIG_HOME = base;
+  await withBase(async () => {
+    const mod = await import(`../settings.mjs?n=${Date.now()}${Math.random()}`);
+    assert.equal(mod.DATA_DIR_NAME, 'DecryptHub');
+    const dir = mod.userDataDir();
+    assert.equal(path.basename(dir), 'DecryptHub');
+    assert.equal(fs.existsSync(dir), true);
+  });
+});
+
+test('旧 WebDecryptHub 数据目录会被整体迁移到 DecryptHub（设置与会话都不丢）', async () => {
+  const base = tmp();
+  process.env.APPDATA = base; process.env.XDG_CONFIG_HOME = base;
+  const legacy = path.join(base, 'WebDecryptHub');
+  fs.mkdirSync(path.join(legacy, 'projects', 'main'), { recursive: true });
+  fs.writeFileSync(path.join(legacy, 'settings.json'), JSON.stringify({ headless: true, openai: { model: 'kept-model' } }));
+  fs.writeFileSync(path.join(legacy, 'sessions.json'), JSON.stringify({ focused: 'main', sessions: [{ id: 'main', primary: true }] }));
+  fs.writeFileSync(path.join(legacy, 'projects', 'main', '.agent-history.json'), '{"events":[]}');
+  await withBase(async () => {
+    const mod = await import(`../settings.mjs?n=${Date.now()}${Math.random()}`);
+    const dir = mod.userDataDir();
+    assert.equal(path.basename(dir), 'DecryptHub');
+    // 数据跟着搬过去，不是新建空目录
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8')).openai.model, 'kept-model');
+    assert.equal(fs.existsSync(path.join(dir, 'sessions.json')), true);
+    assert.equal(fs.existsSync(path.join(dir, 'projects', 'main', '.agent-history.json')), true);
+    assert.equal(fs.existsSync(legacy), false, '旧目录必须整体改名，不能留在原地');
+    assert.equal(mod.load().headless, true);
+  });
+});
+
+test('DecryptHub 已存在时不会被旧的 WebDecryptHub 覆盖', async () => {
+  const base = tmp();
+  process.env.APPDATA = base; process.env.XDG_CONFIG_HOME = base;
+  const current = path.join(base, 'DecryptHub');
+  fs.mkdirSync(current, { recursive: true });
+  fs.writeFileSync(path.join(current, 'settings.json'), JSON.stringify({ openai: { model: 'new-model' } }));
+  const legacy = path.join(base, 'WebDecryptHub');
+  fs.mkdirSync(legacy, { recursive: true });
+  fs.writeFileSync(path.join(legacy, 'settings.json'), JSON.stringify({ openai: { model: 'stale-model' } }));
+  await withBase(async () => {
+    const mod = await import(`../settings.mjs?n=${Date.now()}${Math.random()}`);
+    const dir = mod.userDataDir();
+    assert.equal(path.basename(dir), 'DecryptHub');
+    assert.equal(mod.load().openai.model, 'new-model', '已有新目录时旧目录只能当遗留，不能顶掉它');
+    assert.equal(fs.existsSync(legacy), true, '旧目录保持原样，等用户自己决定');
+  });
+});
+
+test('更早的 JSReverseAgent 目录也能一路迁移到 DecryptHub', async () => {
+  const base = tmp();
+  process.env.APPDATA = base; process.env.XDG_CONFIG_HOME = base;
+  const ancient = path.join(base, 'JSReverseAgent');
+  fs.mkdirSync(ancient, { recursive: true });
+  fs.writeFileSync(path.join(ancient, 'settings.json'), JSON.stringify({ openai: { model: 'ancient-model' } }));
+  await withBase(async () => {
+    const mod = await import(`../settings.mjs?n=${Date.now()}${Math.random()}`);
+    const dir = mod.userDataDir();
+    assert.equal(path.basename(dir), 'DecryptHub');
+    assert.equal(mod.load().openai.model, 'ancient-model');
+    assert.equal(fs.existsSync(ancient), false);
+  });
+});
+

@@ -125,8 +125,9 @@ async function startServer() {
     'mcp-restart': async a => { await mcpHost.restart(String(a?.name || '')); return mcpHost.status(); },
     'mcp-save': a => extensions.saveMcp(a?.servers || {}, a?.approveNames || []),
     'projects-list': () => sessions.projects.list(),
-    // 没有项目归属的历史会话：只报告，不自动处理。删除必须由用户在界面上明确选择。
+    // 没有项目归属的历史会话：只报告，不自动处理。恢复/删除都必须由用户在界面上明确选择。
     'legacy-sessions': () => sessions.legacySessions(),
+    'legacy-sessions-restore': a => sessions.restoreLegacySessions(a?.ids),
     'legacy-sessions-discard': a => sessions.discardLegacySessions(a?.ids),
     'project-save': a => projects.save(a.project || {}, a.scope || a.sessionId),
     'projects-check': () => projects.checkDirectories(),
