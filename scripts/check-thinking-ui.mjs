@@ -79,7 +79,7 @@ await new Promise(r => srv.listen(PORT, '127.0.0.1', r));
 
 const { chromium } = await import('../node_modules/@zhizhuodemao/patchright/index.mjs');
 const browser = await chromium.launch({ headless: true, executablePath: CHROME });
-const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' });
+const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: process.env.JSRA_UI_SCHEME || 'dark' });
 const page = await context.newPage();
 const pageErrors = [];
 page.on('pageerror', e => pageErrors.push(e.message));
@@ -141,12 +141,14 @@ try {
   ok(/reasoning_effort: high/.test(payloadHigh), '高对应 reasoning_effort: high（实际 ' + JSON.stringify(payloadHigh) + '）');
   await page.keyboard.press('Escape');
 
-  // 4) 键盘可达：聚焦档位条后按 Home/ArrowRight 也能改档
+  // 4) 键盘可达：焦点落在当前档那一段上，Home/ArrowRight/End 也能改档
   //    注意必须重新打开浮层——上一步按 Escape 已经把它卸载，对已卸载节点 focus() 不会生效。
   await trigger.click();
   await page.locator('.seat-pop').waitFor({ timeout: 8000 });
-  const bar = page.locator('.seat-pop .thinking-steps');
-  await bar.focus();
+  const currentStep = page.locator('.seat-pop .thinking-steps .thinking-step.on');
+  ok(await currentStep.count() === 1, '当前档应恰好有一段标 on（实际 ' + await currentStep.count() + '）');
+  await currentStep.focus();
+  ok(await page.evaluate(() => document.activeElement?.getAttribute('role') === 'radio'), '档位条应把焦点交给当前档那一段');
   await page.keyboard.press('Home');
   await page.waitForTimeout(300);
   ok(readSettings().activeThinking === 'off', 'Home 应选中第一档关闭（实际 ' + JSON.stringify(readSettings().activeThinking) + '）');

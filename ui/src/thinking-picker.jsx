@@ -126,10 +126,22 @@ export function LevelSlider({ levels, value, onChange, label = '默认强度', d
   // 所以这里基于「刚刚提交的值」推算，而不是等重渲染。
   const pending = useRef(value);
   pending.current = value;
+  // 焦点走 roving tabindex：Tab 进组只落在当前档（没选就落第一档），← → 在段间移动并立即生效。
+  // 每段是真按钮，读屏读到的是「思考强度 中，单选按钮，已选中」，而不是一个说不出值的容器。
+  const stepsRef = useRef(null);
+  const wantFocus = useRef(-1);
+  useEffect(() => {
+    const at = wantFocus.current;
+    if (at < 0) return;
+    wantFocus.current = -1;
+    stepsRef.current?.querySelectorAll('.thinking-step')[at]?.focus();
+  }, [value]);
   const keydown = event => {
     const last = list.length - 1;
-    const at = indexOf(list, pending.current);
-    const delta = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[event.key];
+    // 连续按键时 props 还没回流：按「刚刚提交的值」算起点，否则 Home 之后紧跟 ArrowRight 会停在原地。
+    const seen = indexOf(list, pending.current);
+    const at = seen >= 0 ? seen : 0;
+    const delta = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
     let next;
     if (event.key === 'Home') next = 0;
     else if (event.key === 'End') next = last;
@@ -137,12 +149,14 @@ export function LevelSlider({ levels, value, onChange, label = '默认强度', d
     else return;
     event.preventDefault();
     const target = list[next];
-    if (target === pending.current) return;
-    pending.current = target;
-    onChange(target);
+    if (target === undefined) return;
+    wantFocus.current = next;
+    if (target !== pending.current) { pending.current = target; onChange(target); }
+    else stepsRef.current?.querySelectorAll('.thinking-step')[next]?.focus();
   };
-  return <div className="thinking-steps" role="radiogroup" tabIndex={0} aria-label={label} aria-describedby={describedBy} onKeyDown={keydown}>
-    {list.map((id, index) => <button type="button" role="radio" key={id} tabIndex={-1}
+  const tabIndex = index => ((current >= 0 ? index === current : index === 0) ? 0 : -1);
+  return <div ref={stepsRef} className="thinking-steps" role="radiogroup" aria-label={label} aria-describedby={describedBy} onKeyDown={keydown}>
+    {list.map((id, index) => <button type="button" role="radio" key={id} tabIndex={tabIndex(index)}
       className={'thinking-step' + (index === current ? ' on' : '') + (current >= 0 && index < current ? ' done' : '')}
       aria-checked={index === current} aria-label={'思考强度 ' + levelLabel(id)} title={levelLabel(id)}
       onClick={() => pick(index)}>
