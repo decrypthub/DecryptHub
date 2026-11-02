@@ -11,3 +11,5 @@
 - 改动对应的生命周期/协议/权限测试通过后，运行 `node --test sidecar/test/*.test.mjs`；UI 改动另运行 `npm run build:ui`、`npm run audit:ui`、`npm run check:ui`。平台窗口变更需补真实 Windows 桌面链路验收；单元测试和无头浏览器不能替代原生交互验收。
 - `check:ui` 默认跑全量（约 30–90 秒，400 次断言，含插件与浏览器抓包），它属于 CI 的验收项。**本机只改一处时用分节**：`node scripts/check-ui.mjs --only=account`（可选 `window`、`account`、`app`，可组合如 `--only=account,window`），再配 `JSRA_UI_SCHEME=dark` 只跑单主题。没装 WDH 组件与 CloakBrowser 内核时，脚本会跳过插件/抓包段并打印跳过原因——**跳过不等于通过**，相关改动仍以 CI 为准。不要为了「看一眼」反复跑全量。
 - 保留用户未提交的改动。不要做与当前任务无关的大规模迁移；跨模块迁移先记录决定、兼容策略和可验证的退出条件。
+- **合并之后要核对结果，别只信「没有冲突」。** 2026-11-02 的 `a043f9c`（把 main 合进功能分支）没有报冲突，却把 main 上刚做好的五处 CI 加固覆盖回了旧值：`check-ui.mjs` 的 `context.setDefaultTimeout(60000)` 整行消失、端口退回硬编码，`check-sidecar.mjs` 的 PTY 等待 90000→15000，`shell-encoding` 的 `timeoutMs` 90000→30000，`workspace-tabs` 的提示符窗口 45000→20000。这类回退不红不报错，只把窗口悄悄收窄，等到下一次超时才表现为「新代码有问题」。**判据**：合并后某个文件如果「结果 = 分支侧」且「结果 ≠ main」，而该文件在 main 上有近期改动，就是被吞了——逐项核对，别只看 `git diff` 是否为空。
+- **`check:ui` 是 CI 的验收项，不是本机自检工具。** 跑之前先想清楚这次改动到底需要它回答什么问题：逻辑正确性用 `node --test`；需要肉眼判断的交互交给人工或 CI；只有「这一处界面在真实浏览器里的行为」才值得本机跑，且用 `--only=` 分节。缺 WDH 组件与 CloakBrowser 内核时不要为了跑通去下载——那一段本来就该由 CI 验证。跑不通说明不了代码坏，跑通了也不等于界面好，别为了「做了事」而跑。
