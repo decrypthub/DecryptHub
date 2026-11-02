@@ -59,7 +59,6 @@ node --test sidecar/test/*.test.mjs
 npm run build:ui
 npm run audit:ui
 npm run check:wdh -- ../WebDecryptHub-Runtime
-npm run check:ui
 cargo test --manifest-path src-tauri/Cargo.toml
 npm --prefix ../WebDecryptHub-Runtime test
 ```

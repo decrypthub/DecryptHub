@@ -218,6 +218,18 @@ export function Workbench({ children }) {
 
   // 历史会话（无项目归属）在启动时清点一次。它们是本地残留数据，不做任何自动处理。
   useEffect(() => { api.invoke('legacy-sessions').then(v => setLegacySessions(Array.isArray(v) ? v : [])).catch(() => {}); }, []);
+  const restoreLegacySessions = useCallback(async ids => {
+    try {
+      const r = await api.invoke('legacy-sessions-restore', { ids });
+      const done = (r?.restored || []).map(x => x.id);
+      setLegacySessions(list => list.filter(x => !done.includes(x.id)));
+      const skipped = r?.skipped || [];
+      if (done.length) toast(`已恢复 ${done.length} 个历史会话`, 'ok');
+      // 跳过是逐条原因不同的：一次列出来，别让用户以为全都恢复了。
+      if (skipped.length) toast('未恢复：' + skipped.map(x => `${x.title || x.id}（${x.reason}）`).join('；'), 'warn', 9000);
+      return r;
+    } catch (e) { toast('恢复失败：' + e.message, 'err'); return null; }
+  }, []);
   const discardLegacySessions = useCallback(async ids => {
     try {
       const r = await api.invoke('legacy-sessions-discard', { ids });
@@ -671,7 +683,7 @@ export function Workbench({ children }) {
     projects, setProjects, projectFilter, setProjectFilter, projectEditor, setProjectEditor, moveSession, setMoveSession, workspacePrompt, setWorkspacePrompt,
     isCurrentSession: id => sidRef.current === id,
     commandForm, setCommandForm, extensionBrowser, setExtensionBrowser, automationDraft, setAutomationDraft,
-    legacySessions, discardLegacySessions,
+    legacySessions, restoreLegacySessions, discardLegacySessions,
     commandFeedback: commandFeedback[sid], clearCommandFeedback: () => setCommandFeedback(m => ({ ...m, [sid]: null })),
     settings, saveSettings, setSettings, firstRun, setFirstRun,
     sessions, sid, session, cur, dispatch, focusSession,

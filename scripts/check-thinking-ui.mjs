@@ -79,7 +79,7 @@ await new Promise(r => srv.listen(PORT, '127.0.0.1', r));
 
 const { chromium } = await import('../node_modules/@zhizhuodemao/patchright/index.mjs');
 const browser = await chromium.launch({ headless: true, executablePath: CHROME });
-const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' });
+const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: process.env.JSRA_UI_SCHEME || 'dark' });
 const page = await context.newPage();
 const pageErrors = [];
 page.on('pageerror', e => pageErrors.push(e.message));
@@ -126,9 +126,11 @@ try {
   // 顶部闪电已按要求移除（触发器与浮层都不留）
   ok(await pop.locator('.thinking-bolt').count() === 0, '浮层不应再有闪电图标');
   ok(await page.locator('.seat-trigger .seat-bolt').count() === 0, '触发器不应再有闪电图标');
-  // 底部必须如实说出会发什么，而不是只写「更聪明」
-  const payload = await pop.locator('.thinking-payload').innerText();
-  ok(/reasoning_effort: medium/.test(payload), '应显示实际发送的参数（实际 ' + JSON.stringify(payload) + '）');
+  // 浮层里不该出现 JSON 字段名：用户点开只是想选档位，reasoning_effort / thinking.type
+  // 是适配器的实现细节，写在设置页以外的任何地方都是噪音。
+  ok(await pop.locator('.thinking-payload').count() === 0, '浮层不应再显示请求参数字面量');
+  const popText = await pop.innerText();
+  ok(!/reasoning_effort|budget_tokens|thinking\.type/.test(popText), '浮层不应出现字段名字面量（实际 ' + JSON.stringify(popText.replace(/\n/g, ' ')) + '）');
   await page.screenshot({ path: path.join(ROOT, '.thinking-ui-pop.png') });
 
   // 3) 点最高档 → 写入 settings.json，触发器跟着变
@@ -137,16 +139,16 @@ try {
   ok(readSettings().activeThinking === 'high', '选高后应写入 activeThinking=high（实际 ' + JSON.stringify(readSettings().activeThinking) + '）');
   await trigger.waitFor();
   ok(/高/.test((await trigger.innerText()).trim()), '触发器应显示「高」（实际 ' + JSON.stringify((await trigger.innerText()).trim()) + '）');
-  const payloadHigh = await pop.locator('.thinking-payload').innerText();
-  ok(/reasoning_effort: high/.test(payloadHigh), '高对应 reasoning_effort: high（实际 ' + JSON.stringify(payloadHigh) + '）');
   await page.keyboard.press('Escape');
 
-  // 4) 键盘可达：聚焦档位条后按 Home/ArrowRight 也能改档
+  // 4) 键盘可达：焦点落在当前档那一段上，Home/ArrowRight/End 也能改档
   //    注意必须重新打开浮层——上一步按 Escape 已经把它卸载，对已卸载节点 focus() 不会生效。
   await trigger.click();
   await page.locator('.seat-pop').waitFor({ timeout: 8000 });
-  const bar = page.locator('.seat-pop .thinking-steps');
-  await bar.focus();
+  const currentStep = page.locator('.seat-pop .thinking-steps .thinking-step.on');
+  ok(await currentStep.count() === 1, '当前档应恰好有一段标 on（实际 ' + await currentStep.count() + '）');
+  await currentStep.focus();
+  ok(await page.evaluate(() => document.activeElement?.getAttribute('role') === 'radio'), '档位条应把焦点交给当前档那一段');
   await page.keyboard.press('Home');
   await page.waitForTimeout(300);
   ok(readSettings().activeThinking === 'off', 'Home 应选中第一档关闭（实际 ' + JSON.stringify(readSettings().activeThinking) + '）');
@@ -185,6 +187,14 @@ try {
   await page.getByRole('dialog', { name: '编辑渠道' }).waitFor();
   const badges = await page.locator('.model-row').allInnerTexts();
   ok(badges.some(text => /思考 关闭 \/ 低 \/ 中 \/ 高/.test(text)), '模型行应显示声明的档位（实际 ' + JSON.stringify(badges) + '）');
+  // 进模型编辑弹窗：只声明档位，不该出现「发送方式」这种让用户挑 JSON 字段名的控件。
+  await page.locator('.model-row').first().getByRole('button', { name: '编辑模型', exact: true }).click();
+  const modelDialog = page.getByRole('dialog', { name: '编辑模型' });
+  await modelDialog.waitFor();
+  const dialogText = await modelDialog.innerText();
+  ok(!/发送方式/.test(dialogText), '模型编辑不应再有「发送方式」控件');
+  ok(!/reasoning_effort|budget_tokens|thinking\.type/.test(dialogText), '模型编辑不应出现字段名字面量（实际 ' + JSON.stringify(dialogText.replace(/\n/g, ' ').slice(0, 300)) + '）');
+  ok(/支持的思考强度/.test(dialogText), '仍应能声明支持的档位');
   await page.screenshot({ path: path.join(ROOT, '.thinking-ui-settings.png') });
 
   ok(pageErrors.length === 0, '页面不应有运行时错误：' + pageErrors.join(' | '));

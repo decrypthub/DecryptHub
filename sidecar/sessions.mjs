@@ -574,15 +574,17 @@ export class SessionManager {
     this.sessions = new Map(); this.focusedId = null; this.seq = 0;
     this.stateFile = path.join(userDataDir, 'sessions.json');
     // 无项目归属的历史会话：不恢复、不自动迁移，也不从索引里抹掉。
-    // 它们属于「项目」概念出现之前的数据；是否删除由用户在界面上明确决定
-    // （见 UI 的 legacy-sessions 提示与下面的 discardLegacySessions）。
+    // 它们属于「项目」概念出现之前的数据；是否恢复或删除由用户在界面上明确决定
+    // （见 UI 的 legacy-sessions 提示与下面的 restoreLegacySessions / discardLegacySessions）。
     // 这里只是把它们原样留在索引里，避免 emitList 写盘时顺手把用户数据写成「已删除」。
     this.legacyEntries = [];
     // 恢复上次的会话标签（标题、最后访问的网址、对话上下文；浏览器按需再启动）
     let saved = null; try { saved = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')); } catch {}
+    const indexed = new Set();
     if (saved?.sessions?.length) {
       for (const x of saved.sessions.slice(0, MAX_SESSIONS)) {
         if (!/^(?:main|s(?:[0-9a-f]{6}|[0-9a-f]{32}))$/.test(x.id) || !!x.primary !== (x.id === 'main')) throw Error('会话索引身份无效');
+        indexed.add(x.id);
         const stateFile = path.join(userDataDir, 'projects', x.primary ? 'default' : x.id, '.agent-state.json');
         let state = null; try { state = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
         if (!state?.projectId) { this.legacyEntries.push({ ...x }); continue; }
@@ -592,16 +594,108 @@ export class SessionManager {
       if (!this.focusedId) this.focusedId = this.sessions.values().next().value?.id || null;
       this.seq = Math.max(this.seq, saved.seq || 0);
     }
+    this.adoptOrphans(indexed);
+  }
+  /**
+   * 把「磁盘上有数据目录、索引里却没有」的会话收进历史会话列表。
+   * 这类会话比没有 projectId 的更隐蔽：它不在索引里，所以既不会被恢复，
+   * 也不会出现在删除提示里——用户完全看不到它存在。只收有 .agent-history.json
+   * （真有对话）的目录，避免把空壳目录也列出来。
+   */
+  adoptOrphans(indexed) {
+    let names = [];
+    try { names = fs.readdirSync(path.join(this.userDataDir, 'projects'), { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name); } catch { return; }
+    for (const name of names) {
+      if (indexed.has(name) || this.legacyEntries.some(x => x.id === name)) continue;
+      if (!/^(?:main|s(?:[0-9a-f]{6}|[0-9a-f]{32}))$/.test(name)) continue;
+      const dir = path.join(this.userDataDir, 'projects', name);
+      if (!fs.existsSync(path.join(dir, '.agent-history.json'))) continue;
+      let state = null; try { state = JSON.parse(fs.readFileSync(path.join(dir, '.agent-state.json'), 'utf8')); } catch {}
+      this.legacyEntries.push({
+        id: name, title: '', primary: name === 'main', updatedAt: 0, pinned: false, orphan: true,
+      });
+    }
   }
   /** 等待用户决定如何处理的历史会话（项目概念之前创建、没有 projectId）。 */
   legacySessions() {
-    return this.legacyEntries.map(x => ({
-      id: x.id,
-      title: String(x.title || x.id || ''),
-      primary: !!x.primary,
-      updatedAt: Number(x.updatedAt) || 0,
-      url: String(x.url || ''),
-    }));
+    return this.legacyEntries.map(x => {
+      // restorable 只表示「结构上能接回当前模型」，不代表一定能成功；真正裁决在 restoreLegacySessions。
+      const stateFile = path.join(this.userDataDir, 'projects', x.primary ? 'default' : x.id, '.agent-state.json');
+      let state = null; try { state = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
+      const ws = state?.workspace || {};
+      const hasProject = !!(state?.projectId && this.projects.entries.some(p => p.id === state.projectId));
+      return {
+        id: x.id,
+        title: String(x.title || this.orphanTitle(x.id) || x.id || ''),
+        primary: !!x.primary,
+        updatedAt: Number(x.updatedAt) || this.historyMtime(x.id),
+        url: String(x.url || ''),
+        kind: ws.kind === 'managed' ? 'managed' : 'folder',
+        hasProject,
+        restorable: hasProject || !!(ws.kind === 'managed' ? ws.id : ws.root),
+      };
+    });
+  }
+  /** 没有索引条目的孤儿会话没有标题，用第一条用户消息代替 id，至少让人认得出是哪段对话。 */
+  orphanTitle(id) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(path.join(this.userDataDir, 'projects', id, '.agent-history.json'), 'utf8'));
+      const first = (raw.events || []).find(e => e?.t === 'user' && typeof e.content === 'string' && e.content.trim() && !e.content.startsWith('【'));
+      const text = String(first?.content || '').replace(/【[^】]*】[\s\S]*$/, '').replace(/\s+/g, ' ').trim();
+      if (text) return text.slice(0, 40);
+    } catch {}
+    return '';
+  }
+  historyMtime(id) {
+    try { return fs.statSync(path.join(this.userDataDir, 'projects', id, '.agent-history.json')).mtimeMs; } catch { return 0; }
+  }
+  /**
+   * 把用户明确要求保留的历史会话接回当前模型（不删除任何东西）。
+   * 两条路径：
+   *  - 已有合法 projectId 且项目还在 → 只把会话补回索引（原先"关闭的标签"重新出现）。
+   *  - 没有 projectId → 为它建一个只含单个目录的项目：
+   *      托管工作区改指当前数据目录下的同名目录（旧版本可能记着另一个安装路径）；
+   *      用户文件夹必须仍然存在，否则拒绝并报告原因。
+   * 逐条独立处理：一条失败不影响其它，也绝不写坏已成功的索引。
+   */
+  async restoreLegacySessions(ids) {
+    const wanted = new Set((Array.isArray(ids) ? ids : []).map(String));
+    const restored = [], skipped = [];
+    for (const entry of this.legacyEntries) {
+      if (!wanted.has(entry.id)) continue;
+      const stateFile = path.join(this.userDataDir, 'projects', entry.primary ? 'default' : entry.id, '.agent-state.json');
+      let state = null; try { state = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
+      if (!state) { skipped.push({ id: entry.id, title: entry.title, reason: '会话状态文件缺失，无法确认工作区' }); continue; }
+      try {
+        const projectId = this.ensureProjectFor(entry, state);
+        atomicJson(stateFile, { ...state, projectId });
+        this.create({ id: entry.id, title: entry.title, updatedAt: entry.updatedAt, pinned: entry.pinned, quiet: true, projectId });
+        this.legacyEntries = this.legacyEntries.filter(x => x.id !== entry.id);
+        restored.push({ id: entry.id, title: entry.title, projectId });
+      } catch (error) { skipped.push({ id: entry.id, title: entry.title, reason: error.message }); }
+    }
+    if (restored.length) this.emitList();
+    return { restored, skipped };
+  }
+  /** 历史会话要接回当前模型，必须先有一个项目；已有合法项目就复用。 */
+  ensureProjectFor(entry, state) {
+    if (state.projectId && this.projects.entries.some(p => p.id === state.projectId)) return state.projectId;
+    const ws = state.workspace || {};
+    const managed = ws.kind === 'managed';
+    // 托管工作区永远是数据目录下的 projects/<会话 id>/workspace：跟着数据目录走，不保留旧安装路径。
+    const root = managed ? path.join(this.userDataDir, 'projects', entry.id, 'workspace') : ws.root;
+    if (!root) throw Error('会话缺少工作区信息，无法恢复');
+    if (managed) fs.mkdirSync(root, { recursive: true });
+    else {
+      let st = null; try { st = fs.statSync(root); } catch {}
+      if (!st?.isDirectory()) throw Error('原工作文件夹已不存在：' + root);
+      if (pathKey(fs.realpathSync.native(this.userDataDir)) === pathKey(fs.realpathSync.native(root)) || root.startsWith(this.userDataDir + path.sep))
+        throw Error('工作区位于应用数据目录内，不能作为代码工作区');
+    }
+    const folder = { id: ws.id || crypto.randomUUID(), kind: managed ? 'managed' : 'folder', root, revision: 1, label: ws.label || '恢复的会话' };
+    const title = String(entry.title || entry.id || '').trim() || entry.id;
+    const project = this.projects.save({ name: ('恢复：' + title).slice(0, 80), folders: [folder], primaryId: folder.id });
+    return project.id;
   }
   /**
    * 删除用户明确要求清理的历史会话。

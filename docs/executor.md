@@ -35,7 +35,6 @@ npx --yes @anthropic-ai/sandbox-runtime@0.0.81 windows-install --skip-profile-gr
 npm run build:ui
 node --test sidecar/test/*.test.mjs
 node scripts/check-update-shutdown.mjs
-npm run check:ui
 npm run audit:ui
 npm run check:desktop-browser
 ```

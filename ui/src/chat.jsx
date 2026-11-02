@@ -23,7 +23,7 @@ import { processPresentation } from './process-presentation.js';
 import { reasoningOpen, toggleReasoning } from './scroll-stick.js';
 import { QueuedMessages } from './queue-strip.jsx';
 import { ModelSeat } from './thinking-picker.jsx';
-import { modelThinking, effectiveThinking } from '../../sidecar/thinking.mjs';
+import { modelThinking, effectiveThinking, effectiveTransport } from '../../sidecar/thinking.mjs';
 
 const CTX_PARTS = [['system', '系统提示'], ['tools', '工具定义'], ['summary', '压缩摘要'], ['history', '对话'], ['attachments', '附件'], ['toolResults', '工具结果']];
 
@@ -41,7 +41,8 @@ export function ChatStage({ railOpen, onExpandRail }) {
   const modelInfo = (activeProvider?.models || []).find(m => (typeof m === 'string' ? m : m.id) === model);
   const vision = typeof modelInfo === 'object' && modelInfo?.vision;
   // 思考档位：只有当前模型确实声明了档位时才给选择器，否则不摆一个切换无效的控件。
-  const declaredThinking = modelThinking(typeof modelInfo === 'object' ? modelInfo?.thinking : null, model);
+  // 发送方式由端点推断（deriveTransport），不听 settings 里存的 transport —— 那是旧版让用户手挑的字段名。
+  const declaredThinking = { ...modelThinking(typeof modelInfo === 'object' ? modelInfo?.thinking : null, model), transport: effectiveTransport(typeof modelInfo === 'object' ? modelInfo?.thinking : null, model, activeProvider?.type) };
   const thinking = effectiveThinking(declaredThinking, settings.activeThinking);
   const commands = commandDismissed ? [] : commandMatches(input), commandId = 'composer-commands-' + w.sid;
   const chooseCommand = c => { setInput('/' + c.name + ' '); setCommandDismissed(true); setTimeout(() => refs.inputRef.current?.focus(), 0); };
@@ -129,7 +130,7 @@ export function ChatStage({ railOpen, onExpandRail }) {
           <div className="composer-context"><CtxMeter /></div>
           <div className="composer-seat"><ModelSeat
             providers={providers} providerId={settings.activeProviderId || ''} model={model}
-            levels={declaredThinking.levels} value={thinking.level} transport={declaredThinking.transport}
+            levels={declaredThinking.levels} value={thinking.level}
             defaultLevel={declaredThinking.default}
             onPickModel={(pid, m) => pickModel(pid, m)} onPickThinking={level => w.pickThinking(level)} /></div>
           <ActionIcon icon={responding ? 'stop' : 'send'} className="send-button" variant="solid" onClick={() => responding ? inv('agent-interrupt') : send(false)}

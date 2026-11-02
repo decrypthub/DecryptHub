@@ -44,7 +44,7 @@ await new Promise((res, rej) => {
   sidecar.stdout.on('data', d => { if (/JSRA_PORT=/.test(String(d))) { clearTimeout(t); res(); } });
 });
 
-// 与 check-ui.mjs 同构：一条长连接发 invoke，按 id 收结果。
+// 一条长连接发 invoke，按 id 收结果。
 const rpc = (channel, args = {}) => new Promise((resolve, reject) => {
   const ws = new WebSocket('ws://127.0.0.1:' + WS_PORT + '/?token=' + TOKEN);
   const timer = setTimeout(() => { ws.terminate(); reject(Error('RPC timeout: ' + channel)); }, 30000);
@@ -52,7 +52,7 @@ const rpc = (channel, args = {}) => new Promise((resolve, reject) => {
   ws.on('message', raw => { const message = JSON.parse(raw); if (message.id !== 1) return; clearTimeout(timer); ws.close(); message.error ? reject(Error(message.error)) : resolve(message.result); });
   ws.once('error', error => { clearTimeout(timer); reject(error); });
 });
-// 跳过首次引导，避免弹层抢时序（check-ui.mjs 同样这么做）。
+// 跳过首次引导，避免弹层抢时序。
 await rpc('save-settings', { onboarding: { version: 1, completedAt: new Date().toISOString() } }).catch(error => console.error('save onboarding:', error.message));
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png' };

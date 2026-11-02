@@ -1,4 +1,4 @@
-# Launch the locally built Tauri app with the current sidecar source.
+﻿# Launch the locally built Tauri app with the current sidecar source.
 # Keep this file ASCII for Windows PowerShell 5.1 without a UTF-8 BOM.
 param([string]$BinaryPath)
 $ErrorActionPreference = 'Stop'
@@ -26,7 +26,8 @@ $desktopOldEntry = $env:JSRA_SIDECAR_NODE
 $desktopOldAppData = $env:DECRYPTHUB_DATA_DIR
 try {
   $env:JSRA_SIDECAR_NODE = $desktopEntry
-  $env:DECRYPTHUB_DATA_DIR = Join-Path $desktopRoot '.tmp\desktop-appdata\WebDecryptHub'
+  # 与正式版共用同一个产品数据目录（以前指向 .tmp，导致两份对话互不可见）。
+  if (-not $env:DECRYPTHUB_DATA_DIR) { $env:DECRYPTHUB_DATA_DIR = Join-Path $env:APPDATA 'DecryptHub' }
   $desktopProcess = Start-Process -FilePath $desktopBinary -WorkingDirectory $desktopRoot -WindowStyle Hidden -PassThru `
     -RedirectStandardOutput (Join-Path $desktopLogs 'desktop-stdout.log') `
     -RedirectStandardError (Join-Path $desktopLogs 'desktop-stderr.log')

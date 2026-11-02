@@ -37,7 +37,7 @@ WDH：npm run build 后运行 node scripts/package-component.mjs，得到 wdh-<v
 
 预览包 tag 使用 wdh-v<version>-preview.N 或 decrypthub-v<version>-preview.N，界面标明预览版，不替代旧桌面稳定更新源。
 
-本地检查：核心测试、build:ui、audit:ui、check:ui；check:plugins 使用新应用数据，验证从官方 Release 实际下载三个插件、校验、MCP 配置和连接、自定义 MCP、版本显示、停用与浅深色截图。设备联调使用本地 HTTP 样本，不触碰用户已连接设备。
+本地检查：核心测试、build:ui、audit:ui；check:plugins 使用新应用数据，验证从官方 Release 实际下载三个插件、校验、MCP 配置和连接、自定义 MCP、版本显示、停用与浅深色截图。设备联调使用本地 HTTP 样本，不触碰用户已连接设备。
 
 高级环境可用 DECRYPTHUB_PYTHON 指定 Python 绝对路径。CI 可以设置 DECRYPTHUB_GITHUB_TOKEN 读取官方仓库元数据；该凭据不会传给浏览器、Python 或其他 MCP 子进程。
 
