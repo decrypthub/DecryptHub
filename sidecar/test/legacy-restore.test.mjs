@@ -77,7 +77,9 @@ test('用户文件夹工作区的历史会话：文件夹还在就恢复，已�
     const result = await mgr.restoreLegacySessions(['sbb0001', 'sbb0002']);
     assert.equal(result.restored.length, 1);
     assert.equal(result.restored[0].id, 'sbb0001');
-    assert.equal(mgr.get('sbb0001').workspace.root, fs.realpathSync.native(alive));
+    // Windows 上同一个目录有 8.3 短路径（RUNNER~1）与长路径两种写法，
+    // 直接比字符串会把「同一目录」判成不同。比较前统一取一次真实路径。
+    assert.equal(fs.realpathSync.native(mgr.get('sbb0001').workspace.root), fs.realpathSync.native(alive));
     // 失败的必须给出可读原因，并且原样留在历史会话里等用户处理
     assert.equal(result.skipped.length, 1);
     assert.equal(result.skipped[0].id, 'sbb0002');
