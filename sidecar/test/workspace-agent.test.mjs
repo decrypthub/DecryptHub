@@ -14,7 +14,14 @@ test('directory browsing is shallow, includes empty folders and rejects escaped 
   const dir = tmp(), root = path.join(dir, 'workspace'); fs.mkdirSync(path.join(root, 'src/empty'), { recursive: true });
   fs.writeFileSync(path.join(root, 'src/main.js'), 'source'); fs.writeFileSync(path.join(root, 'README.md'), 'readme'); fs.writeFileSync(path.join(root, '.env'), 'fixture-secret');
   fs.symlinkSync(os.tmpdir(), path.join(root, 'linked'), process.platform === 'win32' ? 'junction' : 'dir');
-  const first = listDirectory(dir); assert.deepEqual(first.entries.map(e => e.name), ['src', 'README.md']);
+  // 2026-11-02 契约变更（对齐 DSH `WorkspaceDirectoryEntry.type`）：链接不再被隐藏，
+  // 而是列为 `other` —— 目录被完整呈现，但界面灰显不可点、不承诺可读。
+  // 真正的安全边界没动：`workspacePath()` 仍然拒绝跟随链接（下面那条 assert.throws 就是它）。
+  const first = listDirectory(dir);
+  assert.deepEqual(first.entries.map(e => e.name), ['src', 'linked', 'README.md']);
+  assert.equal(first.entries.find(e => e.name === 'linked').type, 'other');
+  assert.equal(first.entries.find(e => e.name === 'src').type, 'directory');
+  assert.equal(first.entries.find(e => e.name === 'README.md').type, 'file');
   const nested = listDirectory(dir, 'src'); assert.deepEqual(nested.entries.map(e => e.name), ['empty', 'main.js']);
   assert.equal(listDirectory(dir, 'src/empty').entries.length, 0);
   assert.throws(() => listDirectory(dir, '../'), /越界|outside|范围/);
@@ -82,12 +89,13 @@ test('workspace_shell background job can be polled and killed', { timeout: 40000
     assert.equal(started.isError, undefined);
     const id = started.text.match(/id=([a-f0-9-]+)/)?.[1];
     assert.ok(id);
-    let seen = '';
-    for (const deadline = Date.now() + 15000; Date.now() < deadline && !seen.includes('READY');) {
+    let seen = '', acc = '';
+    for (const deadline = Date.now() + 15000; Date.now() < deadline && !acc.includes('READY');) {
       seen = jobOutput(dir, { id }).text;
-      if (!seen.includes('READY')) await new Promise(r => setTimeout(r, 50));
+      acc += seen;
+      if (!acc.includes('READY')) await new Promise(r => setTimeout(r, 50));
     }
-    assert.match(seen, /READY/);
+    assert.match(acc, /READY/);
     assert.match(seen, /running/);
     assert.match(seen, /time=\d+s/);
     assert.match(seen, /out=\d+B/);

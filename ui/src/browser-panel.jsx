@@ -5,7 +5,7 @@ import { ActionIcon, Button, EmptyState, Icon } from './kit.jsx';
 import { useWorkbench } from './bus.jsx';
 
 export function BrowserPanel({ children }) {
-  const { cur, inv, sid, launching, cleanRetry, refs, sendInput, embedOn, embedCovered, setView, toast, tabs } = useWorkbench();
+  const { cur, inv, sid, launching, cleanRetry, refs, sendInput, embedOn, embedCovered, embedPending, setView, toast, tabs } = useWorkbench();
   const tab = tabs.activeTab, page = cur.status.pages.find(p => p.id === tab?.pageId);
   const network = tab?.mode === 'network';
   const [address, setAddress] = useState(page?.url || ''), dirty = useRef(false);
@@ -75,7 +75,7 @@ export function BrowserPanel({ children }) {
           <Text size="1" color="gray">网页在系统窗口里渲染，地址栏、抓包和调试仍在这里；移动或缩放窗口后可重新对齐。</Text>
           {dockError && <Text size="1" color="red">{dockError}</Text>}
           <Button size="2" variant="soft" color="gray" onClick={() => setDockNonce(n => n + 1)}><Icon n="target" size={14} />重新对齐窗口</Button>
-        </div> : embedOn && running ? <div className="screen-note"><Text size="1" color="gray">{embedCovered ? '画面已暂时隐藏（关闭浮层后恢复）' : '原生窗口已嵌入'}</Text></div> : running && tabs.browserReady
+        </div> : embedOn && running ? <div className="screen-note"><Text size="1" color="gray">{embedCovered ? '画面已暂时隐藏（关闭浮层后恢复）' : embedPending ? '正在读取浏览器窗口尺寸…' : '原生窗口已嵌入'}</Text></div> : running && tabs.browserReady
           ? <canvas ref={refs.canvasRef} className="screen-canvas" tabIndex={0}
             onMouseDown={e => { e.currentTarget.focus(); sendInput(e, 'mouse', { type: 'mousePressed', clickCount: e.detail || 1 }); }}
             onMouseUp={e => sendInput(e, 'mouse', { type: 'mouseReleased', clickCount: e.detail || 1 })}

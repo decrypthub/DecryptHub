@@ -1,7 +1,8 @@
 // OpenAI 兼容适配器：流式 + 工具调用 + reasoning_content 兼容。
 // 返回统一形状 { content, reasoning, toolCalls, usage, finishReason }。
-import { post, sseData, modelStreamError } from './http.mjs';
+import { post, sseData, modelStreamError, isContextOverflowError, CONTEXT_OVERFLOW } from './http.mjs';
 import { openAIThinking } from '../thinking.mjs';
+import { openAIToolImages, portableToolIds } from './content.mjs';
 
 export function toOpenAITools(tools) {
   return tools.map(t => ({ type: 'function', function: { name: t.name, description: (t.description || '').slice(0, 1024), parameters: t.schema || t.inputSchema || { type: 'object', properties: {} } } }));
@@ -11,19 +12,20 @@ export function toOpenAITools(tools) {
 // 若服务端拒绝消息中的 reasoning_content（部分官方 reasoner 会 400），自动剥离后重试。
 export async function completeOpenAI(cfg, messages, tools, { onDelta, onReasoning, signal } = {}) {
   const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.apiKey };
-  let stripReasoning = false, useStreamOpts = true, dropThinking = false, dropEffort = false;
+  let stripReasoning = false, useStreamOpts = true;
   for (let attempt = 0; ; attempt++) {
-    const msgs = messages.map(m => {
+    const msgs = openAIToolImages(portableToolIds(messages).map(({ _nativeReplay: replay, _toolError, ...m }) => {
       if (m.role !== 'assistant') return m;
       const { reasoning_content, ...rest } = m;
-      return (!stripReasoning && reasoning_content) ? { ...rest, reasoning_content } : rest;
-    });
+      const sameRoute = replay?.kind === 'openai-chat' && replay.model === cfg.model
+        && replay.baseUrl === cfg.baseUrl.replace(/\/$/, '') && (replay.providerId || null) === (cfg.providerId || null);
+      return (!stripReasoning && sameRoute && reasoning_content) ? { ...rest, reasoning_content } : rest;
+    }));
     const body = { model: cfg.model, messages: msgs, stream: true, temperature: cfg.temperature ?? 0.2 };
     if (cfg.maxTokens) body.max_tokens = cfg.maxTokens;
     // 思考参数由端点协议自动决定（见 deriveTransport）：强度 → reasoning_effort，
     // 开关型 → thinking.type（开启时再叠加 reasoning_effort 表达「开多大」），未声明 → 一个都不发。
-    const thinking = openAIThinking({ ...(cfg.thinking || {}), requestPurpose: cfg.requestPurpose })
-      .filter(({ field }) => !dropThinking && !(dropEffort && field === 'reasoning_effort'));
+    const thinking = openAIThinking({ ...(cfg.thinking || {}), requestPurpose: cfg.requestPurpose });
     for (const { field, value } of thinking) body[field] = value;
     // 会话标题是元数据，不该花思考预算：DeepSeek V4 默认思考，会把 256 token 的标题预算吃光。
     // 这条与会话标题的思考声明无关，是独立保护，所以在这里兜底而不是塞进 openAIThinking。
@@ -54,12 +56,16 @@ export async function completeOpenAI(cfg, messages, tools, { onDelta, onReasonin
       }, signal, cfg.idleTimeoutMs || 180000);
     } catch (e) {
       const msg = String(e.message || e);
-      // 端点不认思考参数（老模型 / 中转未透传）：去掉参数重试，而不是让整个请求失败。
-      // 两个字段分开剥：开关型端点的常见失败是「只认 thinking.type，不认 reasoning_effort」，
-      // 一刀切会把能用的那一半也扔掉，等于悄悄降级成「开/关」而不告诉任何人。
-      // 必须先于下面那条判定——"reasoning_effort" 也含 reasoning，否则会被误判成「消息里禁止 reasoning_content」。
-      if (e.status === 400 && !dropEffort && thinking.some(t => t.field === 'reasoning_effort') && /reasoning_effort|\beffort\b/i.test(msg)) { dropEffort = true; continue; }
-      if (e.status === 400 && !dropThinking && thinking.some(t => t.field === 'thinking') && /thinking/i.test(msg)) { dropThinking = true; continue; }
+      // 上下文超限不是「端点不认某个参数」，剥参数重试只会用同样的历史再撞一次。
+      // 直接抛给循环，让它压缩后重建请求。
+      if (isContextOverflowError(e)) { e.code = CONTEXT_OVERFLOW; throw e; }
+      // An effort choice is a request contract. Do not silently run at another
+      // strength after a gateway rejects it; DSH resolves capability explicitly.
+      if (e.status === 400 && (thinking.some(t => t.field === 'reasoning_effort') && /reasoning_effort|\beffort\b/i.test(msg)
+        || thinking.some(t => t.field === 'thinking') && /thinking/i.test(msg))) {
+        e.message = '服务商不接受当前模型的思考配置，请核对模型支持的档位和映射后重试。' + msg;
+        throw e;
+      }
       if (e.status === 400 && !stripReasoning && /reasoning/i.test(msg)) { stripReasoning = true; continue; }
       if (e.status === 400 && useStreamOpts && /stream_options/i.test(msg)) { useStreamOpts = false; continue; }
       throw e;
@@ -69,7 +75,8 @@ export async function completeOpenAI(cfg, messages, tools, { onDelta, onReasonin
       const terminal = ['length', 'content_filter', 'refusal'].includes(finishReason);
       throw Object.assign(new Error(terminal ? `模型未输出答案（${finishReason}），请检查输出长度或服务限制` : '模型响应流未完整结束或返回空响应'), { code: 'EMPTY_COMPLETION', retryable: !terminal });
     }
-    return { content, reasoning, toolCalls, usage, finishReason };
+    return { content, reasoning, toolCalls, usage, finishReason,
+      ...(reasoning ? { nativeReplay: { kind: 'openai-chat', model: cfg.model, baseUrl: cfg.baseUrl.replace(/\/$/, ''), providerId: cfg.providerId || null } } : {}) };
   }
 }
 

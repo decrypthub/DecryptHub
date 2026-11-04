@@ -73,7 +73,11 @@ test('real RPC: select folder, write, approve execution, restore history, review
     const diagnostic = await invoke('session-diagnostics', { sessionId });
     assert.equal(diagnostic.sessionId, sessionId); assert.equal(diagnostic.runId, third.runId); assert.equal(diagnostic.mode, 'full-access');
     assert.ok(!JSON.stringify(diagnostic).includes('fixture-private-key'));
-    const directory = await invoke('workspace-directory', { sessionId }); assert.equal(directory.entries[0].path, 'main.js');
+    // 2026-11-02 契约变更（对齐 DSH `WorkspaceDirectoryEntry`）：条目不再自带 `path`
+    // —— 条目只有 `{ name, type, size? }`，路径由调用方用父目录 + 名字拼（`childPath`）。
+    const directory = await invoke('workspace-directory', { sessionId });
+    assert.deepEqual(directory.entries.map(entry => [entry.name, entry.type]), [['main.js', 'file']]);
+    assert.equal(typeof directory.path, 'string', '一层返回自己这个目录的绝对路径');
     const transcript = await invoke('session-export-markdown', { sessionId });
     assert.equal(transcript.sessionId, sessionId); assert.ok(transcript.markdown.includes('HARNESS_OK')); assert.ok(transcript.markdown.includes('workspace_run')); assert.ok(!transcript.markdown.includes('fixture-private-key'));
     assert.equal(stderr.includes('SyntaxError'), false);

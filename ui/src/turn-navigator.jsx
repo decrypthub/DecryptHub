@@ -1,7 +1,7 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { TURN_PITCH, railWindow, turnPreview, visibleTurnIndex } from './turn-navigation.js';
 
-export function TurnNavigator({ turns, scrollRef }) {
+export function TurnNavigator({ turns, scrollRef, scrollController }) {
   const rail = useRef(null), hovering = useRef(false), buttons = useRef(new Map());
   const [active, setActive] = useState(0), [preview, setPreview] = useState(null), [focus, setFocus] = useState(null);
   const [window, setWindow] = useState({ start: 0, end: 42 }), [railHeight, setRailHeight] = useState(420), previewId = useId();
@@ -31,8 +31,18 @@ export function TurnNavigator({ turns, scrollRef }) {
   const indices = new Set(Array.from({ length: Math.max(0, window.end - window.start) }, (_, i) => window.start + i));
   indices.add(Math.max(0, active)); if (focus !== null) indices.add(focus);
   const jump = index => {
-    const el = scrollRef.current, node = el?.querySelectorAll('.conversation-turn')[index]; if (!node) return;
-    el.scrollTo({ top: node.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 12, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+    const el = scrollRef.current, all = el?.querySelectorAll('.conversation-turn'); if (!el || !all) return;
+    const node = all[index]; if (!node) return;
+    // 统一交给 ChatScroll：它决定落位并把跟随意图记对。
+    // 这里不再自己算 scrollTop——旧实现就是这么和别处打架的。
+    const turnId = node.dataset?.turnId;
+    const isLast = index === all.length - 1;
+    const ctrl = scrollController?.current;
+    if (ctrl && turnId) { ctrl.jumpToTurn(turnId, { atBottom: isLast }); return; }
+    // 兜底（控制器尚未就绪）：保持精确贴底 / 12px 呼吸空间的语义。
+    const behavior = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth';
+    if (isLast) { el.scrollTo({ top: el.scrollHeight, behavior }); return; }
+    el.scrollTo({ top: node.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 12, behavior });
   };
   const key = (event, index) => {
     let next;
@@ -58,7 +68,8 @@ export function TurnNavigator({ turns, scrollRef }) {
       </div>
     </div>
     {text && <div className="turn-nav-preview" role="tooltip" id={previewId}>
-      <small>第 {preview + 1} / {turns.length} 轮{selected.active ? ' · 进行中' : ''}</small><strong>{text.input}</strong><p>{text.output}</p>
+      <small>第 {preview + 1} / {turns.length} 轮{selected.active ? ' · 进行中' : ''}</small>
+      <div className="turn-nav-preview-body"><strong>{text.input}</strong><p>{text.output}</p></div>
     </div>}
   </nav>;
 }

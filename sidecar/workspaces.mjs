@@ -3,7 +3,6 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { atomicJson, containsPath, pathKey, resolveIn, isSensitivePath } from './paths.mjs';
 
-const leases = new Map();
 export function directoryAvailability(ws) {
   try {
     const st = fs.statSync(ws.root);
@@ -37,13 +36,6 @@ export class WorkspaceStore {
     const st = fs.statSync(ws.root);
     if (!st.isDirectory() || (ws.identity && `${st.dev}:${st.ino}:${st.birthtimeMs}` !== ws.identity)) throw Object.assign(new Error('工作文件夹身份已变化，请重新选择文件夹'), { code: 'project-directory-unavailable' });
     resolveIn(ws.root, '.'); return ws.root;
-  }
-  acquire(ws, owner, write = true) {
-    this.verify(ws);
-    const key = pathKey(ws.root), prev = leases.get(key);
-    if (write && prev && prev !== owner) throw new Error('另一个任务正在修改此文件夹，请等它完成或使用另一个文件夹');
-    if (write) leases.set(key, owner);
-    return () => { if (leases.get(key) === owner) leases.delete(key); };
   }
 }
 export function workRoot(ctx) {

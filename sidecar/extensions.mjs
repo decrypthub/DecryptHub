@@ -3,13 +3,17 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { resolveIn } from './paths.mjs';
 import { approvedServers, normalizeServers } from './mcphost.mjs';
+import { filesystemSkills, readFilesystemSkill, skillFrontmatter } from './skill-files.mjs';
+import { SkillCatalogCache } from './skill-cache.mjs';
 
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
 const slug = value => { if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(value || '')) throw Error('名称使用 1–64 个小写字母、数字或连字符'); return value; };
 export class ExtensionStore {
   constructor({ directory, getSettings, saveSettings, plugins, mcpHost, tasks, changed = () => {} }) {
     Object.assign(this, { directory, getSettings, saveSettings, plugins, mcpHost, tasks, changed });
+    this.skillCache = new SkillCatalogCache(changed);
   }
+  close() { return this.skillCache.close(); }
   // ctx.scopeId 只在管理面（设置页）传入：模型路径永远按当前会话/项目解析，
   // 避免一次工具调用写进别的项目或别的会话的扩展目录。
   location(kind, scope, ctx) {
@@ -30,7 +34,7 @@ export class ExtensionStore {
     for (const scope of ['session', ...(ctx.projectId ? ['project'] : []), 'user']) {
       const { root } = this.location(kind, scope, ctx);
       if (!fs.existsSync(root)) continue;
-      for (const entry of fs.readdirSync(root, { withFileTypes: true }).slice(0, 100)) {
+      for (const entry of fs.readdirSync(root, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).slice(0, 100)) {
         const name = kind === 'skill' ? entry.name : entry.name.replace(/\.md$/, '');
         try {
           const { file } = this.file(kind, scope, name, ctx), stat = fs.lstatSync(file);
@@ -40,19 +44,35 @@ export class ExtensionStore {
           try { const bytes = fs.readSync(fd, buffer); preview = buffer.subarray(0, bytes).toString('utf8'); }
           finally { fs.closeSync(fd); }
           const description = kind === 'skill' ? preview.match(/^description:[ \t]*(.+)$/m)?.[1] : preview.split('\n').find(x => x.trim());
-          result.push({ name, scope, description: (description || name).slice(0, 160), updatedAt: stat.mtimeMs });
+          const meta = kind === 'skill' ? skillFrontmatter(fs.readFileSync(file, 'utf8')) : null;
+          result.push({ name, scope, description: (meta?.description || description || name).slice(0, 500), updatedAt: stat.mtimeMs,
+            ...(meta ? { modelInvocable: meta.modelInvocable, userInvocable: meta.userInvocable } : {}) });
         } catch { /* Ignore unrelated files, symlinks and invalid names. */ }
       }
     }
-    return result;
+    if (kind !== 'skill' || ctx.admin) return result;
+    const files = ctx.workRoot || ctx.protectedRoot ? filesystemSkills({ ...ctx, skillCatalogCache: this.skillCache }) : [];
+    const ordered = [...result.filter(item => item.scope !== 'user'), ...files.filter(item => item.scope === 'project'),
+      ...result.filter(item => item.scope === 'user'), ...files.filter(item => item.scope === 'user'), ...files.filter(item => item.scope === 'bundled')];
+    const seen = new Set();
+    // Resolve the winning name before applying invocation policy; a disabled
+    // project skill must never fall through to a same-name user skill.
+    return ordered.filter(item => { if (seen.has(item.name)) return false; seen.add(item.name); return true; });
   }
   read(kind, input, ctx) {
+    if (kind === 'skill' && input.source?.startsWith('filesystem:')) {
+      const summary = filesystemSkills({ ...ctx, skillCatalogCache: this.skillCache }).find(item => item.source === input.source && item.name === input.name);
+      if (!summary) throw Error('技能已移除或不在当前项目的可用范围内');
+      return readFilesystemSkill(summary);
+    }
     const { file, scope } = this.file(kind, input.scope, input.name, ctx), st = fs.lstatSync(file);
     if (!st.isFile() || st.nlink > 1 || st.size > 65536) throw Error('扩展文件不是普通文件或超过 64KB');
     const content = fs.readFileSync(file, 'utf8');
-    return { name: input.name, scope, content, hash: digest(content), updatedAt: st.mtimeMs };
+    return { name: input.name, scope, content, hash: digest(content), updatedAt: st.mtimeMs,
+      ...(kind === 'skill' ? { resourceBase: { kind: 'directory', path: path.dirname(file) }, ...(() => { const meta = skillFrontmatter(content); return meta ? { modelInvocable: meta.modelInvocable, userInvocable: meta.userInvocable } : {}; })() } : {}) };
   }
   write(kind, input, ctx) {
+    if (input.source) throw Error('文件系统技能请通过其项目中的文件工具修改，或另存为托管技能');
     const { file, scope } = this.file(kind, input.scope, input.name, ctx);
     const content = String(input.content || '').trim();
     if (!content || Buffer.byteLength(content) > (kind === 'memory' ? 16384 : 65536)) throw Error('内容为空或超过保存上限');
@@ -66,11 +86,12 @@ export class ExtensionStore {
     const temporary = file + '.' + crypto.randomUUID() + '.tmp';
     fs.writeFileSync(temporary, content + '\n', { flag: 'wx', mode: 0o600 });
     fs.renameSync(temporary, file);
-    this.changed(); return this.read(kind, input, ctx);
+    this.skillCache.invalidate(); this.changed(); return this.read(kind, input, ctx);
   }
   // 删除只作用于单个作用域内的一个条目：不带 scope 时不去猜，避免误删用户级长期记忆。
   // 技能按目录删除（SKILL.md 所在目录），记忆删除单个 .md。
   remove(kind, input, ctx) {
+    if (input.source) throw Error('文件系统技能不能通过托管删除操作移除');
     if (!input?.scope) throw Error('删除需要明确 scope（session/project/user）');
     const { file, scope } = this.file(kind, input.scope, input.name, ctx);
     let stat; try { stat = fs.lstatSync(file); } catch { throw Error('没有找到：' + input.name + '（' + scope + '）'); }
@@ -90,8 +111,18 @@ export class ExtensionStore {
     this.changed(); return { name: input.name, scope, removed: true };
   }
   index(ctx) {
-    const skills = this.list('skill', ctx), memories = this.list('memory', ctx);
-    return JSON.stringify({ skills: skills.slice(0, 12), memories: memories.slice(0, 12), skillCount: skills.length, memoryCount: memories.length });
+    const skills = this.list('skill', ctx).filter(item => item.modelInvocable !== false), memories = this.list('memory', ctx);
+    const retain = items => {
+      const result = []; let remaining = 16000;
+      for (const { name, scope, description, source } of items) {
+        const entry = { name, scope, description, ...(source ? { source } : {}) }, size = Buffer.byteLength(JSON.stringify(entry));
+        if (size > remaining) break; result.push(entry); remaining -= size;
+      }
+      return result;
+    };
+    const skillIndex = retain(skills), memoryIndex = retain(memories);
+    return JSON.stringify({ skills: skillIndex, memories: memoryIndex, skillCount: skills.length, memoryCount: memories.length,
+      ...(skillIndex.length < skills.length || memoryIndex.length < memories.length ? { truncated: true, hint: '索引预算不足，使用 skill_manage/memory_manage list 获取完整清单，不能据此推断条目不存在' } : {}) });
   }
   async saveMcp(servers, approveNames = []) {
     const settings = this.getSettings(), previous = settings.mcpServers;
@@ -136,5 +167,12 @@ export class ExtensionStore {
       }
     }
     throw Error('不支持的管理操作');
+  }
+  loadSkill(name, ctx, { user = false } = {}) {
+    const item = this.list('skill', ctx).find(item => item.name === name);
+    if (!item) return null;
+    const loaded = this.read('skill', item, ctx);
+    if (user ? loaded.userInvocable === false : loaded.modelInvocable === false) return null;
+    return loaded;
   }
 }

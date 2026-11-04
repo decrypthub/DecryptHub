@@ -20,9 +20,10 @@ export function normalizeMode(mode) {
 const READ = new Set([
   'component_list', 'browser_open', 'browser_new_tab', 'browser_reset', 'browser_tabs', 'browser_select', 'browser_snapshot',
   'browser_requests', 'browser_request_detail', 'browser_capture',
-  'context_ref_read',
-  'agent_spawn', 'agent_message', 'agent_wait', 'agent_list', 'agent_cancel', 'goal_update',
-  'workspace_list', 'workspace_read', 'workspace_grep', 'workspace_job_output',
+  'context_ref_read', 'load_workspace_dependencies',
+  'session_search', 'session_event_search', 'session_trace', 'session_event_trace', 'session_event_read',
+  'agent_spawn', 'agent_message', 'agent_wait', 'agent_list', 'agent_cancel', 'goal_update', 'get_goal', 'create_goal', 'update_goal',
+  'workspace_list', 'workspace_read', 'workspace_grep', 'workspace_glob', 'workspace_job_output',
   'detect_crypto', 'diff_requests', 'find_signature_params',
   'grep_file', 'read_file_slice', 'list_project_files',
   'net_list', 'net_get', 'net_search', 'net_load_har', 'get_cookies',
@@ -31,12 +32,13 @@ const READ = new Set([
   'list_pages', 'select_page', 'select_frame', 'list_console_messages',
   'list_network_requests', 'list_scripts', 'get_script_source', 'search_in_sources',
   'list_breakpoints', 'get_request_initiator', 'get_paused_info', 'take_screenshot',
-  'get_websocket_messages', 'todo_write', 'ask_user',
+  'get_websocket_messages', 'todo_write', 'ask_user', 'exit_plan_mode', 'skill', 'skill_resource_read',
   'reply_image', // 只把工作区里已有的图片交给 UI 展示，不写文件、不联网、不改远端状态
+  'terminal_read', 'terminal_list', // 只读取已有终端的输出/身份，不写入输入
 ]);
 
 const WRITE = new Set([
-  'workspace_write', 'workspace_edit',
+  'workspace_write', 'workspace_edit', 'apply_patch',
   'notes_write', 'generate_report', 'export_code',
   'net_save_body', 'net_export_har', 'save_script_source',
   'env_from_fingerprint', 'capture_page_env', 'webpack_extract',
@@ -55,6 +57,7 @@ const EXEC = new Set([
   'browser_click', 'browser_fill', 'browser_press',
   'evaluate_script', 'set_breakpoint_on_text', 'break_on_xhr', 'remove_breakpoint', 'pause_or_resume', 'step',
   'workspace_shell', 'workspace_run', 'workspace_npm', 'workspace_job_kill', 'run_node',
+  'terminal_open', 'terminal_send', 'terminal_close', 'terminal_signal', 'pwsh', // 拉起/驱动/结束真实 shell
   // 以下都只在页面/沙箱里执行，碰不到宿主进程与文件，因此不需要确认
   'page_call', 'webpack_expose', 'hook_signer', 'inject_rearm',
   'anti_debug_enable', 'anti_debug_disable', 'fingerprint_install',
@@ -66,7 +69,11 @@ const EXEC = new Set([
 // test/policy.test.mjs 会拿 LOCAL_TOOLS 逐个比对，防止新增工具时漏登记。
 export const CLASSIFIED = new Set([...READ, ...WRITE, ...DESTRUCTIVE, ...EXEC]);
 
-export const HOST_EXEC = new Set(['workspace_shell', 'workspace_run', 'workspace_npm', 'run_node', 'export_code', 'ast_deobfuscate', 'deobfuscate_code', 'env_detect_missing', 'env_iterate']);
+// 交互式终端等同于执行代码：terminal_open 会拉起真实 shell，terminal_send 能写任意命令。
+// 不登记就会被当作「未分类」而默认放行——这正是 test/policy.test.mjs 那条
+// "every local tool has an explicit classification" 要防的漏洞。
+export const HOST_EXEC = new Set(['workspace_shell', 'workspace_run', 'workspace_npm', 'run_node', 'export_code', 'ast_deobfuscate', 'deobfuscate_code', 'env_detect_missing', 'env_iterate',
+  'terminal_open', 'terminal_send', 'pwsh']);
 export const WORKER_TOOLS = new Set(['ast_deobfuscate', 'deobfuscate_code', 'env_detect_missing', 'env_iterate']);
 
 const CONFIRM_INJECT = new Set(['reset_session', 'restart_browser_fresh', 'evaluate_script', 'clear_site_data', 'clear_network_requests', 'remove_breakpoint']);
@@ -140,7 +147,7 @@ export function approvalSummary(name, args = {}, category) {
 export function decideTool(mode, name, args = {}, extra = {}) {
   const m = normalizeMode(mode);
   const risk = extra.trustedRisk || toolRisk(name, args);
-  const internal = ['todo_write', 'compact_context', 'ask_user', 'discover_tools', 'workspace_job_kill'].includes(name);
+  const internal = ['todo_write', 'compact_context', 'ask_user', 'discover_tools', 'workspace_job_kill', 'terminal_close', 'terminal_signal'].includes(name);
   if (m === 'read-only' && risk !== 'read' && !internal) return { action: 'deny', reason: '当前为只读权限，不能写文件、运行代码或修改远程资源。请由用户切换权限后再操作。', injectConfirm: false };
   if (m === 'full-access') return { action: 'run', injectConfirm: CONFIRM_INJECT.has(name) };
   let category = approvalCategory(name, args || {}, extra);

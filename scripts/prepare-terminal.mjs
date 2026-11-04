@@ -5,6 +5,12 @@ export function prepareTerminal(root = fileURLToPath(new URL('..', import.meta.u
   const source = path.join(root, 'sidecar/node_modules/node-pty'), dest = path.join(root, 'build/resources/terminal/node_modules/node-pty');
   fs.mkdirSync(path.join(root, 'build/resources/terminal'), { recursive: true });
   fs.copyFileSync(path.join(root, 'sidecar/terminal-entry.cjs'), path.join(root, 'build/resources/terminal/terminal-entry.cjs'));
+  fs.copyFileSync(path.join(root, 'sidecar/terminal-inspection.mjs'), path.join(root, 'build/resources/terminal/terminal-inspection.mjs'));
+  const headless = path.join(root, 'sidecar/node_modules/@xterm/headless');
+  const headlessDest = path.join(root, 'build/resources/terminal/node_modules/@xterm/headless');
+  fs.mkdirSync(headlessDest, { recursive: true });
+  for (const entry of ['package.json', 'lib-headless']) fs.cpSync(path.join(headless, entry), path.join(headlessDest, entry), { recursive: true });
+  fs.copyFileSync(path.join(root, 'docs/licenses/xterm-MIT.txt'), path.join(headlessDest, 'LICENSE'));
   for (const entry of ['package.json', 'LICENSE', 'lib']) { fs.mkdirSync(dest, { recursive: true }); fs.cpSync(path.join(source, entry), path.join(dest, entry), { recursive: true }); }
   fs.mkdirSync(path.join(dest, 'deps/winpty'), { recursive: true }); fs.copyFileSync(path.join(source, 'deps/winpty/LICENSE'), path.join(dest, 'deps/winpty/LICENSE'));
   const prebuilt = 'prebuilds/' + platform + '-' + process.arch;

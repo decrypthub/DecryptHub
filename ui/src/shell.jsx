@@ -70,6 +70,11 @@ function Rail({ searchRequest, onSearchHandled, onCollapse }) {
       toast(markdown ? '对话 Markdown 已复制' : '会话 ID 已复制', 'ok');
     } catch (error) { toast('复制失败：' + error.message, 'err'); }
   }
+  async function exportSession(session) {
+    try { const path = await native.pickSavePath('DecryptHub-' + session.id + '.zip', '对话归档', 'zip'); if (!path) return;
+      const result = await api.invoke('session-export-archive', { sessionId: session.id, path }); toast('已导出对话、子代理和附件（' + result.entries + ' 项）', 'ok');
+    } catch (error) { toast('导出失败：' + error.message, 'err'); }
+  }
   const commitRename = async e => {
     e.preventDefault();
     if (!rename?.title.trim() || renaming) return;
@@ -107,6 +112,7 @@ function Rail({ searchRequest, onSearchHandled, onCollapse }) {
               <DropdownMenu.Item onSelect={() => setRename({ id: s.id, title: sessionTitle(s) })}><Icon n="edit" />重命名会话</DropdownMenu.Item>
               <DropdownMenu.Item onSelect={() => copySession(s)}><Icon n="copy" />复制会话 ID</DropdownMenu.Item>
               <DropdownMenu.Item onSelect={() => copySession(s, true)}><Icon n="report" />复制为 Markdown</DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={() => exportSession(s)}><Icon n="download" />导出完整对话…</DropdownMenu.Item>
               <DropdownMenu.Item onSelect={() => setMoveSession(s.id)}><Icon n="folder" />移动到项目…</DropdownMenu.Item>
               <DropdownMenu.Item onSelect={() => pinSession(s.id, !s.pinned)}><Icon n="pin" />{s.pinned ? '取消置顶' : '置顶会话'}</DropdownMenu.Item>
               <DropdownMenu.Separator />

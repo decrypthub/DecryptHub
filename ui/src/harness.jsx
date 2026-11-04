@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Flex, Text, Dialog, TextArea, Spinner } from '@radix-ui/themes';
 import { Button, ActionIcon, Icon, Markdown } from './kit.jsx';
 import { useWorkbench } from './bus.jsx';
-export function CommandMenu({ items, selected, choose, anchor, id }) {
+export function CommandMenu({ items, selected, choose, anchor, id, ariaLabel = '输入框命令' }) {
   const [rect, setRect] = useState(null);
   useEffect(() => {
     const update = () => { const el = anchor.current?.closest('.composer'); if (el) setRect(el.getBoundingClientRect()); };
@@ -13,18 +13,30 @@ export function CommandMenu({ items, selected, choose, anchor, id }) {
   useEffect(() => { document.getElementById(id + '-' + selected)?.scrollIntoView({ block: 'nearest' }); }, [selected, id]);
   if (!rect || !items.length) return null;
   return createPortal(<div className="command-menu" data-overlay style={{ left: rect.left, bottom: innerHeight - rect.top + 8, width: Math.min(rect.width, 640), maxHeight: Math.max(100, Math.min(300, rect.top - 24)) }}>
-    <div className="command-menu-label">命令 <span>↑ ↓ 选择 · Tab 补全 · Enter 执行 · Esc 关闭</span></div>
-    <div role="listbox" aria-label="输入框命令" id={id} className="command-options">{items.map((c, i) => <button type="button" role="option" aria-selected={selected === i} id={id + '-' + i} className={'command-option' + (selected === i ? ' selected' : '')} key={c.name} onMouseDown={e => e.preventDefault()} onClick={() => choose(c)}>
-      <code>/{c.name}</code><span title={c.description}>{c.label} · {c.description}</span>
+    <div className="command-menu-label">{ariaLabel === '输入框命令' ? '命令' : ariaLabel} <span>↑ ↓ 选择 · Tab 补全 · Enter {items[0]?.token ? '引用' : '执行'} · Esc 关闭</span></div>
+    <div role="listbox" aria-label={ariaLabel} id={id} className="command-options">{items.map((c, i) => <button type="button" role="option" aria-selected={selected === i} id={id + '-' + i} className={'command-option' + (selected === i ? ' selected' : '')} key={c.name} onMouseDown={e => e.preventDefault()} onClick={() => choose(c)}>
+      <code>{c.token ?? '/' + c.name}</code><span title={c.description}>{c.label} · {c.description}</span>
     </button>)}</div>
   </div>, document.querySelector('.radix-themes') || document.body);
 }
+// 命令反馈条。运行中的两条语义必须分开：
+//   · 一般命令 → ✕ 只是「收起这条提示」，命令还在跑；
+//   · 压缩 → ✕ 是「取消这次压缩」，真的打断摘要请求（sidecar 的 agent-compress-cancel）。
+// 之前两者共用一个「收起提示」，界面上看起来能取消，其实只会把提示藏起来。
 export function CommandFeedback() {
   const w = useWorkbench(), value = w.commandFeedback;
   if (!value) return null;
+  const busy = value.state === 'running';
+  // 压缩在跑时以 agent 真实状态为准：命令已经返回但压缩还没收尾，不能显示成「已完成」。
+  const compressing = busy && value.name === 'compact';
+  const cancel = compressing ? () => w.cancelCompact() : undefined;
   return <div className={'command-feedback ' + value.state} role={value.state === 'error' ? 'alert' : 'status'}>
-    {value.state === 'running' ? <Spinner size="1" /> : <Icon n={value.state === 'error' ? 'info' : 'check'} size={15} />}
-    <span>{value.text}</span><ActionIcon icon="x" size="1" variant="soft" color="gray" title="收起命令提示" onClick={w.clearCommandFeedback} />
+    {busy ? <Spinner size="1" /> : <Icon n={value.state === 'error' ? 'info' : 'check'} size={15} />}
+    <span>{value.text}</span>
+    <ActionIcon icon="x" size="1" variant="soft" color="gray"
+      title={compressing ? '取消这次压缩' : busy ? '收起提示（命令仍在执行）' : '收起命令提示'}
+      aria-label={compressing ? '取消这次压缩' : '收起命令提示'}
+      onClick={cancel || w.clearCommandFeedback} />
   </div>;
 }
 export function CommandDialogs() {
@@ -52,7 +64,7 @@ export function CommandDialogs() {
     </Dialog.Root>
     <Dialog.Root open={!!w.extensionBrowser} onOpenChange={value => { if (!value) w.setExtensionBrowser(null); }}>
       <Dialog.Content maxWidth="680px" data-overlay><Dialog.Title>{w.extensionBrowser === 'skill' ? '技能' : '记忆'}</Dialog.Title><Dialog.Description size="2" color="gray">当前会话、项目及用户范围中保存的内容。</Dialog.Description>
-        <div className="extension-list">{items.map(item => <button className="project-choice" key={item.scope + item.name} onClick={() => { const sid = w.sid; w.api.invoke('extension-read', { sessionId: sid, kind: w.extensionBrowser, name: item.name, scope: item.scope }).then(value => { if (w.isCurrentSession(sid)) setSelected(value); }).catch(e => { if (w.isCurrentSession(sid)) setError(e.message); }); }}><Icon n="file" /><span>{item.name}<small>{{ session: '当前会话', project: '当前项目', user: '用户' }[item.scope]} · {item.description}</small></span></button>)}</div>
+        <div className="extension-list">{items.map(item => <button className="project-choice" key={(item.source || item.scope) + item.name} onClick={() => { const sid = w.sid; w.api.invoke('extension-read', { sessionId: sid, kind: w.extensionBrowser, name: item.name, scope: item.scope, source: item.source }).then(value => { if (w.isCurrentSession(sid)) setSelected(value); }).catch(e => { if (w.isCurrentSession(sid)) setError(e.message); }); }}><Icon n="file" /><span>{item.name}<small>{{ session: '当前会话', project: '当前项目', user: '用户' }[item.scope]} · {item.description}</small></span></button>)}</div>
         {!items.length && <Text as="p" size="2" color="gray">暂无内容。使用 /{w.extensionBrowser === 'skill' ? 'skill' : 'memory'} 创建。</Text>}
         {selected && <div className="extension-preview"><Markdown text={selected.content} /></div>}
         {error && <Text as="p" size="2" color="red" role="alert">{error}</Text>}

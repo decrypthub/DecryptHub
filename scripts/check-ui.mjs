@@ -532,16 +532,21 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.mouse.move(1, 1);
   const composerControls = await page.locator('.composer-bar .rt-SelectTrigger, .composer-bar .seat-trigger').evaluateAll(els => els.map(el => ({ height: el.getBoundingClientRect().height, font: parseFloat(getComputedStyle(el).fontSize) })));
   ok(composerControls.every(c => c.height === 32 && c.font === 13 || c.font === 14), '[' + scheme + '] 输入栏选择器尺寸不统一');
-  await page.getByRole('button', { name: '选择权限', exact: true }).click();
-  ok(await page.getByRole('menuitemradio', { name: '请求批准', exact: true }).count() === 1, '[' + scheme + '] 权限弹窗无法打开');
+  const permTrigger = page.getByRole('button', { name: /^访问模式，当前：/ });
+  await permTrigger.click();
+  ok(await page.getByRole('menuitemradio', { name: '工作区内修改', exact: true }).count() === 1, '[' + scheme + '] 权限弹窗无法打开');
+  ok(await page.getByRole('menuitemradio').count() === 3, '[' + scheme + '] 权限菜单必须正好三档（仅可查看/工作区内修改/完全权限）');
   ok(await page.getByRole('dialog', { name: '权限与执行环境', exact: true }).count() === 0, '[' + scheme + '] 权限切换不应打开居中弹窗');
   await page.waitForTimeout(200);
   await page.screenshot({ path: path.join(SHOTS, scheme + '-permissions.png') });
-  await page.getByRole('menuitemradio', { name: '自动批准', exact: true }).click();
-  await page.getByRole('button', { name: '选择权限', exact: true }).filter({ hasText: '自动批准' }).waitFor();
+  // 完全权限必须过勾选门禁：未勾选时「启用完全权限」按钮是禁用的（DSH 的 RiskConfirmation）。
+  await page.getByRole('menuitemradio', { name: '完全权限', exact: true }).click();
+  const riskDialog = page.getByRole('dialog', { name: '确认启用完全权限？', exact: true });
+  await riskDialog.waitFor();
+  ok(await riskDialog.getByRole('button', { name: '启用完全权限', exact: true }).isDisabled(), '[' + scheme + '] 未勾选风险确认时不应能启用完全权限');
+  await riskDialog.getByRole('button', { name: '取消', exact: true }).click();
+  await riskDialog.waitFor({ state: 'detached' });
   ok(await page.locator('.stage-mode').count() === 0, '[' + scheme + '] 对话顶部不显示权限状态');
-  await page.getByRole('button', { name: '选择权限', exact: true }).click();
-  await page.getByRole('menuitemradio', { name: '请求批准', exact: true }).click();
   // 权限菜单正在关闭时点别处会被当成「关闭它」的那一次点击，座位不会打开；
   // 等它真的消失再点，才是用户看到的行为。
   await page.locator('.permission-menu').waitFor({ state: 'detached' });
@@ -1055,7 +1060,7 @@ try { for (const scheme of (process.env.JSRA_UI_SCHEME ? [process.env.JSRA_UI_SC
   await page.locator('.msgs').evaluate(el => { el.style.scrollBehavior = 'auto'; el.scrollTop = 0; });
   await page.screenshot({ path: path.join(SHOTS, scheme + '-conversation-focused.png') });
 
-  await checkConversationNavigation({ page, rpc, scheme, shots: SHOTS, ok });
+  await checkConversationNavigation({ page, rpc, scheme, shots: SHOTS, ok, codeProject });
 
   // Exercise the actual plan tool, live events, saved state and manual UI reading.
   const priorPlanSession = (await rpc('session-list')).focused;

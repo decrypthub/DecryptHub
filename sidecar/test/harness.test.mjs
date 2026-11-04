@@ -25,7 +25,9 @@ test('project directory and chat state survive restart without polluting a repos
   assert.equal(result.isError, undefined); assert.equal(fs.readFileSync(path.join(repo, 'hello.js'), 'utf8'), 'console.log(1)');
   assert.equal(fs.existsSync(path.join(repo, '.agent-history.json')), false);
   const restored = manager(dir).get('main'); assert.equal(restored.workspace.root, fs.realpathSync.native(repo));
-  assert.equal(restored.mode, 'standard'); s.setMode('full-access'); assert.equal(manager(dir).get('main').mode, 'standard');
+  assert.equal(restored.mode, 'standard');
+  // 完全权限随会话持久化（对齐 DSH 的 permission/preset：预设是会话的持久事实）。
+  s.setMode('full-access'); assert.equal(manager(dir).get('main').mode, 'full-access');
 });
 test('folder identity changes and missing folders require reselection', () => {
   const dir = tmp(), repo = path.join(dir, 'repo'); fs.mkdirSync(repo);
@@ -105,9 +107,52 @@ test('automation waits for the actual Run and does not launch or focus a browser
   const pending = tasks.run(t.id); await new Promise(r => setTimeout(r, 10)); assert.equal(tasks.tasks[0].lastStatus, 'running');
   finish(); await pending; assert.equal(tasks.tasks[0].lastStatus, 'ok'); assert.equal(s.runs.latest().status, 'completed');
 });
-test('a shared folder has one writer lease, and different folders are independent', () => {
-  const store = new WorkspaceStore(tmp()), a = store.folder(tmp()), b = store.folder(tmp()), release = store.acquire(a, 'one');
-  assert.throws(() => store.acquire(a, 'two'), /另一个任务/); store.acquire(b, 'two')(); release(); store.acquire(a, 'two')();
+test('sessions sharing a folder run independently while each session retains one driver', { timeout: 10000 }, async t => {
+  const dir = tmp(), mgr = new SessionManager({ userDataDir: dir,
+    getSettings: () => ({ openai: { apiKey: 'fixture', model: 'test', contextWindow: 1000000 } }),
+    broadcast() {}, chromeMod: {}, titleGenerator: async () => '' });
+  const first = mgr.get('main'), second = mgr.create({ projectId: first.projectId });
+  const pending = [];
+  function hold(session) {
+    const entered = Promise.withResolvers(), response = Promise.withResolvers();
+    session.ensureAgent().chat = async () => { entered.resolve(); return response.promise; };
+    pending.push(response);
+    return entered.promise;
+  }
+  t.after(async () => {
+    for (const response of pending) response.resolve(done);
+    await Promise.allSettled([first.completion, second.completion]);
+    await mgr.closeAll();
+    assert.equal(path.dirname(dir), os.tmpdir()); assert.ok(path.basename(dir).startsWith('wdh-harness-'));
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const firstEntered = hold(first), secondEntered = hold(second);
+  assert.equal(first.workspace.root, second.workspace.root);
+  assert.notEqual(first.projectDir, second.projectDir);
+  assert.equal(first.send({ text: 'first independent task' }).ok, true);
+  await firstEntered;
+  assert.equal(second.send({ text: 'second independent task' }).ok, true);
+  await secondEntered;
+  assert.equal(first.agent.running, true); assert.equal(second.agent.running, true);
+  assert.equal(first.send({ text: 'duplicate task' }).code, 'busy');
+  const file = path.join(first.workspace.root, 'shared.txt'); fs.writeFileSync(file, 'original');
+  const read = WORKSPACE_TOOLS.find(tool => tool.name === 'workspace_read');
+  const write = WORKSPACE_TOOLS.find(tool => tool.name === 'workspace_write');
+  const firstCtx = first.toolCtx(), secondCtx = second.toolCtx();
+  await read.run({ path: 'shared.txt' }, firstCtx); await read.run({ path: 'shared.txt' }, secondCtx);
+  await write.run({ path: 'shared.txt', content: 'first edit' }, firstCtx);
+  await assert.rejects(() => write.run({ path: 'shared.txt', content: 'stale second edit' }, secondCtx), /修改|变化/);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'first edit');
+  await read.run({ path: 'shared.txt' }, secondCtx);
+  await write.run({ path: 'shared.txt', content: 'second edit after rereading' }, secondCtx);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'second edit after rereading');
+  pending[0].resolve(done); await first.completion;
+  assert.equal(first.agent.running, false); assert.equal(second.agent.running, true);
+  pending[1].resolve(done); await second.completion;
+  assert.equal(first.runs.latest().status, 'completed'); assert.equal(second.runs.latest().status, 'completed');
+  assert.ok(first.agent.hist.events.some(e => e.t === 'user' && e.content === 'first independent task'));
+  assert.ok(!first.agent.hist.events.some(e => e.t === 'user' && e.content === 'second independent task'));
+  assert.ok(second.agent.hist.events.some(e => e.t === 'user' && e.content === 'second independent task'));
 });
 test('a script changed while waiting for approval is not executed', async () => {
   const s = manager(tmp()).get('main'), oldProbe = executor.probe; executor.probe = async () => ({ available: false });
@@ -129,7 +174,7 @@ test('approval review persists separately from sandbox mode and never auto-appro
   assert.equal(await reloaded.approve({ name: 'process.exec', isolated: true, trustedPurpose: 'dependency-install', network: ['registry.npmjs.org'] }), true);
   assert.equal(await reloaded.approve({ name: 'process.exec', isolated: false, trustedPurpose: 'dependency-install', network: ['registry.npmjs.org'] }), false);
   assert.equal(reloaded.permissionBlocked, true); assert.equal(reloaded.pending.size, 0);
-  reloaded.setMode('full-access'); assert.equal(manager(dir).get('main').mode, 'standard');
+  reloaded.setMode('full-access'); assert.equal(manager(dir).get('main').mode, 'full-access', '预设随会话保存，重启后仍是完全权限');
 });
 test('changing permissions or workspace revokes approvals, and invalid folder changes preserve the old binding', async () => {
   const mgr = manager(tmp()), s = mgr.get('main');

@@ -114,6 +114,38 @@ test('plan: 已有检查点时只在摘要之后的事件里切', () => {
   assert.equal(recent[0].content, 'u2');
 });
 
+test('replayHead: 摘要重放必须与真实请求逐字节一致（否则 KV 缓存就是假的）', () => {
+  const dir = tmp();
+  const h = new History({ system: '你是 Agent。' });
+  h.ctxDir = dir;
+  // 造足够多的工具结果，触发视图期裁剪（保留最近 6 条）
+  for (let i = 0; i < 10; i++) {
+    h.append({ t: 'user', content: 'u' + i });
+    h.append({ t: 'assistant', content: '', calls: [{ id: 'c' + i, name: 'read', args: { path: 'f' + i } }] });
+    h.append({ t: 'tool', id: 'c' + i, name: 'read', content: 'R' + i + ' ' + 'z'.repeat(3000) });
+  }
+  const opts = { prune: { keep: 6, minChars: 1200, dir } };
+  const plan = h.plan({ keepTokens: 200 });
+  assert.ok(plan.cover > 0);
+
+  const replayed = h.replayHead(plan.cover, opts);
+  const real = h.view(opts).slice(1); // 真实请求去掉 system
+
+  // 逐条比对：重放必须是真实前缀的开头，一个字段都不能差
+  assert.ok(replayed.length > 0);
+  for (let i = 0; i < replayed.length; i++) {
+    assert.deepEqual(
+      { role: replayed[i].role, content: replayed[i].content, tool_call_id: replayed[i].tool_call_id },
+      { role: real[i].role, content: real[i].content, tool_call_id: real[i].tool_call_id },
+      `第 ${i} 条消息与真实请求不一致（前缀复用会失效）`,
+    );
+  }
+  // 裁剪过的工具结果在重放里也必须是引用，不是原文
+  const pruned = replayed.find(m => m.role === 'tool' && m._pruned);
+  assert.ok(pruned, '重放必须沿用真实请求的裁剪结果');
+  assert.match(pruned.content, /ctx_/);
+});
+
 test('持久化往返 + 版本号', () => {
   const dir = tmp();
   const f = path.join(dir, '.agent-history.json');

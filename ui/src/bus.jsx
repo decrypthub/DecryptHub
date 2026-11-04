@@ -8,10 +8,11 @@ import { onConnState, native } from './transport.js';
 import { normalizeTargetUrl } from '../../sidecar/url.mjs';
 import { scheduleStartupCheck } from './updater.js';
 import { historyEvents } from './conversation.js';
-import { shouldStick, settleInto, jumpTo } from './scroll-stick.js';
+import { ChatScroll, BOTTOM_TOLERANCE } from './chat-scroll.js';
 import { sessionView } from './session-view.js';
 import { rememberPreview } from './attachments.jsx';
 import { parseCommand, extensionRequest } from './commands.js';
+import { currentPreset, presetLabel, presetKnobs, presetStatusLine, resolvePreset, PRESET_CLI_NAMES } from '../../sidecar/permission-presets.mjs';
 import { guessPasteName } from './paste-drop.js';
 import { BrowserSurface } from './browser-surface.js';
 import { BrowserFrames } from './browser-frames.js';
@@ -55,9 +56,10 @@ export function Workbench({ children }) {
   const input = drafts[sid] || '';
   const setInput = useCallback(value => setDrafts(d => ({ ...d, [sidRef.current]: value })), []);
   const startEdit = useCallback(turn => {
-    if (!turn?.user?.content) return;
-    setEditTarget({ sid: sidRef.current, turnId: turn.id });
-    setDrafts(d => ({ ...d, [sidRef.current]: turn.user.content }));
+    if (!turn?.user || !turn.user.content && !turn.user.attachments?.length) return;
+    setEditTarget({ sid: sidRef.current, turnId: turn.id, atSeq: turn.user.seq });
+    setAtts(values => ({ ...values, [sidRef.current]: (turn.user.attachments || []).map(a => ({ ...a, key: a.id || a.path || a.file })) }));
+    setDrafts(d => ({ ...d, [sidRef.current]: turn.user.rawContent || turn.user.content }));
     setTimeout(() => inputRef.current?.focus(), 30);
   }, []);
   const cancelEdit = useCallback(() => { setEditTarget(null); setDrafts(d => ({ ...d, [sidRef.current]: '' })); }, []);
@@ -83,12 +85,16 @@ export function Workbench({ children }) {
   const urlRef = useRef();        // 地址栏
   const inputRef = useRef();      // 输入框
   const chatRef = useRef();       // 消息滚动区
+  const [chatElement, setChatElement] = useState(null);
+  const bindChat = useCallback(element => { chatRef.current = element; setChatElement(element); }, []);
   const [uploads, setUploads] = useState({});
   const [sending, setSending] = useState({});
   const attsRef = useRef(atts); attsRef.current = atts;
   const draftsRef = useRef(drafts); draftsRef.current = drafts;
   const approvalChain = useRef(Promise.resolve());
   const seen = useRef(new Set());
+  const hydration = useRef(new Map());
+  const hydratedOrder = useRef(new Map());
   const settingsRef = useRef(settings); settingsRef.current = settings;
   const prevRun = useRef({});
   const embedTry = useRef({});
@@ -162,6 +168,10 @@ export function Workbench({ children }) {
 
   // ---- 连接状态 / 更新提示 ----
   useEffect(() => onConnState(setConn), []);
+  useEffect(() => api.on('credential-store', async request => {
+    try { await native.secretStoreEnvelope(request.envelope); await api.invoke('credential-store-ack', { id: request.id, ok: true }); }
+    catch (error) { await api.invoke('credential-store-ack', { id: request.id, ok: false, error: error.message }).catch(() => {}); }
+  }), []);
   useEffect(() => { if (conn === 'connected') { seen.current.clear(); api.invoke('session-list').then(setSessions).catch(() => {}); } }, [conn]);
   useEffect(() => {
     const s = settingsRef.current;
@@ -190,7 +200,7 @@ export function Workbench({ children }) {
       // thinking 必须原样带过：它是用户逐模型声明的思考档位，丢了界面就无从知道该模型支持哪些档。
       for (const p of s.providers) {
         p.models = (p.models || []).map(m => typeof m === 'string' ? { id: m, name: m }
-          : (m && m.id ? { id: String(m.id), name: m.name || String(m.id), contextWindow: Number(m.contextWindow) || 0, vision: !!m.vision, ...(m.thinking ? { thinking: m.thinking } : {}) } : null)).filter(Boolean);
+          : (m && m.id ? { ...m, id: String(m.id), name: m.name || String(m.id), contextWindow: Number(m.contextWindow) || 0, vision: !!m.vision, ...(m.thinking ? { thinking: m.thinking } : {}) } : null)).filter(Boolean);
       }
       if (s.activeModel && typeof s.activeModel === 'object') s.activeModel = s.activeModel.id;
       if (!s.activeProviderId || !s.providers.some(x => x.id === s.activeProviderId)) s.activeProviderId = s.providers[0]?.id || '';
@@ -241,7 +251,11 @@ export function Workbench({ children }) {
 
   // ---- 事件订阅 ----
   useEffect(() => {
-    const on = (ch, fn) => api.on(ch, fn);
+    const on = (ch, fn) => api.on(ch, (value, sessionId, revision) => {
+      const queued = hydration.current.get(sessionId);
+      if (queued && (ch.startsWith('agent-') || ['plan', 'model-selection', 'goal', 'subagents', 'run-event', 'approval-resolved', 'question-resolved'].includes(ch))) queued.push({ revision, apply: () => fn(value, sessionId) });
+      else fn(value, sessionId);
+    });
     const offs = [
       on('sessions', v => setSessions(v)),
       on('goal', (v, s) => dispatch({ t: 'patch', sid: s, patch: { goal: v } })),
@@ -261,10 +275,19 @@ export function Workbench({ children }) {
       on('frame', (f, s) => { if (s === sidRef.current) drawFrame(f); }),
       on('agent-user', (c, s) => dispatch({ t: 'ev', sid: s, v: { type: 'user', ...(typeof c === 'string' ? { content: c } : c) } })),
       on('agent-continuation', (v, s) => dispatch({ t: 'ev', sid: s, v: { type: 'continuation', ...v } })),
+      on('plan', (plan, s) => { dispatch({ t: 'patch', sid: s, patch: { plan } }); setCommandFeedback(values => values[s]?.name === 'plan' ? { ...values, [s]: null } : values); }),
+      on('model-selection', (modelSelection, s) => dispatch({ t: 'patch', sid: s, patch: { modelSelection } })),
       on('agent-context', (v, s) => {
         dispatch({ t: 'patch', sid: s, patch: { ctx: v } });
         if (v?.event === 'compressed' || v?.event === 'pruned') {
           dispatch({ t: 'ev', sid: s, v: { type: 'compact', stage: v.event, reason: v.reason, before: v.before, after: v.after, instructions: v.instructions || '', summary: v.summary || '', pruned: v.pruned || 0, summarized: v.summarized || 0, at: Date.now() } });
+        }
+        // 压缩没提交（摘要比原文还长）也要留痕：否则用户以为压了，下一轮还是满的。
+        if (v?.event === 'skipped') {
+          dispatch({ t: 'ev', sid: s, v: { type: 'note', content: v.error || '这次压缩没有产生更短的历史，已跳过。' } });
+        }
+        if (v?.event === 'cancelled') {
+          dispatch({ t: 'ev', sid: s, v: { type: 'note', content: '已取消压缩，历史保持不变。' } });
         }
       }),
       on('agent-assistant-start', (v, s) => dispatch({ t: 'assistant-start', sid: s, v })),
@@ -308,68 +331,108 @@ export function Workbench({ children }) {
     }
   }, [sessions]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 首次见到某会话：载入网址、对话记录、已捕获请求
+  // Only the selected chat hydrates; listing thousands of rows stays cold.
   useEffect(() => {
-    for (const s of sessions.sessions) {
+    for (const s of sessions.sessions.filter(item => item.id === sessions.focused)) {
+      hydratedOrder.current.delete(s.id); hydratedOrder.current.set(s.id, true);
       if (seen.current.has(s.id)) continue;
       seen.current.add(s.id);
       const patch = {};
       if (s.url && /^https?:/.test(s.url)) patch.url = s.url;
       dispatch({ t: 'patch', sid: s.id, patch });
+      const updates = []; hydration.current.set(s.id, updates);
+      dispatch({ t: 'patch', sid: s.id, patch: { historyLoading: true, historyError: null } });
       api.invoke('session-snapshot', { sessionId: s.id }).then(v => {
-        const events = historyEvents(v.events, v.partial, v.partialItem, v.partialReasoning);
-        dispatch({ t: 'patch', sid: s.id, patch: { events, ctx: v.context, mode: v.state.mode, review: v.state.review || 'manual', todos: v.state.todos, approvals: v.state.approvals || [], question: v.state.questions?.[0] || null, run: v.state.run, ratings: v.state.ratings || {}, retry: v.state.modelRetry || null, debuggerPaused: !!v.state.debuggerPaused, goal: v.state.goal, subagents: v.state.subagents || [] } });
-      }).catch(() => seen.current.delete(s.id));
+        if (hydration.current.get(s.id) !== updates) return;
+        const events = historyEvents(v.events, v.partial, v.partialItem, v.partialReasoning, v.startSeq || 0);
+        dispatch({ t: 'patch', sid: s.id, patch: { events, historyStart: v.startSeq || 0, historyLoading: false, historyError: null, ctx: v.context, mode: v.state.mode, review: v.state.review || 'manual', modelSelection: v.state.modelSelection, plan: v.state.plan, todos: v.state.todos, approvals: v.state.approvals || [], question: v.state.questions?.[0] || null, run: v.state.run, ratings: v.state.ratings || {}, retry: v.state.modelRetry || null, debuggerPaused: !!v.state.debuggerPaused, goal: v.state.goal, subagents: v.state.subagents || [] } });
+        const queued = hydration.current.get(s.id) || []; hydration.current.delete(s.id);
+        for (const update of queued) if (update.revision == null || update.revision > v.revision) update.apply();
+      }).catch(error => {
+        if (hydration.current.get(s.id) !== updates) return;
+        seen.current.delete(s.id); const queued = hydration.current.get(s.id) || []; hydration.current.delete(s.id);
+        dispatch({ t: 'patch', sid: s.id, patch: { historyLoading: false, historyError: error.message } });
+        for (const update of queued) update.apply();
+      });
       api.invoke('get-requests', { sessionId: s.id }).then(r => r?.list?.length && dispatch({ t: 'requests', sid: s.id, v: r.list })).catch(() => {});
+    }
+    for (const id of hydratedOrder.current.keys()) {
+      if (hydratedOrder.current.size <= 8) break;
+      if (id === sessions.focused || sessions.sessions.find(item => item.id === id)?.agentRunning) continue;
+      hydratedOrder.current.delete(id); hydration.current.delete(id); seen.current.delete(id); dispatch({ t: 'history-evict', sid: id });
     }
   }, [sessions]);
 
-  // 会话切换或历史异步加载完成后，必须贴到最后一条；之后才启用「用户往上翻就不打扰」的粘性逻辑。
-  // 原实现只有一个 scrollHeight 判断：切会话时 .msgs 因 key 变化重建、scrollTop=0，
-  // 历史加载后距离底部远大于 160px，被误判成「用户正在阅读」而放弃滚动，于是停在顶部。
-  const stickTo = useRef({ sid: null, settled: false });
+  const loadEarlierHistory = async () => {
+    const target = sidRef.current, beforeSeq = S[target]?.historyStart;
+    if (!beforeSeq || S[target]?.historyLoading) return;
+    dispatch({ t: 'patch', sid: target, patch: { historyLoading: true } });
+    try {
+      const page = await api.invoke('session-snapshot', { sessionId: target, beforeSeq });
+      dispatch({ t: 'history-prepend', sid: target, events: historyEvents(page.events, '', null, '', page.startSeq), startSeq: page.startSeq });
+    } catch (error) { dispatch({ t: 'patch', sid: target, patch: { historyLoading: false, historyError: error.message } }); toast(error.message, 'err'); }
+  };
+
+  // 滚动：**全部**交给 ChatScroll（ui/src/chat-scroll.js），这里只做接线。
+  //
+  // 2026-11-02 重写：旧版本在这里有三段 useEffect 各自读写 scrollTop
+  // （贴底 / 兜底跟随 / 保存位置），再加 scroll-stick.js 的纯函数，
+  // 任何两处都会互相覆盖——「打开会话停在顶部」改了 6 轮都没修好就是这个原因。
+  // 现在只有 ChatScroll 碰 scrollTop；这里只负责：
+  //   · attach / detach 容器
+  //   · 进入会话时 restore（有锚点回锚点，否则贴底）
+  //   · 内容变化时 contentGrew（仅跟随态才动）
+  //   · 用户移动后把锚点写进 localStorage
+  const scrollRef = useRef(null);
   const viewsRef = useRef(presentation.views); viewsRef.current = presentation.views;
   const setScrollRef = useRef(presentation.setScroll); setScrollRef.current = presentation.setScroll;
   useEffect(() => {
-    const el = chatRef.current; if (!el) return;
-    const { stick, fresh } = shouldStick(el, stickTo.current, sid);
-    if (!stick) return;
-    if (!fresh) { jumpTo(el, el.scrollHeight); return; }
-    // 首次进入：用户上次主动往上翻过就回到原位，否则贴底。
-    settleInto({
-      read: () => chatRef.current,
-      apply: top => jumpTo(chatRef.current, top),
-      alive: () => stickTo.current.sid === sid,
-      saved: sessionView(viewsRef.current, sid)?.scroll || null,
-      schedule: fn => requestAnimationFrame(fn),
-      onSettled: () => { stickTo.current.settled = true; },
-    });
-  }, [cur.events, sid]);
-
-  // 记录阅读位置：用户主动往上翻才保存；回到底部则清掉记录，恢复时继续贴底。
-  // 用 rAF 节流，避免滚动时频繁写 localStorage。
-  // 注意：这里通过 ref 读最新 views，避免把 views 放进依赖导致每次保存都重绑监听。
-  useEffect(() => {
-    const el = chatRef.current; if (!el) return;
-    const target = sid;
+    const el = chatElement;
+    if (!el) return;
+    const ctrl = new ChatScroll();
+    scrollRef.current = ctrl;
     let frame = 0;
-    const save = () => {
-      frame = 0;
-      const node = chatRef.current;
-      if (!node || sidRef.current !== target) return;
-      // 还没 settle（正在贴底/恢复中）时不记录，否则会把恢复过程本身写回去。
-      if (!stickTo.current.settled || stickTo.current.sid !== target) return;
-      const atBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 160;
-      const previous = sessionView(viewsRef.current, target)?.scroll || null;
-      if (atBottom) { if (previous) setScrollRef.current(null, target); return; }
-      // 位置没变就不写，减少 localStorage 抖动。
-      if (previous && Math.abs(previous.top - Math.round(node.scrollTop)) < 24) return;
-      setScrollRef.current({ top: Math.round(node.scrollTop), at: Date.now() }, target);
+    ctrl.attach(el, {
+      onUserMove: () => {
+        // 用户滚动后把语义锚点落盘（节流到一帧）。贴底时锚点是 null → 清空记录。
+        if (frame) return;
+        frame = requestAnimationFrame(() => {
+          frame = 0;
+          if (scrollRef.current !== ctrl || sidRef.current !== sid) return;
+          setScrollRef.current(ctrl.currentAnchor, sid);
+        });
+      },
+    });
+    // 进入会话：有保存的锚点就回锚点，否则贴底。
+    ctrl.restore(sessionView(viewsRef.current, sid)?.scroll || null);
+    const resize = new ResizeObserver(() => ctrl.contentGrew());
+    resize.observe(el);
+    return () => {
+      resize.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+      if (scrollRef.current === ctrl) scrollRef.current = null;
+      ctrl.detach();
     };
-    const onScroll = () => { if (!frame) frame = requestAnimationFrame(save); };
-    el.addEventListener('scroll', onScroll, { passive: true });
-    return () => { el.removeEventListener('scroll', onScroll); if (frame) cancelAnimationFrame(frame); };
-  }, [sid]);
+  }, [sid, chatElement]);
+
+  // 历史异步加载会多次改变高度。只要仍在跟随态就贴底；
+  // 用户上翻过（following=false）则完全不介入——这正是旧版缺失的尊重。
+  useEffect(() => {
+    const el = chatRef.current;
+    if (!el) return;
+    let raf = 0, stable = 0, lastHeight = -1, frames = 0;
+    const tick = () => {
+      const ctrl = scrollRef.current;
+      if (!ctrl || chatRef.current !== el) return;
+      const h = el.scrollHeight;
+      if (h !== lastHeight) { lastHeight = h; stable = 0; ctrl.contentGrew(); }
+      else if (++stable >= 3) return;          // 高度稳定，收手
+      if (++frames > 180) return;              // 安全上限（~3 秒）
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [cur.events, sid, chatElement]);
 
   // 画面区尺寸变化 → 通知 sidecar 调整无头视口
   const runningNow = !!cur?.status?.running;
@@ -391,8 +454,11 @@ export function Workbench({ children }) {
   // 原生嵌入：把面板矩形报告给 Rust，Chrome 子窗口跟随
   const embedOn = !!(cur.status.running && cur.status.embed && cur.status.chromePid);
   const [embedCovered, setEmbedCovered] = useState(false);
+  // 没拿到 Chrome 工具栏尺寸时绝不能把原生窗口露出来：inset 为全零等于「一点都不裁」，
+  // 结果是 Chrome 自带的标签栏/地址栏整条叠在我们的地址栏下面。宁可先不显示，等尺寸到位。
+  const [embedPending, setEmbedPending] = useState(false);
   useEffect(() => {
-    if (!embedOn || !tabs.browserReady || view !== 'chat' || side !== 'browser' || !sideOpen) { surface.current.hide().catch(() => {}); return; }
+    if (!embedOn || !tabs.browserReady || view !== 'chat' || side !== 'browser' || !sideOpen) { surface.current.hide().catch(() => {}); setEmbedPending(false); return; }
     const el = viewRef.current; if (!el) return;
     const mySid = sid, pid = cur.status.chromePid;
     let dead = false, t = null, inset = null, insetAt = 0, lastKey = '', force = true;
@@ -407,8 +473,15 @@ export function Workbench({ children }) {
     const sync = async () => {
       if (dead) return;
       const cov = covered(); setEmbedCovered(cov);
-      if (cov || document.hidden) { if (lastKey !== 'hidden') surface.current.hide().catch(() => {}); lastKey = 'hidden'; return; }
+      if (cov || document.hidden) { if (lastKey !== 'hidden') surface.current.hide().catch(() => {}); lastKey = 'hidden'; setEmbedPending(false); return; }
       if (!inset || Date.now() - insetAt > 3000) { inset = await api.invoke('embed-inset', { sessionId: mySid }).catch(() => null) || inset; insetAt = Date.now(); if (dead) return; }
+      // 仍然没有尺寸（页面正在导航 / 还没有活动页）：先藏起来，避免露出一整条 Chrome 工具栏。
+      // 全零 inset 同样视为无效——那等于「一点都不裁」，Chrome 自带的标签栏和地址栏会整条露出来。
+      if (!inset || !(inset.top > 0 || inset.left > 0 || inset.right > 0 || inset.bottom > 0)) {
+        if (lastKey !== 'pending') surface.current.hide().catch(() => {});
+        lastKey = 'pending'; setEmbedPending(true); return;
+      }
+      setEmbedPending(false);
       const r = el.getBoundingClientRect();
       const active = activityRef.current;
       const key = [r.left, r.top, r.width, r.height, window.devicePixelRatio, JSON.stringify(inset), active].join();
@@ -519,6 +592,12 @@ export function Workbench({ children }) {
     api.sendInput({ kind, w: cv.width, x, y, ...extra });
   }
 
+  function followAcceptedSubmission(target) {
+    if (sidRef.current !== target) return;
+    scrollRef.current?.follow();
+    setScrollRef.current(null, target);
+  }
+
   async function send(auto, override) {
     if (!sid) { setProjectEditor({}); return; }
     const target = sid, sentDraft = input;
@@ -527,18 +606,21 @@ export function Workbench({ children }) {
     if (!auto && !text && !(atts[sid] || []).length) return;
     if (uploads[sid]) { toast('附件仍在添加，请稍候', 'info'); return; }
     if (!auto && editTarget && editTarget.sid === target) {
-      if (!text) return;
-      if ((atts[sid] || []).length) { toast('编辑重发暂不支持附件，请先移除附件', 'warn'); return; }
+      if (!text && !(atts[target] || []).length) return;
       setSending(m => ({ ...m, [target]: true }));
       try {
-        const r = await api.invoke('agent-turn-edit', { sessionId: target, turnId: editTarget.turnId, text });
+        const r = await api.invoke('agent-turn-edit', { sessionId: target, turnId: editTarget.turnId, atSeq: editTarget.atSeq, text, attachments: (atts[target] || []).map(({ key, ...a }) => a) });
         if (!r?.ok) { toast(r?.error || '编辑重发失败', 'warn'); return; }
-        setEditTarget(null); setInput(''); if (inputRef.current) inputRef.current.style.height = '';
+        const destination = r.sessionId || target;
+        setScrollRef.current(null, destination); followAcceptedSubmission(destination);
+        setEditTarget(null); setDrafts(m => m[target] === sentDraft ? { ...m, [target]: '' } : m); if (inputRef.current) inputRef.current.style.height = '';
+        setAtts(values => ({ ...values, [target]: [] }));
         return true;
       } catch (e) { toast('编辑重发失败：' + e.message, 'err'); return; }
       finally { setSending(m => ({ ...m, [target]: false })); }
     }
-    const command = !auto && parseCommand(text);
+    const parsedCommand = !auto && parseCommand(text);
+    const command = parsedCommand?.known ? parsedCommand : null;
     const feedback = (state, message) => setCommandFeedback(m => ({ ...m, [target]: { name: command?.name || '', state, text: message } }));
     if (command) {
       const commandAttachments = atts[target] || [];
@@ -549,12 +631,40 @@ export function Workbench({ children }) {
       if (command.name === 'automation' && !command.argument) { setAutomationDraft(true); setView('automations'); setInput(''); return; }
       if (['goal', 'skill', 'memory', 'agent'].includes(command.name) && !command.argument) { setCommandForm({ name: command.name, sessionId: target }); return; }
       const request = extensionRequest(command.name, command.argument);
-      if (request) {
+      if (command.name === 'permission') {
+        // 对齐 DSH 的 /permission：裸调用报告当前预设与可用项，带参直接切换。
+        // 带参形式已经是明确同意，所以不弹风险确认框（DSH 的 ui-permission-presets README 明文如此）。
+        const preset = command.argument ? resolvePreset(command.argument) : null;
+        if (!command.argument) feedback('success', presetStatusLine(currentPreset(cur.mode, cur.review)));
+        else if (!preset) feedback('error', `未知预设「${command.argument}」（可用：${PRESET_CLI_NAMES.join('、')}）`);
+        else {
+          try {
+            await api.invoke('session-set-mode', { sessionId: target, ...presetKnobs(preset) });
+            feedback('success', `已切换为 ${presetLabel(preset)}`);
+          } catch (e) { feedback('error', e.message || '切换失败'); }
+        }
+        setDrafts(m => m[target] === sentDraft ? { ...m, [target]: '' } : m);
+        if (inputRef.current) inputRef.current.style.height = '';
+        return true;
+      }
+      if (command.name === 'plan') {
+        try {
+          const plan = await api.invoke('plan-set', { sessionId: target, active: command.argument !== 'off' });
+          dispatch({ t: 'patch', sid: target, patch: { plan } });
+          feedback('success', plan.pending !== null ? '计划模式将在下一步切换。' : plan.active ? '计划模式已开启，输入 /plan off 退出。' : '计划模式已关闭。');
+        } catch (e) { feedback('error', e.message); return; }
+        if (!command.argument || command.argument === 'off') {
+          setDrafts(m => m[target] === sentDraft ? { ...m, [target]: '' } : m);
+          if (inputRef.current) inputRef.current.style.height = '';
+          return true;
+        }
+        text = command.argument;
+      } else if (request) {
         if (session?.workspace?.availability !== 'ready') { feedback('error', '项目目录不可用，请重新选择目录。'); return; }
         text = request;
       } else {
       feedback('running', '正在执行 /' + command.name + '…');
-      if (command.name === 'status') { feedback('success', ['会话 ID：' + target, session?.workspace?.root, '权限：' + cur.mode, cur.goal ? '目标：' + cur.goal.objective : ''].filter(Boolean).join('\n')); }
+      if (command.name === 'status') { feedback('success', ['会话 ID：' + target, session?.workspace?.root, '权限：' + presetLabel(currentPreset(cur.mode, cur.review)), cur.goal ? '目标：' + cur.goal.objective : ''].filter(Boolean).join('\n')); }
       else {
         if (command.name === 'compact' && cur.agentRunning) { feedback('error', '请先停止当前任务，再压缩上下文。'); return; }
         if (['agent', 'goal'].includes(command.name) && !['pause', 'clear'].includes(command.argument) && session?.workspace?.availability !== 'ready') { feedback('error', '项目目录不可用，请重新选择目录。'); return; }
@@ -563,12 +673,16 @@ export function Workbench({ children }) {
         try {
           let r;
           if (command.name === 'goal') r = await api.invoke(['pause', 'resume', 'clear'].includes(command.argument) ? 'goal-action' : 'goal-start', { sessionId: target, action: command.argument, objective: command.argument, attachments: commandAttachments.map(({ key, ...a }) => a) });
-          if (command.name === 'compact') r = await api.invoke('agent-compress', { sessionId: target, instructions: command.argument });
+          if (command.name === 'compact') {
+            r = await api.invoke('agent-compress', { sessionId: target, instructions: command.argument });
+            if (r?.cancelled) { feedback('idle', '已取消压缩，历史保持不变。'); return; }
+          }
           if (command.name === 'agent') { await api.invoke('subagent-start', { sessionId: target, task: command.argument }); r = { ok: true }; }
           if (command.name === 'agents') { dispatch({ t: 'patch', sid: target, patch: { subagents: (await api.invoke('agent-state', { sessionId: target })).subagents || [] } }); toast('从对话顶部的子代理入口，或所属轮次的执行过程中查看状态和结论。', 'info'); }
           if (command.name === 'stop') await api.invoke('agent-interrupt', { sessionId: target });
           if (command.name === 'new') await newSession();
           if (r?.ok === false) { feedback('error', r.error || '命令未执行'); return; }
+          if (command.name === 'goal' && !['pause', 'clear'].includes(command.argument)) followAcceptedSubmission(target);
           if (command.name === 'goal') setCommandFeedback(m => ({ ...m, [target]: null }));
           else feedback('success', command.name === 'compact' ? `上下文已压缩：${r.before} → ${r.after} tokens` : '/' + command.name + ' 已执行');
           if (command.name === 'goal' && !['pause', 'resume', 'clear'].includes(command.argument)) { const consumed = new Set(commandAttachments.map(a => a.key)); setAtts(m => ({ ...m, [target]: (m[target] || []).filter(a => !consumed.has(a.key)) })); }
@@ -592,6 +706,7 @@ export function Workbench({ children }) {
       return;
     }
     if (r.queued) toast('已加入下一轮队列', 'info');
+    if (!r.queued) followAcceptedSubmission(target);
     if (!auto) {
       const sent = new Set(list.map(a => a.key));
       setAtts(m => ({ ...m, [target]: (m[target] || []).filter(a => !sent.has(a.key)) }));
@@ -602,10 +717,21 @@ export function Workbench({ children }) {
     return true;
   }
 
+  // 手动压缩：与 /compact 命令走同一条反馈条，只是入口是按钮。
+  // 运行期间反馈条上的 ✕ 会真的取消（agent-compress-cancel）。
   async function compactNow(instructions) {
     setView('chat');
-    const r = await inv('agent-compress', { instructions });
-    if (!r?.ok) toast(r?.error || '压缩失败', 'warn');
+    const target = sidRef.current;
+    if (cur.agentRunning) { toast('请先停止当前任务，再压缩上下文。', 'warn'); return; }
+    setCommandFeedback(m => ({ ...m, [target]: { name: 'compact', state: 'running', text: '正在执行 /compact…' } }));
+    try {
+      const r = await inv('agent-compress', { instructions });
+      if (r?.cancelled) { setCommandFeedback(m => ({ ...m, [target]: { name: 'compact', state: 'idle', text: '已取消压缩，历史保持不变。' } })); return; }
+      if (!r?.ok) { setCommandFeedback(m => ({ ...m, [target]: { name: 'compact', state: 'error', text: r?.error || '压缩失败' } })); return; }
+      setCommandFeedback(m => ({ ...m, [target]: { name: 'compact', state: 'done', text: `上下文已压缩：${r.before} → ${r.after} tokens` } }));
+    } catch (e) {
+      setCommandFeedback(m => ({ ...m, [target]: { name: 'compact', state: 'error', text: e.message || '压缩失败' } }));
+    }
   }
 
   async function cleanRetry({ fresh = false } = {}) {
@@ -639,6 +765,7 @@ export function Workbench({ children }) {
     };
     // 只有模型显式声明了档位才镜像；否则删掉，避免把上一个模型的声明带过去。
     if (mObj?.thinking?.levels?.length) out[p.type].thinking = mObj.thinking; else delete out[p.type].thinking;
+    out[p.type].api = mObj?.api || p.api || null;
     return out;
   }
 
@@ -654,10 +781,17 @@ export function Workbench({ children }) {
     } catch (e) { toast('保存设置失败：' + e.message, 'err'); return false; }
   }
 
-  const pickModel = (pid, m) => saveSettings({ ...settings, activeProviderId: pid, activeModel: m }, true);
+  const setSessionModel = async input => {
+    const target = sidRef.current;
+    try { const modelSelection = await api.invoke('session-model-set', { sessionId: target, ...input }); dispatch({ t: 'patch', sid: target, patch: { modelSelection } }); return true; }
+    catch (e) { toast(e.message || '切换模型失败', 'err'); return false; }
+  };
+  const pickModel = (pid, m) => setSessionModel({ providerId: pid, model: m });
   // 切换思考强度：与选模型同一条保存通道，立刻对下一次请求生效（settings 是请求时的快照来源）。
-  const pickThinking = level => saveSettings({ ...settings, activeThinking: level }, true);
-  const enableImages = () => saveSettings({ ...settings, providers: (settings.providers || []).map(p => p.id !== settings.activeProviderId ? p : { ...p, models: (p.models || []).map(m => (typeof m === 'string' ? m : m.id) !== settings.activeModel ? m : { ...(typeof m === 'string' ? { id: m, name: m } : m), vision: true }) }) }, true);
+  const pickThinking = level => setSessionModel({ thinking: level });
+  const enableImages = () => { const selected = cur.modelSelection || session?.modelSelection;
+    return saveSettings({ ...settings, providers: (settings.providers || []).map(p => p.id !== (selected?.providerId || settings.activeProviderId) ? p : { ...p, models: (p.models || []).map(m => (typeof m === 'string' ? m : m.id) !== (selected?.model || settings.activeModel) ? m : { ...(typeof m === 'string' ? { id: m, name: m } : m), vision: true }) }) }, true);
+  };
 
   // ---- 快捷键 ----
   useEffect(() => {
@@ -685,6 +819,11 @@ export function Workbench({ children }) {
     commandForm, setCommandForm, extensionBrowser, setExtensionBrowser, automationDraft, setAutomationDraft,
     legacySessions, restoreLegacySessions, discardLegacySessions,
     commandFeedback: commandFeedback[sid], clearCommandFeedback: () => setCommandFeedback(m => ({ ...m, [sid]: null })),
+    // 取消正在跑的手动压缩。界面上的 ✕ 走这条，不是只收起提示。
+    cancelCompact: async () => {
+      try { await api.invoke('agent-compress-cancel', { sessionId: sidRef.current }); }
+      catch (e) { toast(e.message || '取消失败', 'err'); }
+    },
     settings, saveSettings, setSettings, firstRun, setFirstRun,
     sessions, sid, session, cur, dispatch, focusSession,
     view, setView, side, setSide, sideOpen, setSideOpen, openSide, panelLayout: presentation.layout, setPanelLayout: presentation.setPanelLayout, tabs,
@@ -692,10 +831,10 @@ export function Workbench({ children }) {
     launching, launch, go, newSession, closeSession, pinSession, cleanRetry,
     input, setInput, editTarget: editTarget?.sid === sid ? editTarget : null, startEdit, cancelEdit, rate,
     atts: atts[sid] || [], addAtt, rmAtt, addFiles, dropPaste, uploading: !!uploads[sid], sending: !!sending[sid], enableImages,
-    send, sendInput, compactNow, pickModel, pickThinking, inv,
+    send, sendInput, compactNow, pickModel, pickThinking, inv, loadEarlierHistory, reloadHistory: () => { seen.current.delete(sidRef.current); setSessions(value => ({ ...value })); },
     setTheme,
-    refs: { viewRef: bindViewport, canvasRef: bindCanvas, urlRef, inputRef, chatRef },
-    embedOn, embedCovered,
+    refs: { viewRef: bindViewport, canvasRef: bindCanvas, urlRef, inputRef, chatRef, bindChat, scrollController: scrollRef },
+    embedOn, embedCovered, embedPending,
     isApi, fmt: { hostOf: undefined },
   };
 

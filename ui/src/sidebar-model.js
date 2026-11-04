@@ -26,7 +26,7 @@ export function sidebarResults(projects, sessions, query, history = [], prefix =
   for (const hit of history) {
     const session = sessions.find(s => s.id === hit.sessionId), project = session && projectMap.get(session.projectId);
     if (!session || !project || project.id !== hit.projectId || found.has(session.id)) continue;
-    found.add(session.id); results.push({ key: 's:' + session.id, kind: 'session', id: session.id, title: sessionLabel(session, prefix), project, subtitle: project.name, excerpt: hit.excerpt, turnId: hit.turnId });
+    found.add(session.id); results.push({ key: 's:' + session.id, kind: 'session', id: session.id, title: sessionLabel(session, prefix), project, subtitle: project.name, excerpt: hit.excerpt, turnId: hit.turnId, seq: hit.seq });
   }
   return results;
 }

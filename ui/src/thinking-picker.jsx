@@ -61,7 +61,7 @@ export function ModelSeat({
   useEffect(() => { if (!open) { setPane('effort'); setQuery(''); } }, [open]);
   useEffect(() => { if (open && pane === 'model' && searchable) searchRef.current?.focus(); }, [open, pane, searchable]);
 
-  const pickModel = m => { onPickModel(providerId, m.id); setOpen(false); };
+  const pickModel = (groupId, m) => { onPickModel(groupId, m.id); setOpen(false); };
 
   return <Popover.Root open={open} onOpenChange={setOpen}>
     <Popover.Trigger>
@@ -85,7 +85,7 @@ export function ModelSeat({
               {filtered.map(g => <div className="seat-group" key={g.id}>
                 <div className="seat-group-name">{g.name}</div>
                 {g.models.map(m => <button type="button" key={g.id + '|' + m.id} role="menuitemradio" aria-checked={g.id === providerId && m.id === model}
-                  className={'seat-item' + (g.id === providerId && m.id === model ? ' on' : '')} onClick={() => pickModel(m)}>
+                  className={'seat-item' + (g.id === providerId && m.id === model ? ' on' : '')} onClick={() => pickModel(g.id, m)}>
                   <span className="seat-item-name">{m.name || m.id}</span>
                   {g.id === providerId && m.id === model && <Icon n="check" size={13} className="seat-check" />}
                 </button>)}

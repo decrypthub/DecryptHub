@@ -19,7 +19,8 @@ export const FALLBACK_TODOS = [
   { id: 'compare', content: '与浏览器结果对比', status: 'pending' },
 ];
 
-export const MODE_LABEL = { 'read-only': '只读查看', standard: '请求批准', 'full-access': '完全访问权限' };
+// 权限名只有一处来源（sidecar/permission-presets.mjs）：界面、/permission 与 /status 共用。
+// 这里不再保留一份同义表：两处名字一旦分叉，用户看到的档位和实际执行的就对不上。
 
 // 每个会话的 UI 状态（事件按 sid 路由，互不干扰）
 export function sessionReducer(state, action) {
@@ -28,6 +29,8 @@ export function sessionReducer(state, action) {
   switch (action.t) {
     case 'drop': { const next = { ...state }; delete next[action.sid]; return next; }
     case 'patch': return set(action.patch);
+    case 'history-prepend': return set({ events: [...action.events, ...cur.events], historyStart: action.startSeq, historyLoading: false, historyError: null });
+    case 'history-evict': return set({ events: [], historyStart: null, historyLoading: false });
     case 'approval': return set({ approvals: [...cur.approvals.filter(a => a.id !== action.v.id), action.v] });
     case 'approval-resolved': return set({ approvals: cur.approvals.filter(a => a.id !== action.id) });
     case 'changes-updated': return set({ changesVersion: (cur.changesVersion || 0) + 1 });
@@ -48,7 +51,11 @@ export function sessionReducer(state, action) {
     case 'log': return set({ logs: [...cur.logs.slice(-300), action.v] });
     case 'ev': return set({ events: [...cur.events, action.v] });
     case 'assistant-start': return set({ thinking: false, events: cur.events.some(e => e.id === action.v.id) ? action.v.retry ? cur.events.map(e => e.id === action.v.id ? { ...e, ...action.v, content: '', reasoning: '', phase: 'streaming', finished: false } : e) : cur.events : [...cur.events, { type: 'assistant', content: '', phase: 'streaming', ...action.v }] });
-    case 'assistant-end': return set({ thinking: false, retry: null, events: cur.events.map(e => e.type === 'assistant' && e.id === action.v.id ? { ...e, ...action.v, finished: true } : e) });
+    case 'assistant-end': {
+      const complete = { type: 'assistant', ...action.v, finished: true };
+      const found = cur.events.some(e => e.type === 'assistant' && e.id === action.v.id);
+      return set({ thinking: false, retry: null, events: found ? cur.events.map(e => e.type === 'assistant' && e.id === action.v.id ? { ...e, ...complete } : e) : [...cur.events, complete] });
+    }
     case 'delta': {
       const events = cur.events.slice();
       for (let i = events.length - 1; i >= 0; i--) if (events[i].type === 'assistant' && (typeof action.v === 'string' || events[i].id === action.v.id)) { events[i] = { ...events[i], content: events[i].content + (typeof action.v === 'string' ? action.v : action.v.text) }; break; }
@@ -64,7 +71,7 @@ export function sessionReducer(state, action) {
       const events = cur.events.slice();
       for (let i = events.length - 1; i >= 0; i--) {
         const e = events[i];
-        if (e.type === 'tool' && (action.v.itemId ? e.itemId === action.v.itemId : e.id === action.v.id) && e.result === undefined) { events[i] = { ...e, result: action.v.text, isError: action.v.isError, ms: action.v.ms, ...(action.v.images?.length ? { images: action.v.images } : {}) }; break; }
+        if (e.type === 'tool' && (action.v.itemId ? e.itemId === action.v.itemId : e.id === action.v.id) && e.result === undefined) { events[i] = { ...e, result: action.v.text, isError: action.v.isError, cancelled: !!action.v.cancelled, ms: action.v.ms, ...(action.v.images?.length ? { images: action.v.images } : {}) }; break; }
       }
       return set({ events });
     }

@@ -4,7 +4,7 @@ import { Box, Flex, Text, Badge, Card, TextField, TextArea, SegmentedControl, Sw
 import { useWorkbench } from './bus.jsx';
 import { fmtK, sessionLabel } from './state.js';
 import { TITLE_PREFIX_MAX } from '../../sidecar/session-titles.mjs';
-import { THINKING_LEVELS, normalizeThinking, levelsLabel, levelLabel, effectiveTransport, payloadLabel } from '../../sidecar/thinking.mjs';
+import { THINKING_LEVELS, normalizeThinking, levelsLabel, levelLabel, effectiveTransport, deriveTransport, payloadLabel } from '../../sidecar/thinking.mjs';
 import { LevelSlider } from './thinking-picker.jsx';
 import { Button, ActionIcon, NavButton, Icon, LogoMark, EmptyState, askConfirm, Dropdown } from './kit.jsx';
 import { native } from './transport.js';
@@ -14,6 +14,7 @@ import { Section, Row } from './settings-kit.jsx';
 import { MemoryPanel } from './memory-panel.jsx';
 import { handleWindowDrag } from './window-drag.js';
 import { AccountTab, useAccount } from './account.jsx';
+import { ProviderLogin } from './provider-login.jsx';
 
 export function Screens() {
   const { view, setView } = useWorkbench();
@@ -86,6 +87,8 @@ function AiTab({ s, setS }) {
   const [edit, setEdit] = useState(null);
   const [mEdit, setMEdit] = useState(null);
   const [testing, setTesting] = useState(null);
+  const [catalog, setCatalog] = useState([]), [login, setLogin] = useState(null);
+  useEffect(() => { w.api.invoke('provider-catalog').then(setCatalog).catch(error => w.toast(error.message, 'err')); }, []);
   const list = s.providers || [];
   const activeId = s.activeProviderId || list[0]?.id;
   const patch = p => setEdit(e => ({ ...e, data: { ...e.data, ...p } }));
@@ -96,8 +99,8 @@ function AiTab({ s, setS }) {
     if (!mEdit) return;
     const id = String(mEdit.data.id || '').trim();
     if (!id) return;
-    const transport = effectiveTransport(mEdit.data.thinking, id, edit.data.type);
-    const entry = { id, name: String(mEdit.data.name || '').trim() || id, contextWindow: Number(mEdit.data.contextWindow) || 0, vision: !!mEdit.data.vision, thinking: normalizeThinking({ ...mEdit.data.thinking, transport }, transport) };
+    const transport = edit.data.api === 'openai-responses' && mEdit.data.thinking?.transport !== 'none' ? 'effort' : effectiveTransport(mEdit.data.thinking, id, edit.data.type);
+    const entry = { ...mEdit.data, id, name: String(mEdit.data.name || '').trim() || id, contextWindow: Number(mEdit.data.contextWindow) || 0, vision: !!mEdit.data.vision, thinking: normalizeThinking({ ...mEdit.data.thinking, transport }, transport) };
     const models = [...(edit.data.models || [])];
     if (mEdit.i >= 0) models[mEdit.i] = entry; else models.push(entry);
     patch({ models });
@@ -117,12 +120,13 @@ function AiTab({ s, setS }) {
   };
   const makeActive = p => setS({ ...s, activeProviderId: p.id, activeModel: p.models?.[0]?.id || p.models?.[0] || '' });
   const test = async p => {
+    if (p.catalogId && !await w.saveSettings(s, true)) return;
     setTesting(p.id);
     try {
       const r = await window.api.invoke('test-connection', {
         providerId: p.id,
         provider: p.type,
-        openai: p.type === 'openai' ? { baseUrl: p.baseUrl, apiKey: p.apiKey, model: p.models?.[0]?.id || p.models?.[0] } : undefined,
+        openai: p.type === 'openai' ? { baseUrl: p.baseUrl, apiKey: p.apiKey, api: p.api, model: p.models?.[0]?.id || p.models?.[0] } : undefined,
         anthropic: p.type === 'anthropic' ? { baseUrl: p.baseUrl, apiKey: p.apiKey, model: p.models?.[0]?.id || p.models?.[0] } : undefined,
       });
       w.toast((r.ok ? '连接正常：' : '连接失败：') + (r.message || ''), r.ok ? 'ok' : 'err', 6000);
@@ -131,7 +135,8 @@ function AiTab({ s, setS }) {
   };
 
   return <>
-    <Section title="模型渠道" desc="支持 OpenAI 兼容接口与 Claude 原生接口。"
+    {login && <ProviderLogin request={login} onClose={() => setLogin(null)} />}
+    <Section title="模型渠道" desc="支持内置供应商目录、供应商登录及自定义兼容接口。"
       actions={<Flex gap="2"><Button size="2" variant="soft" color="gray" onClick={async () => { await w.saveSettings({ ...s, onboarding: null }, true); w.setFirstRun(true); }}>重新运行引导</Button><Button size="2" onClick={openNew}><Icon n="plus" size={16} />添加</Button></Flex>}>
       <Card size="2" style={{ padding: 0 }}>
         {!list.length && <EmptyState icon="sparkles" title="连接第一个模型" description="添加 OpenAI 兼容端点或 Claude 原生渠道，开启 AI 辅助分析。"><Button size="2" onClick={openNew}><Icon n="plus" size={16} />添加模型渠道</Button></EmptyState>}
@@ -140,9 +145,9 @@ function AiTab({ s, setS }) {
           <div className="prov-main">
             <Flex align="center" gap="2" wrap="wrap">
               <Text size="2" weight="bold">{p.name || '未命名渠道'}</Text>
-              {p.name !== (p.type === 'anthropic' ? 'Claude 原生' : 'OpenAI 兼容') && <Badge size="1" variant="soft" color="gray">{p.type === 'anthropic' ? 'Claude 原生' : 'OpenAI 兼容'}</Badge>}
+              {!p.catalogId && p.name !== (p.type === 'anthropic' ? 'Claude 原生' : p.api === 'openai-responses' ? 'OpenAI Responses' : 'OpenAI 兼容') && <Badge size="1" variant="soft" color="gray">{p.type === 'anthropic' ? 'Claude 原生' : p.api === 'openai-responses' ? 'OpenAI Responses' : 'OpenAI 兼容'}</Badge>}
               {activeId === p.id && <Badge size="1" variant="soft" color="tomato">使用中</Badge>}
-              {!(p.hasKey || p.apiKey) && <Badge size="1" variant="soft" color="amber">没有密钥</Badge>}
+              {!(p.hasKey || p.apiKey) && <Badge size="1" variant="soft" color="amber">{p.catalogId ? '凭据由供应商解析' : '没有密钥'}</Badge>}
             </Flex>
             <Text as="div" size="1" color="gray" mt="1">
               {(p.models || []).length ? (p.models || []).map(m => typeof m === 'string' ? m : (m.name || m.id)).join(' · ') : '还没有配置模型'}
@@ -150,6 +155,8 @@ function AiTab({ s, setS }) {
             </Text>
           </div>
           <Flex className="row-actions" align="center" gap="2">
+            {p.catalogId && p.authentication?.configured && <Button size="2" variant="soft" color="gray" onClick={async () => { try { const saved=await w.api.invoke('provider-auth-logout',{routeId:p.id}); w.setSettings(saved); } catch(error){ w.toast(error.message,'err'); } }}>退出认证</Button>}
+            {(catalog.find(item => item.id === p.catalogId)?.methods || []).map(method => <Button size="2" key={method.id} variant="soft" color="gray" onClick={async () => { if (await w.saveSettings(s, true)) setLogin({ routeId: p.id, method: method.id }); }}>{method.id === 'oauth' ? '登录' : '配置认证'}</Button>)}
             {activeId !== p.id && <Button size="2" variant="soft" color="gray" onClick={() => makeActive(p)}>设为当前</Button>}
             <Button size="2" variant="soft" color="gray" disabled={testing === p.id} onClick={() => test(p)}>{testing === p.id ? '测试中…' : '测试'}</Button>
             <ActionIcon icon="edit" onClick={() => openEdit(i)} title="编辑" />
@@ -163,16 +170,25 @@ function AiTab({ s, setS }) {
       <Dialog.Content maxWidth="600px">
         <Dialog.Title size="3">{edit?.i >= 0 ? '编辑渠道' : '添加渠道'}</Dialog.Title>
         {edit && <>
+          <Box mt="3"><Text as="div" size="1" color="gray" mb="1">供应商</Text><Dropdown value={edit.data.catalogId || 'custom'} label="供应商目录" options={[{ value: 'custom', label: '自定义渠道' }, ...catalog.map(item => ({ value: item.id, label: item.name }))]} onChange={value => {
+            if (edit.i >= 0 && value !== (edit.data.catalogId || 'custom')) { w.toast('更换供应商请新建渠道', 'err'); return; }
+            const provider = catalog.find(item => item.id === value);
+            patch(provider ? { catalogId: value, name: provider.name, type: 'openai', api: undefined, baseUrl: provider.baseUrl, models: provider.models.slice(0, 1), apiKey: '', hasKey: false } : { catalogId: undefined, api: undefined });
+          }} /></Box>
           <Box mt="3"><Text as="div" size="1" color="gray" mb="1">名称</Text>
             <TextField.Root size="2" value={edit.data.name} onChange={e => patch({ name: e.target.value })} placeholder="例如 OpenAI 官方 / 公司中转" /></Box>
           <Flex gap="3" mt="3">
             <Box flexGrow="1">
               <Text as="div" size="1" color="gray" mb="1">接口类型</Text>
-              <SegmentedControl.Root size="2" value={edit.data.type} style={{ width: '100%' }}
-                onValueChange={v => patch({ type: v, baseUrl: v === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1' })}>
+              {edit.data.catalogId ? <Text size="2">{catalog.find(item => item.id === edit.data.catalogId)?.name || edit.data.catalogId}</Text> : <SegmentedControl.Root size="2" value={edit.data.api === 'openai-responses' ? 'responses' : edit.data.type} style={{ width: '100%' }}
+                onValueChange={v => patch({ type: v === 'responses' ? 'openai' : v, api: v === 'responses' ? 'openai-responses' : undefined,
+                  baseUrl: v === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1',
+                  models: (edit.data.models || []).map(model => typeof model !== 'object' || !model.thinking ? model : { ...model, thinking: { ...model.thinking,
+                    transport: model.thinking.transport === 'none' ? 'none' : v === 'anthropic' ? 'budget' : v === 'responses' ? 'effort' : deriveTransport(model.id, 'openai') } }) })}>
                 <SegmentedControl.Item value="openai" style={{ flex: 1 }}>OpenAI 兼容</SegmentedControl.Item>
+                <SegmentedControl.Item value="responses" style={{ flex: 1 }}>Responses</SegmentedControl.Item>
                 <SegmentedControl.Item value="anthropic" style={{ flex: 1 }}>Claude 原生</SegmentedControl.Item>
-              </SegmentedControl.Root>
+              </SegmentedControl.Root>}
             </Box>
             <Box flexGrow="1">
               <Text as="div" size="1" color="gray" mb="1">Base URL</Text>
@@ -182,6 +198,9 @@ function AiTab({ s, setS }) {
           <Box mt="3"><Text as="div" size="1" color="gray" mb="1">API Key {edit.data.hasKey && <Text size="1" color="gray">（已保存，留空表示不改）</Text>}</Text>
             <TextField.Root size="2" type="password" value={edit.data.apiKey || ''} onChange={e => patch({ apiKey: e.target.value })} placeholder={edit.data.hasKey ? '••••••••' : 'sk-…'} /></Box>
           <Box mt="3">
+            {edit.data.catalogId && <Box mb="3"><Text as="div" size="1" color="gray" mb="1">从供应商目录添加模型</Text><Dropdown label="供应商模型目录" options={(catalog.find(item => item.id === edit.data.catalogId)?.models || []).map(model => ({ value: model.id, label: model.name || model.id }))} onChange={id => {
+              const model = catalog.find(item => item.id === edit.data.catalogId)?.models.find(model => model.id === id); if (model && !(edit.data.models || []).some(item => item.id === id)) patch({ models: [...(edit.data.models || []), model] });
+            }} /></Box>}
             <Flex justify="between" align="center" mb="2">
               <Text size="1" color="gray">模型</Text>
               <Button size="1" variant="soft" color="gray" onClick={() => setMEdit({ i: -1, data: { id: '', name: '', contextWindow: 0, vision: false } })}><Icon n="plus" size={12} />添加模型</Button>

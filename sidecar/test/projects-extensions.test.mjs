@@ -36,7 +36,10 @@ test('new chats require a project and no longer allow optional or managed direct
   assert.throws(() => new TaskStore({ userDataDir: f.app, getSessions: () => f.mgr }).upsert({ title: 'unbound', prompt: 'must not create a session' }), /项目内的执行会话/);
   f.mgr.extensions = { index() { throw Error('unavailable auxiliary metadata'); } };
   assert.ok(s.ensureAgent().stateNote().includes(s.workspace.root));
-  assert.match(s.ensureAgent().stateNote(), /【权限】standard/);
+  // 权限那一行给模型的是用户看到的预设名，不是内部旋钮值：模型转述时不会说出
+  // 界面上根本不存在的 "standard"，也不会因此把档位说错。
+  assert.match(s.ensureAgent().stateNote(), /【权限】工作区内修改/);
+  assert.doesNotMatch(s.ensureAgent().stateNote(), /【权限】standard/);
   const restore = new SessionManager({ userDataDir: f.app, getSettings: () => f.settings, broadcast() {}, chromeMod: {} });
   assert.equal(restore.get('main').projectId, s.projectId); await restore.closeAll();
 });

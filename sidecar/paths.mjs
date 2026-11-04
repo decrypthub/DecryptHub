@@ -7,6 +7,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export const pathKey = p => process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p);
+export function findProjectRoot(cwd) {
+  cwd = path.resolve(cwd);
+  for (let current = cwd; ; current = path.dirname(current)) {
+    if (fs.existsSync(path.join(current, '.git'))) return current;
+    if (path.dirname(current) === current) return cwd;
+  }
+}
 export function containsPath(root, target) {
   const rel = path.relative(pathKey(root), pathKey(target));
   return !rel || (rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel));
@@ -49,6 +56,7 @@ export function tryResolveIn(root, rel, opts) {
 }
 
 export function isSensitivePath(file) {
+  if (String(file).replace(/\\/g, '/').split('/').some(name => ['.history', '.changes'].includes(name) || /^\.(?:data-write-lease|writer-lease|session-search)\.sqlite(?:-(?:wal|shm|journal))?$/.test(name))) return true;
   return String(file).replace(/\\/g, '/').split('/').some(n => /^(?:\.ssh|\.aws|\.azure|\.gnupg|\.wdh|\.agent-state\.json|\.agent-history\.json|\.npmrc|\.pypirc|credentials(?:\.json)?|id_rsa|id_ed25519)$/i.test(n)
     || (/^\.env(?:\.|$)/i.test(n) && !/^\.env\.(?:example|sample|template)$/i.test(n)) || /\.(?:pem|p12|pfx|key)$/i.test(n));
 }

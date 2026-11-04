@@ -1,7 +1,7 @@
 // Shared primitives use the existing Radix system and one icon family.
 import React, { forwardRef, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Theme, Box, Flex, Text, Button as RadixButton, IconButton as RadixIconButton, TextArea, Select, Dialog, Tooltip } from '@radix-ui/themes';
+import { Theme, Box, Flex, Text, Button as RadixButton, IconButton as RadixIconButton, TextArea, Select, Dialog, Tooltip, Checkbox } from '@radix-ui/themes';
 import { PlayIcon, StopIcon, ArrowLeftIcon, ReloadIcon, ArrowRightIcon, GearIcon, SunIcon, MoonIcon, TrashIcon, ClockIcon, MagicWandIcon, GlobeIcon, CodeIcon, ActivityLogIcon, FileIcon, MixerHorizontalIcon, ArrowUpIcon, Cross2Icon, CheckIcon, DownloadIcon, FileTextIcon, InfoCircledIcon, ResetIcon, MinusIcon, SquareIcon, CopyIcon, PlusIcon, DotsHorizontalIcon, ChatBubbleIcon, ReaderIcon, DrawingPinIcon, LockClosedIcon, MagnifyingGlassIcon, StackIcon, ChevronUpIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, DotFilledIcon, ViewVerticalIcon, DashboardIcon, TargetIcon, DesktopIcon, ExternalLinkIcon, LightningBoltIcon, Pencil1Icon, MobileIcon, PersonIcon } from '@radix-ui/react-icons';
 import { renderMd, highlightHtml } from './md.js';
 import { themeConfig } from './theme.js';
@@ -12,6 +12,11 @@ function SidebarLeftGlyph(props) { return <svg viewBox="0 0 20 20" fill="none" s
 function SidebarRightGlyph(props) { return <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" {...props}><rect x="2" y="3" width="16" height="14" rx="2" /><path d="M13 3v14" /></svg>; }
 function ThumbUpGlyph(props) { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" /></svg>; }
 function ThumbDownGlyph(props) { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" /></svg>; }
+// 权限三档的盾牌：同一副轮廓 + 不同的内芯，和 DSH 的 PermissionIcon 一样靠内芯区分档位，
+// 而不是三个互不相干的图标。轮廓是通用盾形，不是任何产品的标识。
+function PermShield(props) { return <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}><path d="M8 1.85l4.9 1.8v3.45c0 4.05-3.05 5.9-4.9 6.75-1.85-.85-4.9-2.7-4.9-6.75V3.65L8 1.85z" /><path d="M5.95 7.75l1.45 1.45 2.7-2.95" /></svg>; }
+function PermShieldWrite(props) { return <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}><path d="M8 1.85l4.9 1.8v3.45c0 4.05-3.05 5.9-4.9 6.75-1.85-.85-4.9-2.7-4.9-6.75V3.65L8 1.85z" /><path d="M5.7 9.55l.35-1.5 2.6-2.6 1.2 1.2-2.6 2.6-1.55.3z" /></svg>; }
+function PermShieldFull(props) { return <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}><path d="M8 1.85l4.9 1.8v3.45c0 4.05-3.05 5.9-4.9 6.75-1.85-.85-4.9-2.7-4.9-6.75V3.65L8 1.85z" /><path d="M8 4.75v3.4" /><path d="M8 9.85v.85" /></svg>; }
 const ICONS = {
   play: PlayIcon, pause: PauseIcon, stop: StopIcon, back: ArrowLeftIcon, reload: ReloadIcon,
   go: ArrowRightIcon, settings: GearIcon, sun: SunIcon, moon: MoonIcon,
@@ -28,6 +33,7 @@ const ICONS = {
   pin: DrawingPinIcon, mobile: MobileIcon,
   user: PersonIcon, feedback: PaperPlaneIcon, logout: ExitIcon,
   thumbup: ThumbUpGlyph, thumbdown: ThumbDownGlyph,
+  'shield-check': PermShield, 'shield-write': PermShieldWrite, 'shield-full': PermShieldFull,
 };
 
 export function Icon({ n, size = 16, className }) {
@@ -153,6 +159,29 @@ export function askConfirm(message, { ok = '确定', danger = false, always = nu
       </Dialog.Content>
     </Dialog.Root>
   ));
+}
+
+// 风险确认框：主操作在勾选「我已了解风险」之前一直是禁用的。
+// 对应 DSH 的 RiskConfirmation（ui-primitives/src/RiskConfirmation.tsx）——
+// 那道勾选是唯一阻止「顺手一点就开了完全权限」的东西，不能退化成两个按钮的普通确认。
+export function askRiskConfirm({ title, description, acknowledge = '我已了解风险，并愿意继续', cancel = '取消', confirm }) {
+  return mountPromise(done => {
+    const [checked, setChecked] = useState(false);
+    return <Dialog.Root open onOpenChange={o => { if (!o) done(false); }}>
+      <Dialog.Content maxWidth="460px">
+        <Dialog.Title size="4">{title}</Dialog.Title>
+        <Dialog.Description size="2" color="gray" mt="2" style={{ lineHeight: 1.7 }}>{description}</Dialog.Description>
+        <Text as="label" size="2" mt="5" style={{ display: 'flex', gap: 10, alignItems: 'flex-start', lineHeight: 1.7, cursor: 'pointer' }}>
+          <Checkbox size="2" mt="1" checked={checked} onCheckedChange={v => setChecked(v === true)} aria-label={acknowledge} />
+          <span>{acknowledge}</span>
+        </Text>
+        <Flex justify="end" gap="2" mt="5">
+          <Button size="2" variant="soft" color="gray" onClick={() => done(false)}>{cancel}</Button>
+          <Button size="2" color="red" disabled={!checked} onClick={() => done(true)}>{confirm}</Button>
+        </Flex>
+      </Dialog.Content>
+    </Dialog.Root>;
+  });
 }
 
 export function askQuestion({ question, detail, options = [], kind, todos = [] } = {}) {

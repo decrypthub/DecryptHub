@@ -158,7 +158,8 @@ test('自动压缩：阈值触发 → 追加检查点事件，历史不被删改
   const { agent, emitted } = fakeAgent({ projectDir: dir, settings });
   let summaryCalls = 0;
   agent.chat = async (s, messages) => {
-    if (messages[0]?.content?.includes('上下文检查点生成器')) { summaryCalls++; return { content: '## 目标\n- 分析 sign', toolCalls: [], usage: null }; }
+    // 摘要请求现在走「原对话前缀 + 末尾指令」：认最后一条 user 消息里的标记，不再认自建 system。
+    if (/上下文检查点生成任务/.test(String(messages.at(-1)?.content || ''))) { summaryCalls++; return { content: '## 目标\n- 分析 sign', toolCalls: [], usage: null }; }
     return answer('收到');
   };
   agent.getSettings = () => settings;
@@ -292,7 +293,7 @@ test('compact_context: 够长的历史 → 追加检查点，返回前后用量'
   const { agent } = fakeAgent({ tools: AGENT_TOOLS, projectDir: tmp() });
   let summaryAsked = 0;
   agent.chat = async (s, messages) => {
-    if (messages[0]?.content?.includes('上下文检查点生成器')) { summaryAsked++; return { content: '## 目标\n- 保留 sign 结论', toolCalls: [], usage: null }; }
+    if (/上下文检查点生成任务/.test(String(messages.at(-1)?.content || ''))) { summaryAsked++; return { content: '## 目标\n- 保留 sign 结论', toolCalls: [], usage: null }; }
     return answer('ok');
   };
   agent.hist.append({ t: 'user', content: '评估 A ' + 'a '.repeat(4000) });

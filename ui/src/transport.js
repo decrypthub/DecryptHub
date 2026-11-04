@@ -15,7 +15,7 @@ export const native = {
   async accountOpenPage(page = 'home') { return tauriInvoke('account_open_page', { page }); },
   async appInfo() {
     if (isNative()) { try { return await tauriInvoke('app_info'); } catch {} }
-    return { name: 'DecryptHub', version: '1.4.0 (web)', os: 'web', arch: '-', keyringBackend: '进程内存（开发预览，不持久保存）' };
+    return { name: 'DecryptHub', version: '1.5.0 (web)', os: 'web', arch: '-', keyringBackend: '进程内存（开发预览，不持久保存）' };
   },
   async secretGet(slot = 'default') {
     throw new Error('已保存的密钥不向界面返回');
@@ -31,6 +31,7 @@ export const native = {
     if (isNative()) await tauriInvoke('secret_clear', { slot });
     localStorage.removeItem('jsra_key' + (slot === 'default' ? '' : ':' + slot));
   },
+  async secretStoreEnvelope(envelope) { if (!isNative()) throw Error('登录凭据需要原生桌面凭据库'); await tauriInvoke('secret_store_envelope', { envelope }); },
   async restartSidecar() { if (isNative()) { try { await tauriInvoke('restart_sidecar'); } catch {} } },
   // 无标题栏布局：双击 drag region 最大化/还原
   async toggleMaximize() { if (!isNative()) return; try { const { getCurrentWindow } = await import('@tauri-apps/api/window'); await getCurrentWindow().toggleMaximize(); } catch {} },
@@ -101,6 +102,8 @@ function connect() {
         ws.onopen = () => { setState('connected'); if (!resolved) { resolved = true; resolve(); } queue.forEach(m => ws.send(m)); queue = []; };
         ws.onclose = ev => {
           setState('reconnecting');
+          for (const request of pending.values()) { clearTimeout(request.timer); request.rej(new Error('连接已断开，请重试')); }
+          pending.clear(); queue = [];
           // 1008 = sidecar 主动拒绝（Origin 不符或票据过期），换票据重连一次
           if (ev && ev.code === 1008) console.warn('引擎拒绝了连接（' + (ev.reason || '鉴权失败') + '）。若是浏览器直连，请在地址栏加上 ?token=<sidecar 打印的 JSRA_TOKEN>');
           if (window.__JSRA_DEBUG) window.__JSRA_DBGTXT = 'dbg closed ' + (ev && ev.code);
@@ -109,8 +112,8 @@ function connect() {
         ws.onerror = () => {};
         ws.onmessage = ev => {
           const m = JSON.parse(ev.data);
-          if (m.type === 'reply') { const p = pending.get(m.id); if (p) { pending.delete(m.id); m.error ? p.rej(new Error(m.error)) : p.res(m.result); } }
-          else if (m.type === 'event') { (listeners.get(m.channel) || []).forEach(cb => { try { cb(m.payload, m.sid); } catch (e) { console.error(e); } }); }
+          if (m.type === 'reply') { const p = pending.get(m.id); if (p) { pending.delete(m.id); clearTimeout(p.timer); if (m.error) { const error = new Error(m.error); if (m.code) error.code = m.code; p.rej(error); } else p.res(m.result); } }
+          else if (m.type === 'event') { (listeners.get(m.channel) || []).forEach(cb => { try { cb(m.payload, m.sid, m.revision); } catch (e) { console.error(e); } }); }
         };
       }
       open();
@@ -125,7 +128,12 @@ window.api = {
   invoke(channel, ...args) {
     const id = ++seq;
     const msg = JSON.stringify({ type: 'invoke', id, channel, args: args.length <= 1 ? args[0] : args });
-    return new Promise((res, rej) => { pending.set(id, { res, rej }); sendRaw(msg); setTimeout(() => { if (pending.has(id)) { pending.delete(id); rej(new Error('请求超时，逻辑进程可能繁忙或已退出')); } }, channel === 'download-kernel' ? 900000 : 130000); });
+    return new Promise((res, rej) => {
+      const request = { res, rej }; pending.set(id, request); sendRaw(msg);
+      // Cold corpus indexing and streamed archives have explicit ownership and
+      // cancellation; a generic timer must not discard a still-running reply.
+      if (!['session-search','session-export-archive'].includes(channel)) request.timer = setTimeout(() => { if (pending.has(id)) { pending.delete(id); rej(new Error('请求超时，逻辑进程可能繁忙或已退出')); } }, channel === 'download-kernel' ? 900000 : 130000);
+    });
   },
   sendInput(ev) { sendRaw(JSON.stringify({ type: 'input', payload: ev })); },
   on(channel, cb) { if (!listeners.has(channel)) listeners.set(channel, new Set()); listeners.get(channel).add(cb); return () => listeners.get(channel)?.delete(cb); },

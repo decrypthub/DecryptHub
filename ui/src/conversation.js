@@ -1,22 +1,27 @@
+import { toolFailed } from './tool-execution.js';
+
 // Derive the presentation from persisted events; never rewrite model history.
-export function historyEvents(history, partial = '', partialItem = null, partialReasoning = '') {
+export function historyEvents(history, partial = '', partialItem = null, partialReasoning = '', baseSeq = 0) {
   const events = [];
   for (let i = 0; i < (history || []).length; i++) {
-    const e = history[i], meta = { id: e.id || 'history-' + i, turnId: e.turnId, at: e.at };
+    const e = history[i], meta = { id: e.id || 'history-' + (baseSeq + i), seq: baseSeq + i, turnId: e.turnId, at: e.at };
+    if (e.t === 'continuation' && ['runtime-context', 'agent-instructions', 'skill-invocation', 'goal-context', 'session-reference'].includes(e.source?.kind)) continue;
     if (e.t === 'user') {
       if (e.displayContent === undefined && /^【(?:系统|工作区已切换)】/.test(e.content || '')) { events.push({ ...meta, type: 'note', content: e.content }); continue; }
-      events.push({ ...meta, type: 'user', content: e.displayContent ?? String(e.content || '').split('\n\n【当前状态')[0].split('\n\n【附件·')[0], attachments: e.attachments || [] });
+      events.push({ ...meta, type: 'user', rawContent: e.displayContent, content: e.renderedContent ?? e.displayContent ?? String(e.content || '').split('\n\n【当前状态')[0].split('\n\n【附件·')[0], attachments: e.attachments || [] });
     } else if (e.t === 'assistant') {
       events.push({ ...meta, type: 'assistant', content: e.content || '', reasoning: typeof e.reasoning === 'string' ? e.reasoning : '', phase: e.phase || (e.calls?.length ? 'commentary' : undefined), finished: true });
       for (const call of e.calls || []) events.push({ type: 'tool', id: call.id, itemId: call.itemId, turnId: e.turnId, at: e.at, name: call.name, args: call.args });
     } else if (e.t === 'tool') {
       const item = [...events].reverse().find(t => t.type === 'tool' && (e.itemId ? t.itemId === e.itemId : t.id === e.id && t.result === undefined));
-      if (item) Object.assign(item, { result: e.content, isError: !!e.isError, ms: e.ms, ...(e.images?.length ? { images: e.images } : {}) });
+      if (item) Object.assign(item, { result: e.content, isError: !!e.isError, cancelled: !!e.cancelled, ms: e.ms, ...(e.images?.length ? { images: e.images } : {}) });
     } else if (e.t === 'continuation') events.push({ ...meta, type: 'continuation', content: String(e.content || ''), source: e.source || null, notice: e.notice || null });
-    else if (e.t === 'turn-end') events.push({ ...e, type: 'turn-end' });
+    else if (e.t === 'turn-end') events.push({ ...e, seq: baseSeq + i, type: 'turn-end' });
     else if (e.t === 'summary') events.push({ ...meta, type: 'compact', stage: 'compressed', summary: e.content, ...e.meta });
   }
-  if ((partial || partialReasoning) && !events.some(e => e.id === partialItem?.id)) events.push({ ...partialItem, type: 'assistant', phase: 'streaming', content: partial, reasoning: partialReasoning });
+  // A newly published fork can be observed after assistant-start but before the
+  // first token. Keep that message identity so later deltas/end have a target.
+  if ((partialItem?.id || partial || partialReasoning) && !events.some(e => e.id === partialItem?.id)) events.push({ ...partialItem, type: 'assistant', phase: 'streaming', content: partial, reasoning: partialReasoning });
   return events;
 }
 
@@ -67,7 +72,7 @@ export function conversationTurns(events, run = null, running = false, subagents
     turn.endedAt ||= run?.id === turn.id ? run.endedAt : turn.items.at(-1)?.at;
     if (!turn.active) turn.process = turn.process.map(e => e.type === 'reasoning' ? { ...e, finished: true } : e.type === 'tool' && e.result === undefined ? { ...e, cancelled: true, result: '未收到完成结果；未自动重放此操作。' } : e);
     turn.tools = turn.process.filter(e => e.type === 'tool');
-    turn.failures = turn.tools.filter(e => e.isError).length;
+    turn.failures = turn.tools.filter(toolFailed).length;
     // A missing parent stays in the session menu; never guess from a title/time.
     turn.subagents = subagents.filter(agent => agent.parentRunId === turn.id);
   }
@@ -77,9 +82,12 @@ export function conversationTurns(events, run = null, running = false, subagents
 const TITLES = { workspace_list: '查看文件', workspace_read: '读取文件', workspace_grep: '搜索代码', workspace_write: '写入文件', workspace_edit: '编辑文件', workspace_shell: '运行命令', workspace_run: '运行脚本', workspace_npm: '安装依赖', workspace_job_output: '查看任务输出', workspace_job_kill: '停止后台任务', browser_open: '打开网页', browser_new_tab: '新建标签页', browser_reset: '重建调试上下文', browser_snapshot: '读取页面', browser_tabs: '查看标签页', browser_select: '切换标签页', browser_click: '点击页面', browser_fill: '填写表单', browser_press: '发送按键', todo_write: '更新计划', compact_context: '整理上下文', ask_user: '询问用户', discover_tools: '加载工具' };
 Object.assign(TITLES, { agent_spawn: '创建研究子代理', agent_wait: '汇总子代理结论', agent_list: '查看子代理', agent_cancel: '取消子代理', goal_update: '更新目标进展', browser_requests: '查看抓包列表', browser_request_detail: '读取请求详情', browser_capture: '调整抓包状态', list_scripts: '列出页面脚本', get_script_source: '读取脚本源码', save_script_source: '保存脚本源码', search_in_sources: '搜索页面源码', set_breakpoint_on_text: '设置源码断点', break_on_xhr: '设置请求断点', remove_breakpoint: '移除断点', list_breakpoints: '查看断点', get_paused_info: '检查暂停现场', pause_or_resume: '暂停或恢复执行', step: '单步调试', evaluate_script: '在网页中求值', select_frame: '选择页面框架', list_console_messages: '读取控制台', get_websocket_messages: '读取 WebSocket 消息', list_network_requests: '检查网络请求', get_request_initiator: '定位请求调用栈', take_screenshot: '截取网页画面', clear_site_data: '清除站点数据', clear_network_requests: '清空调试请求' });
 
+Object.assign(TITLES, { skill: '加载技能', skill_manage: '管理技能', memory_manage: '管理记忆', skill_resource_read: '读取技能资源', workspace_glob: '查找文件', apply_patch: '批量修改文件', exit_plan_mode: '提交计划确认', get_goal: '读取目标', create_goal: '建立目标', update_goal: '更新目标', agent_spawn: '创建子代理', agent_message: '追加子代理任务' });
+Object.assign(TITLES, { pwsh: '运行 PowerShell', terminal_open: '打开终端', terminal_send: '发送终端输入', terminal_read: '读取终端输出', terminal_list: '查看终端', terminal_signal: '发送终端信号', terminal_close: '关闭终端' });
+
 export function toolPresentation(event) {
   const a = event.args || {}, title = TITLES[event.name] || event.name?.replace('__', ' / ') || '工具调用';
-  let detail = a.path || a.file || a.filePath || a.task || a.summary || a.text || a.cmd || a.url || a.pattern || a.query || a.name || a.selector || a.group || '';
+  let detail = a.path || a.file || a.filePath || a.task || a.summary || a.description || a.command || a.text || a.cmd || a.url || a.pattern || a.query || a.name || a.sessionId || a.id || a.selector || a.group || '';
   if (event.name === 'workspace_npm') detail = (a.packages || [a.package || a.command || 'install']).join(' ');
   return { title, detail: String(detail).replace(/\s+/g, ' ').slice(0, 160) };
 }

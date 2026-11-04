@@ -7,6 +7,7 @@ mod embed;
 mod activity_overlay;
 mod shutdown;
 mod account;
+mod credential_store;
 
 const KEYRING_SERVICE: &str = "com.webdecrypthub.app";
 const LEGACY_KEYRING_SERVICE: &str = "com.niying.jsra";
@@ -114,13 +115,12 @@ fn slot_user(slot: &str) -> String {
 #[tauri::command]
 fn secret_set(slot: String, value: String) -> Result<(), String> {
     let user = slot_user(&slot);
-    match keyring::Entry::new(KEYRING_SERVICE, &user) {
-        Ok(e) => e.set_password(&value).map_err(|err| err.to_string()),
-        Err(e) => Err(e.to_string()),
-    }
+    credential_store::write(&user, &value)
 }
 fn secret_get(slot: String) -> Result<String, String> {
     let user = slot_user(&slot);
+    let saved = credential_store::read(&user)?;
+    if !saved.is_empty() { return Ok(saved); }
     match keyring::Entry::new(KEYRING_SERVICE, &user) {
         Ok(e) => match e.get_password() {
             Ok(p) => Ok(p),
@@ -172,10 +172,25 @@ fn secret_sync(state: State<AppState>, slots: Vec<String>) -> Result<serde_json:
 #[tauri::command]
 fn secret_clear(slot: String) -> Result<(), String> {
     let user = slot_user(&slot);
-    if let Ok(e) = keyring::Entry::new(KEYRING_SERVICE, &user) {
-        let _ = e.delete_credential();
-    }
-    Ok(())
+    credential_store::clear(&user)
+}
+
+#[tauri::command]
+fn secret_store_envelope(state: State<AppState>, envelope: serde_json::Value) -> Result<(), String> {
+    use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::Aead};
+    let decode = |text: &str| -> Result<Vec<u8>, String> { if text.len() % 2 != 0 || !text.bytes().all(|b| b.is_ascii_hexdigit()) { return Err("凭据信封编码无效".into()); } (0..text.len()).step_by(2).map(|i| u8::from_str_radix(&text[i..i+2], 16).map_err(|_| "凭据信封编码无效".to_string())).collect() };
+    let encoded = state.native_key.lock().map_err(|e| e.to_string())?.clone();
+    let nonce = envelope["nonce"].as_str().ok_or("缺少凭据信封 nonce")?;
+    let ciphertext = envelope["ciphertext"].as_str().ok_or("缺少凭据信封正文")?;
+    if encoded.len() != 64 || nonce.len() != 24 || ciphertext.len() > 220_000 { return Err("凭据通道或信封无效".into()); }
+    let key = decode(&encoded)?; let nonce = decode(nonce)?;
+    let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| "凭据通道无效")?;
+    let bytes = cipher.decrypt(Nonce::from_slice(&nonce), decode(ciphertext)?.as_slice()).map_err(|_| "凭据信封校验失败")?;
+    let payload: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| "凭据信封内容无效")?;
+    let slot = payload["slot"].as_str().ok_or("缺少凭据槽位")?;
+    if !slot.starts_with("prov.") || slot.len() > 120 { return Err("凭据槽位无效".into()); }
+    let value = payload["value"].as_str().ok_or("缺少凭据值")?;
+    secret_set(slot.to_string(), value.to_string())
 }
 
 // 原生保存对话框（导出 HAR 等）。必须是 async 命令，否则阻塞式对话框会在主线程上死锁
@@ -314,7 +329,7 @@ fn main() {
         .plugin(tauri_plugin_process::init())
         .manage(account::AccountManager::default())
         .manage(AppState { port: port.clone(), token: token.clone(), native_key: native_key.clone(), sidecar: sidecar.clone(), running: running.clone() })
-        .invoke_handler(tauri::generate_handler![secret_set, secret_sync, secret_clear, get_ws_port, get_ws_token, app_info, restart_sidecar, prepare_for_update, pick_save_path, pick_open_paths, pick_work_folder, embed_show, embed_hide, embed_release, embed_supported, open_devtools, account::account_status, account::account_login, account::account_cancel, account::account_logout, account::account_open_page, account::account_reopen_login, account::account_avatar])
+        .invoke_handler(tauri::generate_handler![secret_set, secret_sync, secret_store_envelope, secret_clear, get_ws_port, get_ws_token, app_info, restart_sidecar, prepare_for_update, pick_save_path, pick_open_paths, pick_work_folder, embed_show, embed_hide, embed_release, embed_supported, open_devtools, account::account_status, account::account_login, account::account_cancel, account::account_logout, account::account_open_page, account::account_reopen_login, account::account_avatar])
         .setup(move |app| {
             match spawn_sidecar(&port, &token, &native_key) {
                 Ok(c) => { *sidecar.lock().unwrap() = Some(c); }

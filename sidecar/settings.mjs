@@ -122,7 +122,7 @@ export function save(s) {
   // 密钥不落盘，由 OS keyring/DPAPI 管理（前端注入到内存）
   c.openai.apiKey = ''; c.anthropic.apiKey = '';
   // 渠道密钥同样只在密钥库里：providers[].apiKey 以前会被原样写盘，启动时再用 keyring 回填
-  if (Array.isArray(c.providers)) c.providers = c.providers.map(p => ({ ...p, apiKey: '', hasKey: undefined }));
+  if (Array.isArray(c.providers)) c.providers = c.providers.map(p => ({ ...p, apiKey: '', hasKey: undefined, authentication: undefined }));
   atomicJson(file(), c);
 }
 export { DEFAULTS };

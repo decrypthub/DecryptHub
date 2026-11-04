@@ -3,6 +3,10 @@ import path from 'node:path';
 import { prepareExecutor } from './prepare-executor.mjs';
 import { prepareWindowsArtifacts } from './prepare-windows-runtime.mjs';
 import { prepareTerminal } from './prepare-terminal.mjs';
+import { prepareSearch } from './prepare-search.mjs';
+import { prepareNotices } from './prepare-notices.mjs';
+import { prepareOffice } from './prepare-office.mjs';
+import { preparePrimaryRuntime } from './prepare-primary-runtime.mjs';
 if (typeof Bun === 'undefined' || Bun.version !== '1.4.4')
   throw Error('Use npx --yes bun@1.4.4 scripts/build-sidecar.mjs win|linux');
 const root = path.resolve(import.meta.dir, '..');
@@ -10,6 +14,9 @@ const which = process.argv[2] || 'win';
 if (!['win', 'linux'].includes(which)) throw Error('Choose win or linux');
 prepareExecutor(root);
 prepareTerminal(root, which === 'win' ? 'win32' : 'linux');
+prepareSearch(root, which === 'win' ? 'win32' : 'linux');
+prepareNotices(root);
+if (which === 'win') { await preparePrimaryRuntime(); await prepareOffice(root); }
 const output = path.join(root, 'build');
 const common = {
   entrypoints: [path.join(root, 'sidecar/index.mjs')],
@@ -40,6 +47,10 @@ const result = await Bun.build(
 if (!result.success) {
   console.error(result.logs);
   process.exit(1);
+}
+{
+  const worker = await Bun.build({ ...common, entrypoints: [path.join(root, 'sidecar/history-verifier.mjs')], target: 'node', format: 'esm', outdir: path.join(output, 'resources/sidecar'), naming: 'history-verifier.mjs' });
+  if (!worker.success) throw new AggregateError(worker.logs, 'History verifier build failed');
 }
 const file = path.join(output, which === 'win' ? 'resources/sidecar/main.mjs' : 'jsra-sidecar-linux');
 const bytes = fs.readFileSync(file);

@@ -124,7 +124,6 @@ export function transcript(msgs, perMsg = 4000) {
     return `[${m.role === 'user' ? '用户' : '助手'}]: ${c.slice(0, perMsg)}${c.length > perMsg ? '…' : ''}${calls ? `\n[助手调用工具]: ${calls}` : ''}`;
   }).join('\n');
 }
-
 // 结构化摘要模板（综合 Pi SUMMARIZATION_PROMPT、opencode SUMMARY_TEMPLATE/RULES、Gemini state_snapshot，用于通用任务）
 const SECTIONS = `## 目标
 - 用户要完成的任务与验收条件，一两句
@@ -160,20 +159,106 @@ const RULES = `规则：
 - 不要提及“摘要/压缩”过程本身；直接输出 Markdown，不要前言`;
 export function summaryPrompt({ update, instructions } = {}) {
   const head = update
-    ? '上面 <conversation> 中是【新增】对话，<previous-summary> 中是已有检查点。把新增内容合并进已有检查点，输出一份完整的、更新后的检查点（保留仍然有效的旧信息，更新状态与下一步）。'
-    : '上面 <conversation> 中是一段通用 Agent 的工作对话。为另一个将接手继续工作的模型生成一份结构化“上下文检查点”。';
+    ? '上面这段对话是【新增】部分；<previous-summary> 中是已有检查点。把新增内容合并进已有检查点，输出一份完整的、更新后的检查点（保留仍然有效的旧信息，更新状态与下一步）。'
+    : '上面这段对话是一段通用 Agent 的工作对话。为另一个将接手继续工作的模型生成一份结构化“上下文检查点”。';
   return `${head}\n\n必须使用以下格式：\n${SECTIONS}\n\n${RULES}${instructions ? `\n\n用户额外要求重点保留：${String(instructions).slice(0, 500)}` : ''}`;
 }
-export function buildSummaryRequest(old, { previousSummary, instructions } = {}) {
-  let user = `<conversation>\n${transcript(old)}\n</conversation>\n\n`;
-  if (previousSummary) user += `<previous-summary>\n${previousSummary}\n</previous-summary>\n\n`;
-  user += summaryPrompt({ update: !!previousSummary, instructions });
-  return [{ role: 'system', content: '你是上下文检查点生成器，只输出检查点内容，不调用工具，不继续对话。' }, { role: 'user', content: user }];
+
+/** 摘要调用的固定标记：宿主、测试和日志靠它认出「这次请求是压缩，不是对话」。 */
+export const SUMMARY_REQUEST_TAG = '【上下文检查点生成任务】';
+
+/**
+ * 构造摘要请求。
+ *
+ * 两种形状，由是否给出 `system` 决定：
+ *
+ * - **前缀复用（默认，生产用）**：`system` + 原封不动的对话消息 + 一条指令 user 消息。
+ *   这样这次辅助调用是上一次真实请求的**真前缀**，端点的 KV 缓存可以直接命中，
+ *   压缩成本从「重新读一整段历史」降到「只算新加的那条指令」。
+ *   换一份自建的摘要 system prompt 就等于每次都冷启动。
+ * - **旧形状（不给 system）**：自定义摘要 system + 一条把对话转写成纯文本的 user。
+ *   保留给不持有会话上下文的调用方与既有测试；它不复用缓存，不要在生产主路径上用。
+ *
+ * 指令放在**最后一条 user 消息**而不是 system 里，是因为 system 属于要复用的前缀。
+ *
+ * @returns {{ messages: object[], tools: object[] }}
+ */
+export function buildSummaryRequest(old, { previousSummary, instructions, system, tools } = {}) {
+  const instruction = SUMMARY_REQUEST_TAG + '\n\n' + summaryPrompt({ update: !!previousSummary, instructions })
+    + (previousSummary ? `\n\n<previous-summary>\n${previousSummary}\n</previous-summary>` : '');
+  if (typeof system === 'string' && system) {
+    // 重放的就是原对话形状；末尾补一条 user 指令，模型才会「总结上面」而不是继续对话。
+    const replayed = Array.isArray(old) ? old : [];
+    return { messages: [{ role: 'system', content: system }, ...replayed, { role: 'user', content: instruction }], tools: Array.isArray(tools) ? tools : [] };
+  }
+  const user = `<conversation>\n${transcript(old)}\n</conversation>\n\n`
+    + (previousSummary ? `<previous-summary>\n${previousSummary}\n</previous-summary>\n\n` : '')
+    + instruction;
+  return { messages: [{ role: 'system', content: '你是上下文检查点生成器，只输出检查点内容，不调用工具，不继续对话。' }, { role: 'user', content: user }], tools: [] };
 }
 export const SUMMARY_PREFIX = '【上下文检查点：以下是较早对话的结构化摘要，由之前的工作生成；在此基础上继续，避免重复已完成的工作】\n';
 export const SUMMARY_PROMPT = summaryPrompt(); // 兼容旧导出
 
+/**
+ * 摘要必须真的比被它替换的内容小，否则压缩等于白做——还白花一次模型调用。
+ *
+ * 参考 DSH `compaction-basic/region.ts`：帧化后的检查点 token 数 ≥ 被遮蔽区间的
+ * token 数就直接拒绝提交。判定用**同一套估算**（`estimateTokens`），所以是
+ * 「按我们自己的账本更小」，不是「按 provider 计费更小」——但两者方向一致，
+ * 这就够了：一个比原文还长的摘要不可能让下一轮请求变小。
+ *
+ * @param {string} summary 待提交的摘要正文
+ * @param {number} before 被替换内容的 token 数
+ * @returns {{ ok: boolean, tokens: number, before: number, excess: number }}
+ */
+export function summaryFits(summary, before) {
+  const tokens = estimateTokens(SUMMARY_PREFIX + String(summary || ''));
+  const limit = Math.max(0, Number(before) || 0);
+  return { ok: tokens < limit, tokens, before: limit, excess: Math.max(0, tokens - limit) };
+}
+
 // 大工具输出 → 存档 + 引用（模型可用 context_ref_read / net_get 重新获取）
+//
+// 截断策略参考 DSH `spill-policy/retention.ts`：**首尾各保留一段 + 中间打洞**，
+// 而不是只留开头。工具输出（报错堆栈、脚本尾部、grep 结果）的有用信息常在末尾，
+// 只砍尾巴会让模型看不到关键结论。
+//
+// 另外照抄了它的两个细节：
+//   - 切点落在 UTF-16 代理对中间时修正，不产生乱码（`safeSlice`）
+//   - 头尾各拿一半预算，同一文本同时进头尾时不重复（`slice(headChars)`）
+
+/** 在安全位置切分，避免把代理对切成两半产生替换字符。 */
+export function safeSlice(text, length, fromEnd = false) {
+  if (length <= 0) return '';
+  if (length >= text.length) return text;
+  let cut = fromEnd ? text.length - length : length;
+  const previous = text.charCodeAt(cut - 1);
+  const current = text.charCodeAt(cut);
+  if (previous >= 0xd800 && previous <= 0xdbff && current >= 0xdc00 && current <= 0xdfff) {
+    cut += fromEnd ? 1 : -1;
+  }
+  return fromEnd ? text.slice(cut) : text.slice(0, cut);
+}
+
+/**
+ * 首尾各保留一部分，返回保留内容与被省略的量。
+ * @param text 原文
+ * @param limit 保留的总字符预算（不含省略提示本身）
+ * @returns {{ head, tail, omittedChars, headChars }}
+ */
+export function retainEnds(text, limit) {
+  text = String(text ?? '');
+  if (limit <= 0) return { head: '', tail: '', omittedChars: text.length, headChars: 0 };
+  if (text.length <= limit) return { head: text, tail: '', omittedChars: 0, headChars: text.length };
+  const headBudget = Math.ceil(limit / 2);
+  const tailBudget = Math.floor(limit / 2);
+  const head = safeSlice(text, headBudget, false);
+  // 尾部预算按剩余部分算，且不与头部重叠
+  const remaining = Math.max(0, text.length - head.length);
+  const tail = safeSlice(text.slice(head.length), Math.min(tailBudget, remaining), true);
+  return { head, tail, omittedChars: text.length - head.length - tail.length, headChars: head.length };
+}
+
 export function trimToolOutput(text, { dir, name, limit = 6000, head = 1800 } = {}) {
   text = String(text ?? '');
   if (limit > 0 && text.length <= limit) return text;
@@ -186,7 +271,15 @@ export function trimToolOutput(text, { dir, name, limit = 6000, head = 1800 } = 
     } catch { ref = ''; }
   }
   const ids = [...new Set((text.match(/\b(?:r|h)\d{1,6}\b/g) || []))].slice(0, 12);
-  return text.slice(0, head) + `\n…[输出过长已截断：原 ${text.length} 字符${ref ? `；完整内容 context_ref_read(ref="${ref}", offset, length)` : ''}${ids.length && /^net_/.test(name || '') ? `；或 net_get(id) 重新获取：${ids.join(', ')}` : ''}]`;
+  // 首尾各留一段：末尾常见的是退出码、汇总行、最终结论，只留开头会丢掉它们。
+  const retained = retainEnds(text, head);
+  const hint = ref ? `；完整内容 context_ref_read(ref="${ref}", offset, length)` : '';
+  const netHint = ids.length && /^net_/.test(name || '') ? `；或 net_get(id) 重新获取：${ids.join(', ')}` : '';
+  const gap = `\n…[中段省略 ${retained.omittedChars} 字符：原 ${text.length} 字符${hint}${netHint}]\n…[以下是原文末尾]\n`;
+  if (!retained.tail) {
+    return retained.head + `\n…[输出过长已截断：原 ${text.length} 字符${hint}${netHint}]`;
+  }
+  return retained.head + gap + retained.tail;
 }
 
 export function readRef(dir, ref, offset = 0, length = 6000) {

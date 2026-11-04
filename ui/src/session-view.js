@@ -10,11 +10,20 @@ const sides = new Set(['browser', 'evidence', 'code', 'document', 'terminal']);
 // 与 docs/conversation-presentation.md 的「思考过程默认收起」一致。用户当场点开照样能看，
 // 只是不跨刷新记住——否则页面会一进来就把整段推理摊开，把对话顶走。
 const MAX_OPEN_REASONING = 200;
+// 阅读位置的规范化。除 top 外还要保留 fromBottom / max：
+//   · fromBottom —— 距底部像素，恢复时按它重算，内容变长也不会漂到顶部
+//   · max        —— 保存时的可滚动高度，用于把旧的纯 top 记录换算成 fromBottom
+// 只留 top 会让「关掉再打开」回放一个对旧高度才成立的绝对值——历史加载完高度变了，
+// 那个值就落在偏上甚至顶部（2026-11-02 用户反复报告的正是这个）。
 const normalizeScroll = value => {
   if (!value || typeof value !== 'object') return null;
   const top = Number(value.top);
   if (!Number.isFinite(top) || top < 0) return null;
-  return { top: Math.round(top), at: value.at || 0, pinned: false };
+  const out = { top: Math.round(top), at: value.at || 0, pinned: false };
+  const max = Number(value.max), fromBottom = Number(value.fromBottom);
+  if (Number.isFinite(max) && max >= 0) out.max = Math.round(max);
+  if (Number.isFinite(fromBottom) && fromBottom >= 0) out.fromBottom = Math.round(fromBottom);
+  return out;
 };
 const normalizeReasoning = value => {
   if (!Array.isArray(value)) return [];
@@ -31,7 +40,11 @@ const normalize = (value, previous = DEFAULT_SESSION_VIEW) => {
   // 阅读位置是「用户显式做过选择」才记，缺省不写入。
   // 思考展开状态在内存里照常记录（当场点开立刻生效），但永不写进 localStorage，
   // 所以刷新/重开会话后一定从收起开始——由 use-session-view 的持久化处剥离。
-  scroll: value?.scroll === null ? null : (normalizeScroll(value?.scroll) ?? previous.scroll ?? null),
+  // 阅读位置：显式 null 表示「贴底，不记忆位置」，必须真的清掉，
+  // 不能被 previous.scroll 兜回来——否则用户回到底部后重开，读到的仍是
+  // 之前那个顶部位置，表现就是「关掉再打开又跳到最上面」。
+  scroll: value?.scroll === null ? null
+    : (value?.scroll !== undefined ? (normalizeScroll(value.scroll) ?? null) : (previous.scroll ?? null)),
   reasoningOpen: normalizeReasoning(value?.reasoningOpen ?? previous.reasoningOpen),
   ...(dock.activeId ? { side: tabSide(dock.tabs.find(t => t.id === dock.activeId)) } : {}),
 }); };

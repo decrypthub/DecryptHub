@@ -1,7 +1,7 @@
 import path from 'node:path';
 
 // Runs against the real UI/sidecar with disposable local records, never a provider.
-export async function checkConversationNavigation({ page, rpc, scheme, shots, ok }) {
+export async function checkConversationNavigation({ page, rpc, scheme, shots, ok, codeProject }) {
   const sid = (await rpc('session-list')).focused, saved = await rpc('session-snapshot', { sessionId: sid });
   const fixture = Array.from({ length: 120 }, (_, i) => [
     { t: 'user', id: 'rail-user-' + i, turnId: 'rail-turn-' + i, at: Date.now() - (120 - i) * 10000, content: `索引示例第 ${i + 1} 轮：检查项目文件和工具结果。` },
@@ -54,6 +54,35 @@ export async function checkConversationNavigation({ page, rpc, scheme, shots, ok
       await page.locator('.conversation-turn').first().locator('.turn-process > summary').click();
     }
     await page.setViewportSize({ width: 1440, height: 900 });
+
+    // 切走再切回来必须贴在底部（2026-11-02 用户反馈「打开会话停在最顶部」）。
+    // 这里必须覆盖「回到曾经访问过的会话」这条路径：stickTo.settled 若残留为 true，
+    // 只会按旧高度跳一次，历史异步加载完成后就停在顶部——单测锁逻辑，这里锁真实 DOM。
+    if (!codeProject?.id) {
+      ok(false, `[${scheme}] 贴底检查缺少项目上下文（codeProject 未传入）`);
+    } else {
+      const other = await rpc('session-create', { title: '贴底回归检查 ' + scheme, projectId: codeProject.id });
+      await rpc('session-focus', { sessionId: other.id });
+      await page.waitForTimeout(400);
+      await rpc('session-focus', { sessionId: sid });
+      // 等历史渲染完（120 轮都在）
+      await page.locator('.conversation-turn').nth(119).waitFor({ state: 'attached' });
+      // 给 settleInto 的 rAF 收敛时间
+      await page.waitForFunction(() => {
+        const el = document.querySelector('.msgs');
+        return el && el.scrollHeight - el.scrollTop - el.clientHeight < 8;
+      }, { timeout: 5000 }).then(
+        () => ok(true, `[${scheme}] 切回会话后应贴在最新消息处`),
+        () => ok(false, `[${scheme}] 切回会话后停在顶部，没有贴到最新消息`),
+      );
+      // 用户主动往上翻后，不能被抢回去
+      await page.locator('.msgs').evaluate(el => { el.style.scrollBehavior = 'auto'; el.scrollTop = 200; });
+      await page.waitForTimeout(600);
+      const kept = await page.locator('.msgs').evaluate(el => Math.round(el.scrollTop));
+      ok(kept < 800, `[${scheme}] 用户往上翻后不应被强制抢回底部（实际 ${kept}）`);
+      await rpc('session-focus', { sessionId: sid });
+    }
+
     const before = await page.locator('.composer').boundingBox();
     await page.getByRole('button', { name: '查看子代理', exact: true }).click();
     await page.locator('.subagents-list .subagent-row').nth(2).waitFor();

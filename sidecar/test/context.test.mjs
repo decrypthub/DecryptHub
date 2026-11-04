@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { estimateTokens, contextTokens, modelLimit, limitInfo, compactTrigger, breakdown, microcompact, splitByTokens, buildSummaryRequest, splitForCompress, trimToolOutput, readRef, transcript } from '../context.mjs';
+import { estimateTokens, contextTokens, modelLimit, limitInfo, compactTrigger, breakdown, microcompact, splitByTokens, buildSummaryRequest, splitForCompress, trimToolOutput, readRef, transcript, summaryFits } from '../context.mjs';
 
 test('estimateTokens CJK vs latin', () => {
   assert.equal(estimateTokens('你好世界'), 4);
@@ -74,5 +74,38 @@ test('splitByTokens keeps recent budget and previous summary', () => {
   assert.equal(previousSummary, 'OLD'); assert.notEqual(recent[0].role, 'tool');
   assert.ok(old.length > 10 && recent.length >= 1); assert.ok(!old.some(x => x._summary || x._ack));
   const req = buildSummaryRequest(old, { previousSummary, instructions: '关注 sign 算法' });
-  assert.match(req[1].content, /<previous-summary>/); assert.match(req[1].content, /关注 sign 算法/); assert.match(req[1].content, /## 下一步/);
+  assert.match(req.messages[1].content, /<previous-summary>/); assert.match(req.messages[1].content, /关注 sign 算法/); assert.match(req.messages[1].content, /## 下一步/);
+  // 不给 system 时仍是「自建摘要 system + 一条转写 user」，保持既有调用方可用的旧形状
+  assert.match(req.messages[0].content, /检查点生成器/);
+  assert.deepEqual(transcript(old).length > 0, true);
+});
+
+test('buildSummaryRequest: 给了 system 就走前缀复用（原对话原样重放 + 末尾指令）', () => {
+  const old = [
+    { role: 'user', content: '帮我找 sign' },
+    { role: 'assistant', content: '', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'read', arguments: '{}' } }] },
+    { role: 'tool', tool_call_id: 'c1', name: 'read', content: '源码' },
+  ];
+  const system = '你是桌面端通用 Agent。';
+  const req = buildSummaryRequest(old, { system, tools: [{ name: 'read', schema: {} }] });
+  // 前 N 条必须与真实请求逐字节相同：前缀只要差一个字符，KV 缓存就整段失效。
+  assert.equal(req.messages[0].content, system);
+  assert.deepEqual(req.messages.slice(1, 1 + old.length), old);
+  // 指令作为最后一条 user 消息，而不是塞进 system
+  const last = req.messages.at(-1);
+  assert.equal(last.role, 'user');
+  assert.match(last.content, /上下文检查点生成任务/);
+  assert.match(last.content, /## 目标/);
+  assert.equal(req.tools.length, 1, '工具定义要一起重放，否则系统提示里的工具前缀对不上');
+  assert.equal(req.messages.filter(m => m.content === system).length, 1, 'system 不能重复出现');
+});
+
+test('summaryFits: 摘要不小于被替换区间时必须拒绝', () => {
+  const tiny = summaryFits('短', 1000);
+  assert.equal(tiny.ok, true);
+  const huge = summaryFits('z'.repeat(20000), 1000);
+  assert.equal(huge.ok, false);
+  assert.ok(huge.excess > 0);
+  // 帧化前缀本身也计入：空摘要对着 0 token 的区间也不算更小
+  assert.equal(summaryFits('', 0).ok, false);
 });

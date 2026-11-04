@@ -24,6 +24,9 @@ export function post(urlStr, headers, body, onChunk, signal, idleMs = 180000) {
           const err = new Error(`HTTP ${res.statusCode}: ${e.slice(0, 500)}`);
           err.status = res.statusCode;
           err.body = e.slice(0, 2000);
+          // 上下文超限必须在最外层就能认出来：它不是一个「请求写错了」的 400，
+          // 而是「这一版历史放不下」。认出来才有机会压缩后重试，否则整轮直接失败。
+          if (isContextOverflowError(err)) err.code = CONTEXT_OVERFLOW;
           const after = res.headers['retry-after'];
           err.retryAfterMs = after ? (/^\d+(?:\.\d+)?$/.test(after) ? Number(after) * 1000 : Math.max(0, Date.parse(after) - Date.now())) || 0 : 0;
           fail(err);
@@ -49,15 +52,57 @@ export function post(urlStr, headers, body, onChunk, signal, idleMs = 180000) {
 export function retryable(e) {
   if (!e || /已中断/.test(e.message)) return false;
   if (e.name === 'AbortError') return false;
+  // 上下文超限既不重试也不该被当成普通 4xx：调用方要靠这个 code 走「压缩后重试」，
+  // 在重试层就把它咽掉的话，压缩恢复路径永远看不到它。
+  if (e.code === CONTEXT_OVERFLOW) return false;
   if (e.status) return [408, 409, 425, 429].includes(e.status) || e.status >= 500;
   if (typeof e.retryable === 'boolean') return e.retryable;
   return /ECONNRESET|ETIMEDOUT|EPIPE|EAI_AGAIN|ENOTFOUND|socket hang up|ECONNREFUSED|timed out|terminated|idle|超时|连接被服务器中断/i.test(e.code || '') || /ECONNRESET|ETIMEDOUT|EPIPE|EAI_AGAIN|ENOTFOUND|socket hang up|ECONNREFUSED|timed out|terminated|idle|超时|连接被服务器中断/i.test(e.message || '');
 }
 
+// ---------------------------------------------------------------- 上下文超限
+//
+// 各家把「这一版历史放不进窗口」报成 400（也见过 413 / 422），而且**文案各不相同**。
+// 按状态码一刀切会把真正的参数错误也当成超限去压缩重试（白压一次还失败），
+// 所以只认明确的措辞；认不出来就老实当普通错误处理。
+
+/** 归一后的错误 code：调用方用 `e.code === CONTEXT_OVERFLOW` 判断。 */
+export const CONTEXT_OVERFLOW = 'CONTEXT_WINDOW_EXCEEDED';
+
+const OVERFLOW_PATTERNS = [
+  /context[ _-]?length/i,                        // OpenAI: maximum context length is N tokens
+  /context[ _-]?window/i,                        // Anthropic / 通用: exceeds the context window
+  /maximum (?:context|prompt)/i,
+  /too many (?:tokens|input tokens)/i,
+  /prompt is too long/i,                         // Anthropic 旧文案
+  /input (?:is )?too long/i,
+  /reduce the length of the messages/i,          // OpenAI 官方建议句
+  /exceed(?:s|ed)? .{0,30}(?:token|limit).{0,20}(?:window|context)/i, // DeepSeek 等
+  /request too large/i,
+  /上下文(?:长度|窗口)/,
+  /超出.{0,10}(?:上下文|最大).{0,10}(?:长度|限制|窗口)/,
+];
+
+/** 这条错误是不是「上下文放不下」。只用于可恢复判断，不改变错误本身的语义。 */
+export function isContextOverflowError(e) {
+  if (!e) return false;
+  if (e.code === CONTEXT_OVERFLOW) return true;
+  // 401/403/404/429 明确不是超限：哪怕文案撞词也排除，避免把配额问题压成「历史太长」。
+  if ([401, 403, 404, 429].includes(e.status)) return false;
+  const text = String(e.body || '') + '\n' + String(e.message || '');
+  if (!OVERFLOW_PATTERNS.some(re => re.test(text))) return false;
+  // 4xx 之外（没有状态码的流内错误也常见）只要措辞对就认；有状态码时限制在 400/413/422/500 段。
+  if (!e.status) return true;
+  return e.status === 400 || e.status === 413 || e.status === 422 || e.status >= 500;
+}
+
 export function modelStreamError(value = {}) {
   const type = String(value.type || value.code || '');
   const status = Number(value.status || value.status_code) || (/authentication|invalid_api_key/.test(type) ? 401 : /permission|insufficient_quota|billing/.test(type) ? 403 : /invalid_request/.test(type) ? 400 : /not_found/.test(type) ? 404 : /rate_limit/.test(type) ? 429 : /overloaded/.test(type) ? 529 : null);
-  return Object.assign(new Error('模型返回错误: ' + String(value.message || type || '响应流中断').slice(0, 300)), { status, retryable: !status || [408, 409, 425, 429].includes(status) || status >= 500 });
+  const err = Object.assign(new Error('模型返回错误: ' + String(value.message || type || '响应流中断').slice(0, 300)), { status, retryable: !status || [408, 409, 425, 429].includes(status) || status >= 500 });
+  // 流内错误（有的端点在 SSE 里抛 overflow 而不是回 HTTP 4xx）同样要能走到压缩恢复路径。
+  if (isContextOverflowError(err)) { err.code = CONTEXT_OVERFLOW; err.retryable = false; }
+  return err;
 }
 
 /** SSE 行 → data 负载；非 data 行返回 null。 */

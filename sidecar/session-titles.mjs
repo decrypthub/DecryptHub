@@ -42,7 +42,9 @@ export async function generateSessionTitle(settings, prompt, { signal, complete,
   // 本模块同时被 UI 引用，任何指向 providers/ 的 import 都会把 node:http 拖进浏览器构建。
   if (typeof complete !== 'function') throw new Error('generateSessionTitle 需要注入 complete');
   const deadline = AbortSignal.timeout(timeoutMs), combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
-  const bounded = { ...settings, openai: { ...settings.openai, requestPurpose: 'session-title' }, temperature: 0, maxTokens: 256, openaiMaxTokens: 256, idleTimeoutMs: timeoutMs };
+  const bounded = { ...settings, openai: { ...settings.openai, maxTokens: 256, requestPurpose: 'session-title' },
+    anthropic: { ...settings.anthropic, maxTokens: 256, requestPurpose: 'session-title' },
+    temperature: 0, maxTokens: 256, openaiMaxTokens: 256, idleTimeoutMs: timeoutMs };
   const request = complete(bounded, [{ role: 'system', content: TITLE_SYSTEM }, { role: 'user', content: JSON.stringify({ task: String(prompt).slice(0, 4000) }) }], [], { signal: combined });
   let abort;
   try {

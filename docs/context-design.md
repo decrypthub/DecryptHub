@@ -55,12 +55,16 @@ Sources were read on 2026-10-21 (shallow clones, commit in brackets).
 - **Window per model**: selected `providers[].models[].contextWindow` takes precedence over legacy provider mirrors. Empty means inferred from the model name; DeepSeek V4/V4.1/Flash uses 1M. Capacity metadata lives in model settings; the meter is read-only.
 - **Threshold**: `compactAt` (default 0.85, range 0.5–0.95), measured against the window minus a 16k output reserve (Pi / opencode). Compaction re-arms after context grows by 10%; only two consecutive failed attempts are allowed. Successful compactions can repeat throughout a long task.
 - **Stage 1, microcompact** (Claude Code, Gemini): replace old tool results with refs and keep the last 3 intact. Full outputs stay in `.ctx/` and can be read back with `context_ref_read` or `net_get`. If the context then fits, no LLM call is made.
-- **Stage 2, LLM summary** (Pi / opencode):
-  - The serialized transcript truncates tool results to 2 000 characters.
+- **Stage 2, LLM summary** (Pi / opencode / DSH):
+  - **Prefix reuse (2026-11-02)**: the summarizer replays the conversation's own system prompt, tool schemas and messages, and appends the compaction instruction as the final user message. The auxiliary call is then a genuine prefix of the last routed request, so the provider's KV cache is hit instead of invalidated. A bespoke summarizer system prompt would cold-start every time. See `buildSummaryRequest(..., { system, tools })`.
+  - The serialized transcript truncates tool results to 2 000 characters (only used by the legacy no-`system` shape).
   - Structured sections: 目标 / 用户约束与事实 / 关键发现 / 涉及的脚本与文件 / 涉及的请求 / 当前状态 / 下一步 / 关键数据.
   - Update mode when a previous summary exists.
   - Optional user instructions (`/compact 关注签名算法`).
-  - The most recent ~20k tokens (capped at 25% of the window) stay verbatim, cut only at user or assistant messages.
+  - The most recent 16% of the window (min 2k, capped 150k) stays verbatim, cut only at user or assistant messages. Raised from a flat 20k on 2026-11-02: on a 1M window that was 2%, too tight for reverse-engineering work where the evidence lives in tool output.
+  - **Size guard (2026-11-02)**: a summary that is not strictly smaller than the span it replaces is rejected and never committed (`summaryFits`). Otherwise compaction makes the next request *more* expensive and the cost is locked into the log.
+- **Overflow recovery (2026-11-02)**: an upstream "context window exceeded" error (recognised by wording, not by status code alone — `isContextOverflowError`) triggers one forced compaction and retries the same step. Only retried when the history actually got shorter (DSH's rule); a second overflow fails honestly. This path exists because our window estimate is a character heuristic that undercounts CJK and JSON schemas: if it thinks 84% while reality is 100%, the threshold never fires and the turn would otherwise die with a 400 that reads like a malformed request.
+- **Cancellable manual compaction (2026-11-02)**: `/compact` and the UI button carry their own AbortController through `sessions.compactWith()` / `agent-compress-cancel`. The ✕ on the running command bar cancels the summary request, not just the toast. `agent.context.compressing` drives an in-transcript running divider that is replaced in place by the completed marker.
 - **Chat marker**: a compaction divider showing reason, before → after and the instructions, with an expandable summary.
 - **Meter**: used / limit and %, with a popover breakdown (system prompt, tool definitions, history, attachments, tool results, summary).
 - **Sessions**: one history per tab, persisted; "新对话" archives to `.chats/`. A branch/fork tree like Pi's is future work.
@@ -73,7 +77,12 @@ Sources were read on 2026-10-21 (shallow clones, commit in brackets).
 | 容量是模型元数据；设置页支持录入，用量弹层只读，不提供第二份 Agent 窗口覆盖 | `ui/src/screens.jsx` / `ui/src/chat.jsx` |
 | 触发线 `min(compactAt × 窗口, 窗口 − min(16k, 10%))`，`compactAt` 默认 0.85（80/85/90 可选） | `compactTrigger` |
 | 第一阶段 microcompact：旧工具结果（保留最近 3 条）落盘 `.ctx/` 换成引用，够用则不调用 LLM | `microcompact` |
-| 第二阶段结构化摘要：最近 min(20k, 25% 窗口) tokens 原样保留；已有摘要时走 UPDATE 合并；工具结果在转写中截到 2000 字符；用户指令作为“重点保留” | `splitByTokens` / `buildSummaryRequest` |
+| 第二阶段结构化摘要：最近 16% 窗口（下限 2k、上限 150k）tokens 原样保留；已有摘要时走 UPDATE 合并；工具结果在转写中截到 2000 字符；用户指令作为“重点保留” | `splitByTokens` / `buildSummaryRequest` |
+| 摘要走前缀复用：重放本次请求的 system + 工具 + 消息，压缩指令作为最后一条 user 消息（命中 KV cache） | `buildSummaryRequest` / `agent.mjs compress` |
+| 摘要尺寸门：不小于被替换区间就拒绝提交（`summaryFits`） | `context.mjs` / `agent.mjs compress` |
+| 上游「上下文超限」→ 强制压缩一次 → 同一步重试（只在历史真的变短时重试，最多 1 次） | `isContextOverflowError` / `Agent.recoverFromOverflow` |
+| 手动压缩可取消：`/compact` 与按钮各带自己的 AbortController；运行条上的 ✕ 真的打断摘要请求 | `sessions.compactWith` / `agent-compress-cancel` / `harness.jsx CommandFeedback` |
+| 压缩进行中在对话内显示运行分隔线（读 `ctx.compressing`），完成后原地替换成压缩标记 | `chat.jsx CompactingLine` |
 | 防抖：最多连续 2 次失败 + 需再增长 10% 窗口才再次触发；成功后继续重置失败计数 | `agent.mjs` |
 | `/compact 重点…` | `ui/src/bus.jsx` |
 | 用量弹层：used / limit / %、分类条（系统、工具定义、摘要、对话、附件、工具结果）、压缩线 | `ContextMeter` |

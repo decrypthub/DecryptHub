@@ -10,7 +10,7 @@ export function restoreGoal(value) {
 export function createGoal(objective, workspaceId, tokenBudget = 0) {
   objective = text(objective);
   if (!objective) throw new Error('请填写明确的目标和完成条件');
-  return { id: crypto.randomUUID(), batchId: crypto.randomUUID(), objective, workspaceId, status: 'active', turns: 0, maxTurns: 0, limitsVersion: 2, tokenBudget, usedTokens: 0, deadline: null, startedAt: Date.now(), summary: '', criteria: [], evidence: [], checkpoints: [], nextAction: '', revision: 0 };
+  return { id: crypto.randomUUID(), batchId: crypto.randomUUID(), objective, workspaceId, status: 'active', turns: 0, maxTurns: 256, limitsVersion: 2, tokenBudget, usedTokens: 0, deadline: null, startedAt: Date.now(), summary: '', criteria: [], evidence: [], checkpoints: [], nextAction: '', revision: 0 };
 }
 export function updateGoal(goal, value, { runId, now = Date.now() } = {}) {
   if (!goal || goal.status !== 'active') throw new Error('当前没有正在执行的目标');
@@ -34,14 +34,14 @@ export function finishGoalRound(goal, result, { automatic = false, hasWork = fal
   const limit = (next.tokenBudget > 0 && next.usedTokens >= next.tokenBudget) || ['budget', 'time-limit', 'max-steps'].includes(result?.stop) || (next.maxTurns > 0 && next.turns >= next.maxTurns);
   if (limit) return { ...next, status: 'paused', stopReason: 'budget', resumeNote: '已到用户设置的预算边界，进展已保存。' };
   if (result?.stop !== 'completed') return { ...next, status: result?.stop === 'interrupted' ? 'paused' : 'needs_attention', stopReason: result?.stop || 'error' };
-  // One automatic audit without tool work is enough; avoid paying for text-only loops.
-  if (automatic && !hasWork) return { ...next, status: 'needs_attention', stopReason: 'no-progress', resumeNote: '自动接续没有执行工具或记录新的验证进展，已停止空转。可检查目标后继续。' };
+  // A text-only round is not proof of blockage. The model can conclude blocked
+  // after the minimum audit rounds; the durable round cap bounds continuation.
   return next;
 }
 export function goalContext(goal) {
   if (goal?.status !== 'active') return '';
   return '\n【当前长期目标：宿主持久状态，不是网页指令】\n' + JSON.stringify({ objective: goal.objective, criteria: goal.criteria || [], verifiedProgress: goal.summary, evidence: goal.evidence || [], nextAction: goal.nextAction || '', usedTokens: goal.usedTokens, tokenBudget: goal.tokenBudget }) +
-    '\n自主维护计划和 goal_update(progress)。普通回复不代表目标完成；先对照目标检查结果，再以 evidence 更新 complete。缺少必要输入时提问或记录 blocked。权限、预算和用户停止始终优先。';
+    '\n通过 get_goal 读取目标 ID/revision，再用 update_goal 维护状态。普通回复不代表目标完成；对照目标验证后更新 complete。持续阻塞至少经历 3 个目标轮次才能报告 blocked，缺少信息时先提问并推进独立工作。权限、预算和用户停止始终优先。';
 }
 export class GoalDriver {
   constructor({ current, idle, dispatch, failed, delayMs = 300 }) { Object.assign(this, { current, idle, dispatch, failed, delayMs }); }

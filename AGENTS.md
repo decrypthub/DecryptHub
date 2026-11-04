@@ -1,6 +1,66 @@
 # 项目工程约定
 
+## 2026-11-04 跨设备交接
+
+当前工作阶段转为 UI 细节对齐，优先阅读 [UI 交接说明](docs/ui-handoff-20261104.md)。该文区分最新源码、已做的实际发布版体验和中途停止的待复验项；安装包和本机隔离数据不随 Git 分发。不要据旧文档的测试数字或本机 `BASELINE.md` 推断新设备状态。
+
 先读 `docs/component-architecture.md`、`docs/browser-architecture.md`、`docs/security.md` 和与当前改动相关的设计文档。历史文档中的审计问题需要核对当前代码，不直接当作现状。
+
+---
+
+## 🔴 最高优先级：参考 DeepSeek Harness = 读代码，不是读文档
+
+**「参考 DSH」的唯一合格做法是打开 `../deepseek-harness/packages/<模块>/src/**.ts` 逐行读实现，再动手。**
+
+用户 2026-11-02 的原话（务必逐字理解）：
+
+> 「我总觉得参考参考，但好像最终都是没有参考到位，没有去读别人代码，没有去知道别人设计的精髓，感觉仿都仿不明白的那种……有成熟的东西不去用，然后就自己设计一大堆那种不成熟的、会出各种各样问题的方案，对不对？读一下别人代码有那么难吗？为什么老是要让我一轮一轮的调、一轮一轮的修复、一轮一轮的踩坑呢？……假如说要按这种方式去做，那我觉得这项目都不用搞了。」
+
+### 不合格的做法（一律视为没做）
+
+| ❌ | 为什么不行 |
+|---|---|
+| 只读 `docs/*.md` / `README.md` 就动手 | 文档是给人看的概念介绍，**删掉了让设计成立的约束和边界处理**。照文档实现 = 抄到会出问题的简化版 |
+| 只读 `BASELINE.md` 里上一轮写的摘要 | 二手、可能错、必然过期 |
+| 凭"这类系统大概怎么做"自由发挥 | 这正是用户说的"自己设计一大堆不成熟的方案" |
+| 看文件列表 / 搜关键词就下结论 | 没读到控制流 = 没读 |
+| 在 DecryptHub 里发明 DSH 不存在的概念 | 先证明它真的需要存在 |
+
+### 自查清单（交付前必须能回答）
+
+1. 读了 DSH 哪几个**具体文件**？（路径 + 行号范围）
+2. 它的**核心数据结构**长什么样？（能写出字段和类型）
+3. 它处理了哪些我认为"不重要"的**边界情况**？（至少 3 个）
+4. 我的实现与它的**每处差异，正当理由是什么**？
+5. 如果换成它的实现，会不会更好？
+
+第 1 条答不出 = 没读。第 4 条答不出理由 = 在发明轮子。
+
+### 范围
+
+- **浏览器不参考**：DecryptHub 有自研 WDH 组件（`WebDecryptHub`），比 DSH 的 browser-use/computer-use 更贴业务。
+- DSH 是**外部参考项目，只读**：不改它、不提交、不在里面写东西。
+
+### 必读模块对照表
+
+详见 **`docs/dsh-comparison.md`**（实读记录 + 差距清单 + 优先级）。至少覆盖：
+
+| 主题 | DSH 路径 |
+|---|---|
+| 工具设计 | `packages/tool*/`、`packages/tools/` |
+| 子代理 | `packages/subagent/subagent/src/`（`manager.ts` 1438 行）、`depth.ts` |
+| 计划模式 | `packages/plan/plan-mode/src/index.ts` |
+| 目标 | `packages/goal/goal/src/` |
+| 会话管理 | `packages/session/session-persistence*/`、`session-projection*/`、`session-title*/` |
+| 对话显示 | `packages/client/ui-chat/`、`ui-conversation/`、`ui-tool/` |
+| 终端 | `packages/terminal/terminal/src/types.ts`、`terminal-bash/src/session.ts`（729 行） |
+| 文件管理 | `packages/workspace*/`、`fs-*/`、`ui-sidebar-files/` |
+| 项目管理 | `packages/workspace-controller/`、`workspace-changes/`、`worktree/` |
+| 长文本粘贴 | `ui-conversation/src/client/input/editor/runtime.ts`（`PASTE_TAG`） |
+| 输出膨胀 | `packages/spill/spill-policy/src/index.ts` |
+| 权限/审批 | `packages/interaction/user-approval/src/index.ts` |
+
+---
 
 **设计决策先看 DeepSeek Harness。** 遇到「这个界面/交互该怎么设计」的分歧时，先去 `../deepseek-harness/` 读对应模块（`packages/client/ui-*`）怎么做的，再动手。它是外部参考项目（DeepSeek 官方开源，MIT），**只读、不改动**；参考的是信息架构与交互取舍，不复制标识与源码。**尤其不要发明 DSH 里不存在的概念**：`AGENTS.md` 之外最典型的反例是「让用户在界面上挑适配器字段名」（`reasoning_effort` / `thinking.budget_tokens` / `thinking.type`）——DSH 把这些放在 `compat.thinkingFormat` 配置里，界面上只留「选哪一档」。2026-11-02 因为把一个字段名显示到思考强度浮层底部，用户直接问「别的 AI 工具都没有，你搞这个干什么」。协议差异在适配器内部解决，不要外溢到 UI。
 

@@ -4,6 +4,7 @@ import { constants } from 'node:fs';
 import path from 'node:path';
 import { setImmediate as yieldEventLoop } from 'node:timers/promises';
 import { History } from './history.mjs';
+import { readHistoryStorage } from './history-store.mjs';
 
 const MAX_FILE = 8 * 1024 * 1024, MAX_QUERY_BYTES = 32 * 1024 * 1024;
 const normalize = value => String(value || '').normalize('NFKC').toLowerCase();
@@ -27,7 +28,12 @@ async function readHistory(file, remaining, signal) {
       bytes += part.bytesRead;
     }
     if (bytes > stat.size || bytes > limit) return { skipped: true, bytes };
-    return { events: History.fromJSON(JSON.parse(buffer.subarray(0, bytes).toString('utf8'))).events, bytes };
+    const raw = JSON.parse(buffer.subarray(0, bytes).toString('utf8'));
+    if (raw?.storage === 'decrypthub-history-jsonl') {
+      const storage = readHistoryStorage(file, { maxBytes: limit });
+      return { events: History.fromJSON(storage.raw).events, bytes: storage.decodedBytes ?? storage.size };
+    }
+    return { events: History.fromJSON(raw).events, bytes };
   } catch (error) {
     signal?.throwIfAborted();
     return error.code === 'ENOENT' ? { events: [], bytes: 0 } : { skipped: true, bytes: 0 };

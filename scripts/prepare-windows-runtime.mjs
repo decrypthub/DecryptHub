@@ -13,7 +13,15 @@ export async function prepareWindowsArtifacts(kind = 'all') {
     if (!containsPath(root, target) || path.resolve(root) === target) throw Error('Desktop build target must be a dedicated directory inside this workspace');
     files.push([path.join(target, 'debug/jsra-tauri.exe'), target]);
   }
-  if (['sidecar', 'all'].includes(kind)) files.push([path.join(root, 'build/resources/node/node.exe'), path.join(root, 'build')], [path.join(root, 'build/jsra-sidecar.exe'), path.join(root, 'build')]);
+  if (['sidecar', 'all'].includes(kind)) files.push([path.join(root, 'build/resources/node/node.exe'), path.join(root, 'build')], [path.join(root, 'build/jsra-sidecar.exe'), path.join(root, 'build')], [path.join(root, 'build/resources/search/rg.exe'), path.join(root, 'build')]);
+  if (['sidecar', 'all'].includes(kind)) {
+    // PTY helpers are executable child processes too. A newly copied helper may
+    // inherit a low directory label even when the source helper was provisioned.
+    const terminal = path.join(root, 'build/resources/terminal');
+    if (fs.existsSync(terminal)) for (const relative of fs.readdirSync(terminal, { recursive: true })) {
+      if (relative.toLowerCase().endsWith('.exe')) files.push([path.join(terminal, relative), path.join(root, 'build')]);
+    }
+  }
   for (const [file, parent] of files) if (fs.existsSync(file)) {
     const result = await prepareBuildExecutable(file, parent);
     console.log('Windows runtime ' + path.relative(root, file) + ': ' + (result.changed ? 'restored normal user integrity' : 'normal user integrity'));

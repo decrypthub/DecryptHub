@@ -4,7 +4,12 @@
       "../build/resources/sidecar/": "resources/sidecar/",
       "../build/resources/node/": "resources/node/",
       "../build/resources/executor/": "resources/executor/",
-      "../build/resources/terminal/": "resources/terminal/"
+      "../build/resources/terminal/": "resources/terminal/",
+      "../build/resources/search/": "resources/search/",
+      "../build/resources/notices/": "resources/notices/",
+      "../build/resources/office/": "resources/office/",
+      "../build/resources/office-skills/": "resources/office-skills/",
+      "../build/resources/primary-runtime/": "resources/primary-runtime/"
     }
   }
 }

@@ -8,6 +8,10 @@ export { chat };
 export async function testConnection(settings) {
   const p = settings.provider;
   try {
+    if (settings[p]?.catalogProviderId) {
+      await chat({ ...settings, [p]: { ...settings[p], maxTokens: 32, requestPurpose: 'session-title' } }, [{ role: 'user', content: 'Reply OK.' }], [], { managedRetry: true, signal: AbortSignal.timeout(15000) });
+      return { ok: true, message: `供应商连接成功，模型 ${settings[p].model} 可用。` };
+    }
     if (p === 'anthropic') {
       const c = settings.anthropic;
       if (!c.apiKey) return { ok: false, message: '请先填写 Claude API Key。' };
@@ -21,6 +25,11 @@ export async function testConnection(settings) {
     }
     const c = settings.openai;
     if (!c.apiKey) return { ok: false, message: '请先填写 API Key。' };
+    if (c.api === 'openai-responses') {
+      await chat({ ...settings, providers: [], activeThinking: '', openai: { ...c, maxTokens: 32, requestPurpose: 'session-title', thinking: { levels: [], transport: 'none' } } },
+        [{ role: 'user', content: 'Reply OK.' }], [], { managedRetry: true, signal: AbortSignal.timeout(15000) });
+      return { ok: true, message: `Responses 连接成功，模型 ${c.model} 可用。` };
+    }
     const r = await fetch(c.baseUrl.replace(/\/$/, '') + '/models', { headers: { Authorization: 'Bearer ' + c.apiKey } });
     if (r.ok) { const j = await r.json().catch(() => ({})); const n = (j.data || []).length; return { ok: true, message: `连接成功${n ? `，检测到 ${n} 个模型` : ''}。` }; }
     // 某些兼容端点不支持 /models，退化为一次极小对话

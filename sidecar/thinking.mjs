@@ -69,7 +69,9 @@ export function normalizeThinking(value, fallbackTransport = 'effort') {
   const levels = normalizeThinkingLevels([...(Array.isArray(raw.levels) ? raw.levels : []), ...shortcut]);
   const transport = TRANSPORTS.includes(raw.transport) ? raw.transport : (TRANSPORTS.includes(fallbackTransport) ? fallbackTransport : 'effort');
   const fallback = levels.includes(raw.default) ? raw.default : (levels.includes(DEFAULT_LEVEL) ? DEFAULT_LEVEL : (levels[0] || ''));
-  return { levels, default: fallback, transport };
+  return { levels, default: fallback, transport,
+    ...(raw.wireValues && typeof raw.wireValues === 'object' ? { wireValues: { ...raw.wireValues } } : {}),
+    ...(raw.budgets && typeof raw.budgets === 'object' ? { budgets: { ...raw.budgets } } : {}) };
 }
 
 /**
@@ -101,24 +103,20 @@ export function modelThinking(declared, modelId) {
  * 而用户看到的只是「这个模型有几档思考强度」。DSH 也不问：它由协议（api）和
  * compat.thinkingFormat 决定，表单上只有「推理等级」本身。
  *
- * 规则：Claude 原生 → 预算；其余按模型名推断，认不出来就按强度发（这是 OpenAI 兼容端点的通行写法）。
- * 认错也不会炸：providers/openai.mjs 收到 400 时会去掉该参数重试一次。
+ * 默认规则：Claude 原生使用预算；兼容接口的 DeepSeek 使用开关加强度，其余使用强度。
+ * 明确配置的传输方式和 wireValues/budgets 映射优先；声明不被端点接受时明确报错。
  */
 export function deriveTransport(modelId, providerType) {
   if (providerType === 'anthropic') return 'budget';
   const inferred = inferThinking(modelId).transport;
-  return inferred === 'none' ? 'effort' : inferred;
+  return inferred === 'switch' ? 'switch' : 'effort';
 }
 
 /**
- * 一次声明实际用哪种发送方式：显式写了「不发送」就尊重它，其余一律按端点推断。
- *
- * 保留 none 是有意的边界：手工编辑 settings.json 的人可以用 `{transport:'none'}` 表达
- * 「界面照常给档位，但请求里一个思考参数都别带」。这是用户的明确意愿，不能因为
- * 「界面不问了」就把它推断掉 —— 那等于把用户的显式配置改成主动发送。
+ * 显式声明优先；仅在没有传输声明时按协议推断。对应 DSH 的模型级 compat 覆盖渠道默认。
  */
 export function effectiveTransport(declaration, modelId, providerType) {
-  if (declaration?.transport === 'none') return 'none';
+  if (TRANSPORTS.includes(declaration?.transport)) return declaration.transport;
   return deriveTransport(modelId, providerType);
 }
 
@@ -138,7 +136,9 @@ export function declaredThinking(declared) {
 export function effectiveThinking(declaration, requested) {
   const levels = declaration?.levels || [];
   const level = levels.includes(requested) ? requested : (levels.includes(declaration?.default) ? declaration.default : '');
-  return { transport: declaration?.transport || 'none', level };
+  return { transport: declaration?.transport || 'none', level,
+    ...(declaration?.wireValues ? { wireValues: { ...declaration.wireValues } } : {}),
+    ...(declaration?.budgets ? { budgets: { ...declaration.budgets } } : {}) };
 }
 
 /**
@@ -165,8 +165,16 @@ export function requestThinking(settings, type) {
   // 渠道里逐模型的声明优先；旧配置只有 openai/anthropic 两段时读镜像。
   const declared = declaredThinking(modelDecl) || declaredThinking(mirror.thinking);
   if (declared) {
-    // 发送方式按端点推断，但显式写的「不发送」要尊重（手工配置里这是明确意愿）。
-    return effectiveThinking({ ...declared, transport: effectiveTransport(declared, mirror.model || requested, type) }, settings?.activeThinking);
+    const transport = effectiveTransport(declared, mirror.model || requested, type);
+    if (transport !== 'none' && (type === 'anthropic' ? transport !== 'budget' : transport === 'budget'))
+      throw Error('模型思考参数与渠道协议不匹配，请核对模型的 thinking.transport');
+    for (const [level, wire] of Object.entries(declared.wireValues || {}))
+      if (!declared.levels.includes(level) || (wire === null ? level !== 'off' : typeof wire !== 'string' || !wire.trim()))
+        throw Error('模型思考档位映射无效：' + level);
+    for (const [level, budget] of Object.entries(declared.budgets || {}))
+      if (level === 'off' || !declared.levels.includes(level) || !Number.isSafeInteger(budget) || budget < 1024)
+        throw Error('模型思考预算映射无效：' + level);
+    return effectiveThinking({ ...declared, transport }, settings?.activeThinking);
   }
   // 未声明：只有当用户在界面上明确选了一档时才发送，发送方式按模型名推断。
   // 这里仍用 inferThinking 而不是 deriveTransport：没声明就说明我们对这个模型一无所知，
@@ -214,13 +222,13 @@ export function payloadLabel(transport, level) {
  *
  * 会话标题这类元数据请求永远不花思考预算：开关型端点显式关闭，强度型端点一律不附加。
  */
-export function openAIThinking({ transport, level, requestPurpose } = {}) {
+export function openAIThinking({ transport, level, requestPurpose, wireValues } = {}) {
   if (requestPurpose === 'session-title') return transport === 'switch' ? [{ field: 'thinking', value: { type: 'disabled' } }] : [];
   if (transport === 'none' || !isThinkingLevel(level)) return [];
-  const effort = reasoningEffort(level);
+  const effort = Object.hasOwn(wireValues || {}, level) ? wireValues[level] : reasoningEffort(level);
   if (transport === 'switch') {
     if (level === 'off') return [{ field: 'thinking', value: { type: 'disabled' } }];
-    // 开：先放开关，再放强度（端点认哪个用哪个，不认的会被 400 兜底剥掉重试）。
+    // 开关与强度是独立字段；wireValues 可把通用档位映射到供应商自己的值。
     return effort
       ? [{ field: 'thinking', value: { type: 'enabled' } }, { field: 'reasoning_effort', value: effort }]
       : [{ field: 'thinking', value: { type: 'enabled' } }];
@@ -235,8 +243,8 @@ export function openAIThinking({ transport, level, requestPurpose } = {}) {
  * 并把 max_tokens 抬到 budget 之上，否则端点会直接 400（见 providers/anthropic.mjs）。
  * 会话标题与 OpenAI 侧对称：元数据请求不花思考预算。
  */
-export function anthropicThinking({ transport, level, requestPurpose } = {}) {
+export function anthropicThinking({ transport, level, requestPurpose, budgets } = {}) {
   if (requestPurpose === 'session-title') return null;
   if (transport !== 'budget') return null;
-  return thinkingBudget(level);
+  return budgets?.[level] ?? thinkingBudget(level);
 }

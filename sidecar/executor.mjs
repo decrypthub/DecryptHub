@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { killPidTree } from './proctree.mjs';
+import { CollectedStream, readProcessOutput } from './shell-process.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const MAX_OUTPUT = 80000;
@@ -15,6 +16,14 @@ export function childEnv(base = {}, additions = {}) {
   const env = {};
   for (const [k, v] of Object.entries(base)) if (v != null && ENV_ALLOW.test(k)) env[k] = String(v);
   return { ...env, ...additions, npm_config_fund: 'false', npm_config_audit: 'false' };
+}
+// Windows programs must resolve profile caches to an absolute private directory,
+// otherwise PowerShell can create Microsoft/Windows/... inside the workspace.
+export function privateProcessEnv(directory, additions = {}) {
+  const roaming = path.join(directory, 'AppData', 'Roaming'), local = path.join(directory, 'AppData', 'Local');
+  fs.mkdirSync(roaming, { recursive: true }); fs.mkdirSync(local, { recursive: true });
+  return childEnv(process.env, { HOME: directory, USERPROFILE: directory, TMP: directory, TEMP: directory, TMPDIR: directory,
+    APPDATA: roaming, LOCALAPPDATA: local, ...additions });
 }
 export function findNode() {
   const name = process.platform === 'win32' ? 'node.exe' : 'node';
@@ -55,20 +64,35 @@ function sandboxEntry() {
   const candidates = [path.join(path.dirname(process.execPath), 'resources', 'executor', 'sandbox-entry.mjs'), path.join(path.dirname(process.execPath), '..', 'executor', 'sandbox-entry.mjs'), path.join(HERE, 'sandbox-entry.mjs')];
   const found = candidates.find(p => fs.existsSync(p)); if (!found) throw new Error('未找到执行隔离资源，请重新构建安装包'); return found;
 }
-function launch(spec, { signal, env, timeoutMs = 60000 } = {}) {
+function launch(spec, { signal, env, timeoutMs = 60000, spillDir } = {}) {
   if (signal?.aborted) throw new Error('任务已取消');
   const child = spawn(spec.file, spec.args || [], { cwd: spec.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' });
-  let out = '', err = '', truncated = false, ended = false, timer;
-  const cap = (previous, chunk) => { const full = previous + chunk.toString(); if (full.length > MAX_OUTPUT) truncated = true; return full.slice(-MAX_OUTPUT); };
-  child.stdout.on('data', d => { out = cap(out, d); }); child.stderr.on('data', d => { err = cap(err, d); });
-  const job = { id: crypto.randomUUID(), child, pid: child.pid, startedAt: Date.now(), status: 'running', get out() { return out; }, get err() { return err; }, get truncated() { return truncated; } };
+  const stdout = new CollectedStream({ maxChars: MAX_OUTPUT, spillPath: spillDir ? path.join(spillDir, 'stdout.log') : null });
+  const stderr = new CollectedStream({ maxChars: MAX_OUTPUT, spillPath: spillDir ? path.join(spillDir, 'stderr.log') : null });
+  let ended = false, timer;
+  child.stdout.on('data', d => stdout.push(d));
+  child.stderr.on('data', d => stderr.push(d));
+  const job = {
+    id: crypto.randomUUID(), child, pid: child.pid, startedAt: Date.now(), status: 'running',
+    streams: { stdout, stderr },
+    get out() { return stdout.tail; },
+    get err() { return stderr.tail; },
+    get truncated() { return stdout.truncated || stderr.truncated; },
+    readOutput: () => readProcessOutput(stdout, stderr),
+  };
   const stop = reason => { if (ended) return; job.reason = reason; killPidTree(child.pid); try { child.kill('SIGKILL'); } catch {} };
   const onAbort = () => stop('cancelled'); signal?.addEventListener('abort', onAbort, { once: true });
-  timer = setTimeout(() => stop('timeout'), Math.max(1000, Math.min(timeoutMs, 24 * 3600000)));
+  // onExpiry 'none'：不设截止期限。前台超时由调用方自己停等，进程继续留在后台。
+  // 默认仍是到点杀掉，workspace_run / npm 依赖这个行为。
+  if (spec.onExpiry !== 'none') timer = setTimeout(() => stop('timeout'), Math.max(1000, Math.min(timeoutMs || 60000, 24 * 3600000)));
   job.kill = () => stop('cancelled');
   job.done = new Promise(resolve => {
-    const finish = code => { if (ended) return; ended = true; clearTimeout(timer); signal?.removeEventListener('abort', onAbort); job.code = code ?? -1; job.status = job.reason || (job.code === 0 ? 'completed' : 'failed'); job.endedAt = Date.now(); resolve({ code: job.code, out, err, truncated, reason: job.reason }); };
-    child.on('error', e => { err = cap(err, String(e.message)); });
+    const finish = code => {
+      if (ended) return; ended = true; clearTimeout(timer); signal?.removeEventListener('abort', onAbort);
+      job.code = code ?? -1; job.status = job.reason || (job.code === 0 ? 'completed' : 'failed'); job.endedAt = Date.now();
+      resolve({ code: job.code, out: stdout.tail, err: stderr.tail, truncated: job.truncated, reason: job.reason });
+    };
+    child.on('error', e => stderr.push(String(e.message || e)));
     // close follows output drain; exit can lose the last stdout chunk on Windows.
     child.on('close', finish);
   });
@@ -116,7 +140,7 @@ export class Executor {
   }
   start(spec, { signal, isolated = false, workspace, dataDir, protectedRoot, network = [] } = {}) {
     const temp = path.join(dataDir || os.tmpdir(), '.exec', crypto.randomUUID()); fs.mkdirSync(temp, { recursive: true });
-    const env = childEnv(process.env, { HOME: temp, USERPROFILE: temp, TMP: temp, TEMP: temp, TMPDIR: temp,
+    const env = privateProcessEnv(temp, {
       // 长任务日志要可观测：Python/Node 不块缓冲，统一 UTF-8，避免进度行迟迟不出现。
       PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1', NO_COLOR: '1', FORCE_COLOR: '0',
       npm_config_cache: path.join(temp, 'npm-cache'), npm_config_userconfig: path.join(temp, 'npmrc'), ...spec.env });
@@ -124,7 +148,7 @@ export class Executor {
     if (isolated) {
       target = { file: findNode(), args: [sandboxEntry()], cwd: spec.cwd, input: JSON.stringify({ spec, workspace, dataDir, protectedRoot, temp, network, env }) };
     }
-    const job = launch(target, { signal, env, timeoutMs: spec.timeoutMs });
+    const job = launch(target, { signal, env, timeoutMs: spec.timeoutMs, spillDir: temp });
     job.isolated = isolated; job.workspaceId = workspace?.id; this.jobs.set(job.id, job);
     job.done.then(() => { for (const [id, item] of this.jobs) if (this.jobs.size > 100 && item.status !== 'running') this.jobs.delete(id); });
     return job;

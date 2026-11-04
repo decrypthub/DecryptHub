@@ -16,7 +16,7 @@ export function SidebarBrowser({ searchRequest, onSearchHandled, renderSession }
   const { settings } = w;
   const [expanded, setExpanded] = useState(false), [query, setQuery] = useState(''), [active, setActive] = useState(0);
   const [view, setView] = useState(() => readSidebarView(localStorage)), [reveal, setReveal] = useState(null), [foldRequest, setFoldRequest] = useState(null);
-  const [remote, setRemote] = useState({ query: '', matches: [], state: 'idle', skipped: 0 });
+  const [remote, setRemote] = useState({ query: '', matches: [], state: 'idle', skipped: 0, capped: false });
   const normalizedQuery = query.trim();
   const results = useMemo(() => normalizedQuery ? sidebarResults(w.projects, w.sessions.sessions, normalizedQuery, remote.query === normalizedQuery ? remote.matches : [], settings?.titlePrefix) : [], [w.projects, w.sessions.sessions, normalizedQuery, remote, settings?.titlePrefix]);
   const selected = Math.min(active, Math.max(0, results.length - 1));
@@ -25,27 +25,30 @@ export function SidebarBrowser({ searchRequest, onSearchHandled, renderSession }
   useEffect(() => { if (searchRequest) { setExpanded(true); requestAnimationFrame(() => { input.current?.focus(); input.current?.select(); onSearchHandled?.(); }); } }, [searchRequest]);
   useEffect(() => {
     if (!normalizedQuery) { setRemote({ query: '', matches: [], state: 'idle', skipped: 0 }); return; }
-    let live = true;
+    let live = true, started = false;
     const timer = setTimeout(() => {
       setRemote({ query: normalizedQuery, matches: [], state: 'loading', skipped: 0 });
-      w.api.invoke('session-search', { query: normalizedQuery }).then(value => { if (live) setRemote({ query: normalizedQuery, matches: value.matches, skipped: value.skipped, state: 'ready' }); }).catch(() => { if (live) setRemote({ query: normalizedQuery, matches: [], skipped: 0, state: 'error' }); });
+      started = true;
+      w.api.invoke('session-search', { query: normalizedQuery }).then(value => { if (live) setRemote({ query: normalizedQuery, matches: value.matches, skipped: value.skipped, capped: value.capped, state: 'ready' }); }).catch(() => { if (live) setRemote({ query: normalizedQuery, matches: [], skipped: 0, state: 'error' }); });
     }, 250);
-    return () => { live = false; clearTimeout(timer); };
+    return () => { live = false; clearTimeout(timer); if (started) void w.api.invoke('session-search-cancel').catch(() => {}); };
   }, [normalizedQuery]);
   useEffect(() => { resultsRef.current?.querySelectorAll('[role="option"]')[selected]?.scrollIntoView({ block: 'nearest' }); }, [selected]);
   useEffect(() => {
-    if (!reveal?.turnId || reveal.sessionId !== w.sid || jumped.current === reveal.nonce || w.view !== 'chat') return;
+    if (!(reveal?.turnId || Number.isSafeInteger(reveal?.seq)) || reveal.sessionId !== w.sid || jumped.current === reveal.nonce || w.view !== 'chat') return;
     const frame = requestAnimationFrame(() => {
-      const scroll = w.refs.chatRef.current, node = [...(scroll?.querySelectorAll('[data-turn-id]') || [])].find(el => el.dataset.turnId === reveal.turnId);
-      if (node) { jumped.current = reveal.nonce; scroll.scrollTo({ top: node.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop - 12, behavior: 'instant' }); }
+      const turnId = reveal.turnId || w.cur.events.find(event => event.seq === reveal.seq)?.turnId;
+      const scroll = w.refs.chatRef.current, node = turnId && [...(scroll?.querySelectorAll('[data-turn-id]') || [])].find(el => el.dataset.turnId === turnId);
+      if (node) { if (w.refs.scrollController.current?.jumpToTurn(turnId)) jumped.current = reveal.nonce; }
+      else if (w.cur.historyStart && !w.cur.historyLoading && !w.cur.historyError) void w.loadEarlierHistory();
     });
     return () => cancelAnimationFrame(frame);
-  }, [reveal, w.sid, w.cur.events, w.view]);
+  }, [reveal, w.sid, w.cur.events, w.cur.historyStart, w.cur.historyLoading, w.cur.historyError, w.view]);
   const clear = () => { setQuery(''); setActive(0); setExpanded(false); setReveal(null); requestAnimationFrame(() => searchButton.current?.focus()); };
   const choose = result => {
     if (!result) return;
     setQuery(''); setExpanded(false); setActive(0);
-    setReveal({ projectId: result.project.id, sessionId: result.kind === 'session' ? result.id : null, turnId: result.turnId, nonce: Date.now() });
+    setReveal({ projectId: result.project.id, sessionId: result.kind === 'session' ? result.id : null, turnId: result.turnId, seq: result.seq, nonce: Date.now() });
     w.setProjectFilter(result.project.id);
     if (result.kind === 'session') w.focusSession(result.id);
   };
@@ -79,7 +82,7 @@ export function SidebarBrowser({ searchRequest, onSearchHandled, renderSession }
           {result.excerpt && <span className="sidebar-result-excerpt"><MatchText text={result.excerpt} query={normalizedQuery} /></span>}
         </button>)}
       </div>
-      <div className="sidebar-search-status" role="status">{pending ? <><Spinner size="1" />正在搜索会话内容…</> : remote.state === 'error' ? '内容搜索暂不可用，仍可按项目和会话名称查找。' : !results.length ? '未找到项目或会话' : `${results.length} 项结果${remote.skipped ? ` · ${remote.skipped} 条记录未能搜索` : ''}`}</div>
+      <div className="sidebar-search-status" role="status">{pending ? <><Spinner size="1" />正在搜索会话内容…</> : remote.state === 'error' ? '内容搜索暂不可用，仍可按项目和会话名称查找。' : !results.length ? '未找到项目或会话' : `${results.length} 项结果${remote.capped ? ' · 还有更多内容，请缩小搜索范围' : ''}${remote.skipped ? ` · ${remote.skipped} 条记录未能搜索` : ''}`}</div>
     </div> : <ProjectTree view={view} reveal={reveal} foldRequest={foldRequest}>{renderSession}</ProjectTree>}
   </>;
 }

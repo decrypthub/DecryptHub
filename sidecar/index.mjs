@@ -2,6 +2,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { BrowserManager } from './browser.mjs';
+import { formatSessionReferenceMention } from './session-reference-uri.mjs';
 import { fileURLToPath } from 'node:url';
 
 const MODE = process.env.JSRA_MODE || 'server';
@@ -30,18 +31,24 @@ async function startServer() {
   const { resolveIn } = await import('./paths.mjs');
   const { collectArtifacts, groupArtifacts } = await import('./artifacts.mjs');
   const { listWorkspace, listDirectory, readWorkspace } = await import('./workspace.mjs');
+  const { DirectoryWatches } = await import('./file-view.mjs');
   const { executor } = await import('./executor.mjs');
   const { consumeFolderGrant } = await import('./grants.mjs');
   const { selectReadRoot } = await import('./workspaces.mjs');
   const { ProjectService } = await import('./project-service.mjs');
   const { ExtensionStore } = await import('./extensions.mjs');
   const { SYSTEM_MEMORY_SOURCES } = await import('./system-memory.mjs');
+  const { COMMANDS } = await import('./commands.mjs');
   const { publicSettings, decryptSecrets, mirrorProvider } = await import('./secrets.mjs');
   const { registerAttachment, attachmentPreview } = await import('./attachments.mjs');
   const { savePastedText } = await import('./paste-drop.mjs');
   const { conversationMarkdown } = await import('./transcript.mjs');
-  const { searchSessions } = await import('./session-search.mjs');
-  const { openFeedback } = await import('./feedback.mjs');
+  const { sessionSnapshot, passiveHistory } = await import('./session-snapshots.mjs');
+  const { exportSessionArchive } = await import('./session-export.mjs');
+  const { catalogEntries, configureCatalogCredentials, credentialStore } = await import('./provider-catalog.mjs');
+  const { ProviderAuthorization } = await import('./provider-authorization.mjs');
+  const { openFeedback, openUserUrl } = await import('./feedback.mjs');
+  const { selectionSettings } = await import('./model-selection.mjs');
   const { readDocument } = await import('./documents.mjs');
   const consumedGrants = new Map();
   const usedNativeNonces = new Set();
@@ -59,12 +66,16 @@ async function startServer() {
 
   const clients = new Set();
   // 事件信封带 sid（会话 id）；全局事件 sid=null
-  function broadcast(channel, payload, sid = null) {
+  function broadcast(channel, payload, sid = null, revision = null) {
     if (channel === 'log') fileLog((sid ? '[' + sid + '] ' : '') + String(payload));
     if (channel === 'run-event' && ['run-started', 'run-status'].includes(payload.type)) fileLog(`[session=${sid}][run=${payload.runId}] ${payload.type} ${payload.run?.status || ''} ${payload.run?.stop || ''}`);
-    const msg = JSON.stringify({ type: 'event', channel, sid, payload });
+    const msg = JSON.stringify({ type: 'event', channel, sid, payload, revision });
     for (const c of clients) { try { c.send(msg); } catch {} }
   }
+  // 审批只能由界面的 WS 客户端点击（agent-approval → agent-approval-reply）。
+  // 没有客户端时 approve() 必须立即拒绝：以前它无上限等 5 分钟，纯 MCP/CLI 客户端
+  // 会表现为「工具静默挂起到外层超时」，调用方分不清「权限被拒」和「命令很慢」。
+  const hasApprovalListener = () => clients.size > 0;
   // 用户接入的 MCP 服务：全局一份，所有会话共享（工具名带服务前缀）
   let plugins;
   const { PluginManager } = await import('./plugins.mjs');
@@ -75,7 +86,7 @@ async function startServer() {
     log: m => fileLog(m),
     onChange: status => { broadcast('mcp-status', status); plugins?.notify(); },
   });
-  const sessions = new SessionManager({ userDataDir: settingsMod.userDataDir(), getSettings: () => settings, broadcast, chromeMod, mcpHost });
+  const sessions = new SessionManager({ userDataDir: settingsMod.userDataDir(), getSettings: () => settings, broadcast, chromeMod, mcpHost, hasApprovalListener });
   // 内核管理不依赖会话：全新安装（零项目/零会话）也必须能查询、下载和测试内核。
   const kernelHost = new BrowserManager({ components: sessions.components, getRoot: () => settingsMod.userDataDir(), dataDir: path.join(settingsMod.userDataDir(), '.kernel-host'), kernelDir: settingsMod.userDataDir() });
   kernelHost.on('download-progress', value => broadcast('download-progress', value));
@@ -95,21 +106,44 @@ async function startServer() {
   tasks.start();
   const S = a => { const session = sessions.get(a?.sessionId); if (session.closing) throw Error('会话正在关闭或删除'); return session; };
   const B = a => { const s = S(a); if (!s.browser.running) throw new Error('该会话的浏览器未启动'); return s.browser; };
+  const credentialWrites = new Map();
+  configureCatalogCredentials({ save: (slot, value) => new Promise((resolve, reject) => {
+    if (!settings.providers?.some(route => slot === 'prov.' + route.id && route.catalogId)) { reject(Error('供应商渠道已删除或变更，凭据未保存')); return; }
+    if (!nativeKey || !clients.size) { reject(Error('需要连接原生桌面窗口以保存凭据')); return; }
+    const id = crypto.randomUUID(), nonce = crypto.randomBytes(12), cipher = crypto.createCipheriv('aes-256-gcm', nativeKey, nonce);
+    const ciphertext = Buffer.concat([cipher.update(JSON.stringify({ slot, value })), cipher.final(), cipher.getAuthTag()]);
+    const timer = setTimeout(() => { credentialWrites.delete(id); reject(Error('原生凭据保存未确认，登录结果未接纳')); }, 15000);
+    credentialWrites.set(id, { resolve, reject, timer }); broadcast('credential-store', { id, envelope: { nonce: nonce.toString('hex'), ciphertext: ciphertext.toString('hex') } });
+  }) });
+  const providerAuthorization = new ProviderAuthorization({ settings: () => settings, emit: state => broadcast('provider-authorization', state) });
 
   let downloading = null;
+  // 目录监听：界面在展开/收起后整份上报当前展开路径，这里做差集开关。
+  const directoryWatches = new DirectoryWatches((sid, paths) => broadcast('workspace-directory-changed', { paths }, sid));
   const handlers = {
     'get-settings': () => publicSettings(settings),
+    'commands-list': () => COMMANDS,
+    'provider-catalog': () => catalogEntries(),
+    'provider-auth-start': a => providerAuthorization.start(a.routeId, a.method),
+    'provider-auth-status': a => providerAuthorization.status(a.id),
+    'provider-auth-answer': a => providerAuthorization.answer(a.id, a.promptId, a.value),
+    'provider-auth-cancel': a => providerAuthorization.cancel(a.id),
+    'provider-auth-logout': async a => { if(!settings.providers?.some(route=>route.id===a.routeId&&route.catalogId))throw Error('供应商渠道不存在'); for(const attempt of providerAuthorization.attempts.values())if(attempt.routeId===a.routeId)providerAuthorization.cancel(attempt.id); await credentialStore(a.routeId).delete(a.routeId); const route=settings.providers.find(route=>route.id===a.routeId); if(route)route.apiKey=''; mirrorProvider(settings); return publicSettings(settings); },
+    'provider-auth-open': a => openUserUrl(providerAuthorization.url(a.id), { nativeHost: !!nativeKey }),
+    'credential-store-ack': a => { const pending = credentialWrites.get(a.id); if (!pending) throw Error('凭据保存请求已结束'); credentialWrites.delete(a.id); clearTimeout(pending.timer); if (a.ok) pending.resolve(); else pending.reject(Error(a.error || '原生凭据保存失败')); return true; },
     'save-settings': s => {
       const previous = settings, old = new Map((settings.providers || []).map(p => [p.id, p]));
+      for (const route of s?.providers || []) if (old.has(route.id) && old.get(route.id).catalogId !== route.catalogId && (old.get(route.id).catalogId || route.catalogId)) throw Error('更换供应商请新建渠道，以保留各渠道独立的认证信息');
       settings = { ...settings, ...s, mcpServers:settings.mcpServers, openai: { ...settings.openai, ...(s?.openai || {}), apiKey: s?.openai?.apiKey || settings.openai.apiKey }, anthropic: { ...settings.anthropic, ...(s?.anthropic || {}), apiKey: s?.anthropic?.apiKey || settings.anthropic.apiKey } };
       if (Array.isArray(s?.providers)) settings.providers = s.providers.map(p => ({ ...p, apiKey: (!nativeKey && p.apiKey) || old.get(p.id)?.apiKey || (!previous.providers?.length && previous[p.type]?.baseUrl === p.baseUrl ? previous[p.type]?.apiKey : '') || (p.type === 'openai' && process.env.JSRA_OPENAI_KEY && settings.openai.baseUrl === p.baseUrl ? process.env.JSRA_OPENAI_KEY : '') || '' }));
-      mirrorProvider(settings); settingsMod.save(settings); mcpHost.apply().catch(e => fileLog('MCP 应用失败: ' + e.message));
+      mirrorProvider(settings); settingsMod.save(settings); providerAuthorization.reconcile(); mcpHost.apply().catch(e => fileLog('MCP 应用失败: ' + e.message));
       for (const x of sessions.sessions.values()) if (x.agent) x.agent.emitContext(); return publicSettings(settings);
     },
     'secrets-sync': a => {
       if (!nativeKey || usedNativeNonces.has(a?.envelope?.nonce)) throw new Error('无效或重复的原生凭据同步');
       const values = decryptSecrets(nativeKey, a.envelope); usedNativeNonces.add(a.envelope.nonce);
-      for (const p of settings.providers || []) p.apiKey = values['prov.' + p.id] || (p.type === 'openai' && process.env.JSRA_OPENAI_BASE === p.baseUrl ? process.env.JSRA_OPENAI_KEY || '' : '');
+      configureCatalogCredentials({ values });
+      for (const p of settings.providers || []) p.apiKey = p.catalogId && values['prov.' + p.id]?.startsWith('{') ? '' : values['prov.' + p.id] || (p.type === 'openai' && process.env.JSRA_OPENAI_BASE === p.baseUrl ? process.env.JSRA_OPENAI_KEY || '' : '');
       mirrorProvider(settings); return publicSettings(settings);
     },
     // MCP 服务管理：列表/测试/保存/重启。保存会立即与常驻连接对齐。
@@ -134,8 +168,8 @@ async function startServer() {
     'project-attach': a => projects.attach(S(a).id, a.projectId || null),
     'project-remove': a => projects.remove(a.id, a),
     'project-move': a => projects.move(a.id, a.beforeId),
-    'extensions-list': a => { const s = S(a); return extensions.list(a.kind, { sessionId: s.id, projectId: s.projectId }); },
-    'extension-read': a => { const s = S(a); return extensions.read(a.kind, a, { sessionId: s.id, projectId: s.projectId }); },
+    'extensions-list': a => { const s = S(a); return extensions.list(a.kind, { sessionId: s.id, projectId: s.projectId, workRoot: s.workspace.root, protectedRoot: sessions.userDataDir }); },
+    'extension-read': a => { const s = S(a); return extensions.read(a.kind, a, { sessionId: s.id, projectId: s.projectId, workRoot: s.workspace.root, protectedRoot: sessions.userDataDir }); },
     // 设置页的「记忆与技能」：跨项目、跨会话的只读清点 + 删除。
     // 与工具通道分开：这里没有当前会话，必须由调用方明确 scope 和 scopeId，不做猜测。
     // 系统记忆不在此列——它是产品内置与插件声明的事实，设置页不展示也不可编辑。
@@ -199,7 +233,8 @@ async function startServer() {
     'probe-kernel': async a => kernelHost.control('kernel-probe',{...a,kernel:settingsMod.KERNEL}),
     // 会话（多目标站点并行分析，每个会话独立 Chrome/内核/Agent）
     'session-list': () => sessions.list(),
-    'session-search': (a, context) => searchSessions({ sessions: sessions.sessions, projects: sessions.projects.list(), query: a?.query, signal: context?.signal }),
+    'session-search': (a, context) => sessions.sessionQuery.searchSidebar({ query: a?.query, signal: context?.signal }),
+    'session-search-cancel': () => true,
     'feedback-open': () => openFeedback({ nativeHost: !!nativeKey }),
     'session-diagnostics': a => {
       const s = S(a), agent = s.ensureAgent(), run = s.runs.latest(), context = agent.stats();
@@ -207,8 +242,8 @@ async function startServer() {
       return { sessionId: s.id, runId: run?.id || null, status: run?.status || 'idle', stop: run?.stop || null, mode: s.mode, review: s.review, workspace: s.workspace.root, provider: settings.provider, model, context: { used: context.used, limit: context.limit, inferred: context.inferred }, limits: { maxSteps: settings.maxSteps || 0, tokenBudget: settings.tokenBudget || 0 }, usage: run?.usage || null, appVersion: process.env.JSRA_APP_VERSION || 'development', platform: process.platform, node: process.versions.node };
     },
     'session-create': a => { if (!a?.projectId) throw Error('请先选择项目'); return sessions.create({ projectId: a.projectId, title: typeof a.title === 'string' ? a.title.slice(0, 200) : undefined }).info(); },
-    'session-close': async a => { await sessions.close(a?.sessionId); return sessions.list(); },
-    'session-delete': async a => { await sessions.delete(a?.sessionId); return sessions.list(); },
+    'session-close': async a => { directoryWatches.closeSession(a?.sessionId); await sessions.close(a?.sessionId); return sessions.list(); },
+    'session-delete': async a => { directoryWatches.closeSession(a?.sessionId); await sessions.delete(a?.sessionId); return sessions.list(); },
     'terminal-open': a => S(a).terminals.open(a),
     'terminal-snapshot': a => S(a).terminals.snapshot(a.id),
     'terminal-input': a => S(a).terminals.input(a.id, a.data),
@@ -221,14 +256,15 @@ async function startServer() {
     'workspace-recent': () => sessions.workspaces.recent(),
     'executor-status': a => executor.probe(!!a?.refresh),
     'run-events': a => S(a).runs.events(Number(a?.after) || 0),
-    'agent-history': a => { const s = S(a); return s.ensureAgent().hist.events; },
+    'agent-history': a => passiveHistory(S(a)),
     'session-export-markdown': a => {
-      const s = S(a), agent = s.ensureAgent(), events = [...agent.hist.events];
-      if (agent.currentItem && agent.partial) events.push({ t: 'assistant', ...agent.currentItem, phase: 'partial_answer', content: agent.partial });
+      const s = S(a), agent = s.agent, events = [...passiveHistory(s)];
+      if (agent?.currentItem && agent.partial) events.push({ t: 'assistant', ...agent.currentItem, phase: 'partial_answer', content: agent.partial });
       return { sessionId: s.id, markdown: conversationMarkdown({ id: s.id, title: s.title, events }) };
     },
+    'session-export-archive': (a, context) => exportSessionArchive(S(a), a.path, { signal: context?.signal, includeDescendants: a.includeDescendants !== false }),
     'changes-list': a => { const s = S(a); return s.changes.list(s.workspace.id); },
-    'change-detail': a => { const s = S(a); return s.changes.detail(a.id, s.workspace.id); },
+    'change-detail': a => { const s = S(a); return s.changes.detail(a.id, s.workspace.id, { offset: a?.offset ?? 0, maxChars: a?.maxChars ?? 80000 }); },
     'change-undo': a => { const s = S(a); if (s.agent?.running) throw new Error('任务运行中，请先停止后撤销'); if (s.mode === 'read-only') throw new Error('只读权限下不能撤销文件改动'); sessions.workspaces.verify(s.workspace); const result = s.changes.undo(a.id, s.workspace); s.emit('changes-updated', { workspaceId: s.workspace.id }); return result; },
     'browser-launch': async a => S(a).launch({url:a?.url,isolated:a?.isolated}),
     'browser-viewport': async a => { const s = S(a); return s.browser.fitViewport(a.width, a.height, a.dpr); },
@@ -264,22 +300,34 @@ async function startServer() {
     'read-file': a => { const s = S(a), name = String(a.file || ''); if (name.startsWith('workspace/')) return readWorkspace(selectReadRoot(s.toolCtx(), a.root), name.slice(10)); const p = resolveIn(s.projectDir, name); return fs.readFileSync(p, 'utf8').slice(0, 300000); },
     'list-files': a => { const s = S(a); sessions.workspaces.verify(s.workspace); return listWorkspace(s.toolCtx()).map(f => ({ ...f, name: 'workspace/' + f.name })); },
     'workspace-directory': a => { const s = S(a); sessions.workspaces.verify(s.workspace); return listDirectory(selectReadRoot(s.toolCtx(), a.root), String(a.path || '.')); },
+    // 目录监听：界面把「当前展开的绝对路径」整份报上来，这里做差集开关，一次往返即可对齐。
+    // 变化按目录合并后回推 `workspace-directory-changed`，界面据此就地重列，不清空已显示的行。
+    'workspace-watch': a => {
+      const s = S(a); sessions.workspaces.verify(s.workspace);
+      const paths = Array.isArray(a.paths) ? a.paths.filter(p => typeof p === 'string').slice(0, 200) : [];
+      directoryWatches.sync(s.id, paths);
+      return { watching: paths.length };
+    },
     'git-status': a => git.gitStatus(S(a).toolCtx()),
     'git-diff': a => git.gitDiff(S(a).toolCtx(), a.path),
     'agent-send': a => S(a).send(a),
     'agent-queue-resume': a => S(a).resumeQueue(),
     'agent-queue-remove': a => S(a).removeQueued(a?.id),
     'agent-queue-edit': a => S(a).editQueued(a?.id, a?.text),
-    'agent-turn-edit': a => S(a).editTurn(a?.turnId, a?.text),
+    'agent-turn-edit': a => S(a).editTurn(a?.turnId, a?.text, a?.attachments, a?.atSeq),
+    'session-fork': async a => ({ sessionId: (await sessions.forkSession(S(a).id, a?.atSeq)).id }),
+    'session-reference-candidates': a => { const session = S(a); return sessions.sessionQuery.candidates(session.toolCtx(), a?.query, a?.limit).map(record => ({ ...record, mention: formatSessionReferenceMention({ sessionId: record.sessionId, label: record.title }) })); },
     'agent-rate': a => S(a).rateMessage(a?.id, a?.rating),
     'agent-queue-clear': a => { const s = S(a); s.queue = []; s.saveState(); sessions.emitList(); return { ok: true }; },
-    'agent-state': a => { const s = S(a); s.ensureAgent(); return s.publicState(); },
+    'agent-state': a => S(a).publicState(),
+    'plan-set': a => S(a).setPlan(a.active),
+    'session-model-set': a => S(a).setModel(a),
     'goal-start': a => S(a).startGoal(a.objective, a.attachments),
     'goal-action': a => S(a).goalAction(a.action, { revision: a.revision }),
     'subagent-start': a => S(a).subagents.spawn(a.task),
     'subagent-result': a => { const s = S(a); return s.subagents.wait(a.id, { waitMs: 0, workspaceId: s.workspace.id }); },
     'subagent-cancel': a => ({ ok: S(a).subagents.cancel(a.id) }),
-    'session-snapshot': a => { const s = S(a), ag = s.ensureAgent(); return { state: s.publicState(), events: ag.hist.events, partial: ag.partial || '', partialReasoning: ag.partialReasoning || '', partialItem: ag.currentItem || null, context: ag.stats() }; },
+    'session-snapshot': a => sessionSnapshot(S(a), { beforeSeq: a?.beforeSeq, turns: a?.turns ?? 50 }),
     'test-seed-history': a => {
       if (process.env.JSRA_TEST_FIXTURES !== '1') throw new Error('disabled');
       const s = S(a), ag = s.ensureAgent(); if (ag.running) throw new Error('busy');
@@ -343,11 +391,21 @@ async function startServer() {
     'task-save': a => tasks.upsert(a?.task || {}),
     'task-remove': a => tasks.remove(a?.id),
     'task-run': a => { const id = String(a?.id || ''); if (tasks.busy.has(id)) return { ok: false, error: '任务正在运行' }; if (!tasks.tasks.some(t => t.id === id)) throw new Error('任务不存在'); tasks.run(id, { manual: true }).catch(e => fileLog('自动化运行失败：' + e.message)); return { ok: true }; },
-    'agent-compress': async a => { const s = S(a); const ag = s.ensureAgent(); if (ag.running) return { ok: false, error: 'AI 运行中，将在接近上限时自动压缩' }; try { return await ag.compress({ reason: 'manual', instructions: String(a?.instructions || '').slice(0, 500), force: true }); } catch (e) { return { ok: false, error: e.message }; } },
+    'agent-compress': async a => {
+      const s = S(a), ag = s.ensureAgent();
+      if (ag.running) return { ok: false, error: 'AI 运行中，将在接近上限时自动压缩' };
+      if (ag.compressing) return { ok: false, error: '正在压缩', busy: true };
+      try { return await s.compactWith({ reason: 'manual', instructions: String(a?.instructions || '').slice(0, 500), force: true }); }
+      catch (e) { return { ok: false, error: e.message }; }
+    },
+    // 手动压缩的取消：真的打断这次摘要请求，而不是把界面上的提示收起来。
+    'agent-compress-cancel': a => ({ ok: S(a).cancelCompact(), cancelling: true }),
     'test-connection': async (override) => {
       const { testConnection } = await import('./llm.mjs');
       const p = settings.providers?.find(p => p.id === override?.providerId);
+      if (p?.catalogId) return testConnection(selectionSettings(settings, { providerId: p.id, model: p.models?.[0]?.id || p.models?.[0], thinking: 'off' }));
       const merged = override ? { ...settings, ...override, openai: { ...settings.openai, ...(override.openai || {}), apiKey: override.openai?.apiKey || (p?.type === 'openai' ? p.apiKey : settings.openai.apiKey) }, anthropic: { ...settings.anthropic, ...(override.anthropic || {}), apiKey: override.anthropic?.apiKey || (p?.type === 'anthropic' ? p.apiKey : settings.anthropic.apiKey) } } : settings;
+      if (override?.providerId) { merged.activeProviderId = override.providerId; merged.activeModel = override[override.provider]?.model || merged.activeModel; }
       return testConnection(merged);
     },
     // 更新前调用：先应答，再关掉浏览器、工作区后台任务和 MCP，然后退出。
@@ -412,19 +470,24 @@ async function startServer() {
       if (m.type === 'input') { sessions.focused()?.browser.input(m.payload); return; }
       if (m.type === 'invoke') {
         const h = handlers[m.channel];
-        let result, error = null;
+        let result, error = null, code = null;
         try {
           if (m.channel === 'session-search') { searchController?.abort(); searchController = new AbortController(); }
+          if (m.channel === 'session-search-cancel') searchController?.abort();
           result = h ? await h(m.args, m.channel === 'session-search' ? { signal: searchController.signal } : undefined) : undefined;
           if (!h) error = '未知通道: ' + m.channel;
         }
-        catch (e) { error = e.message || String(e); }
-        try { ws.send(JSON.stringify({ type: 'reply', id: m.id, result, error })); } catch {}
+        catch (e) { error = e.message || String(e); code = e?.code || null; }
+        // code 只在真的带错误码时才出现：界面据此把「目录不在了」和「读失败」分开说。
+        try { ws.send(JSON.stringify({ type: 'reply', id: m.id, result, error, ...(code ? { code } : {}) })); } catch {}
       }
     });
   });
   async function gracefulExit() {
+    providerAuthorization.close();
     projects.stop();
+    directoryWatches.closeAll();
+    await extensions.close();
     try { await plugins.close(); } catch {}
     try { await mcpHost.close(); } catch {}
     try { await sessions.closeAll(); } catch {}
