@@ -32,6 +32,12 @@ const url = 'http://127.0.0.1:19387/'
 const cookie = 'dsh-auth-fixture=signed'
 
 describe('desktop welcome Web operations', () => {
+  it('boots with independent native identity without requesting the disabled upstream account service', async () => {
+    const host = transport('zh')
+    const backend = connectDesktopWelcome(url, cookie, host.send, { accountEnabled: false })
+    expect(await backend.read()).toMatchObject({ loggedIn: false, localePreference: 'zh', hasApiKey: false })
+    expect(host.send.mock.calls.some(([input]) => input.includes('/api/account/'))).toBe(false)
+  })
   it('authenticates with the explicit Host cookie and stores only through the configured credential reference', async () => {
     const host = transport()
     const backend = connectDesktopWelcome(url, cookie, host.send)

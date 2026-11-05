@@ -29,6 +29,7 @@ import type { ModelSelectInjected } from './slots.ts'
 import { ModelSelect } from './ModelSelect.tsx'
 import { en, ja, es, fr, de, ru, pt, zh, type ModelKey } from './locales.ts'
 import { orderModelProviders } from './provider-order.ts'
+import { Config, MODEL_PRESENTATION_GLOBAL } from '../presentation.ts'
 
 export { ModelDirectory } from './directory.ts'
 export type { ModelDirectoryState } from './directory.ts'
@@ -113,6 +114,8 @@ export const inject = ['commandUi', 'locale', 'sessions', 'slots', 'remote', 're
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
+  const page = globalThis as Partial<Record<typeof MODEL_PRESENTATION_GLOBAL, unknown>>
+  const presentation = Config(page[MODEL_PRESENTATION_GLOBAL] ?? {})
   ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'ui-model-selection: dictionaries')
 
   // Non-slot faces (the command description, the popup option builder) read
@@ -180,6 +183,7 @@ export function apply(ctx: ClientContext): void {
         const directory = models.directoryFor(sessionId)
         const available = sessions.subagentAddress(sessionId) === undefined
         return {
+          effortControl: presentation.effortControl,
           available,
           directory: directory.store,
           load: () => {

@@ -371,6 +371,8 @@ Native original-file operations accept only the trusted application frame. Compl
 
 An unpackaged Electron process uses `.desktop-build/development/project` under its application directory as its development project. `DSH_DESKTOP_PNPM_ENTRY` and `DSH_DESKTOP_DSH_DIR` are optional overrides with application-path defaults. `DSH_DESKTOP_PRIMARY_RUNTIME_DIR` is required for every unpackaged launch: the development launchers (`dev:desktop`, `start:desktop`, and the workspace-update qualification runner) set it to the primary-runtime directory of the target they prepared, and a launch without it fails with the fatal startup dialog. The launcher must set it because the shell cannot derive that directory from `process.arch`: the build target fixes Windows to x64 while the host may be arm64. Packaged applications ignore these variables, resolve signed resources from `process.resourcesPath`, and use the managed Desktop profile.
 
+Build isolated previews by setting `DSH_DESKTOP_BUILD_ROOT` to a nonempty absolute directory. Target preparation and application artifacts move together under that root, while download and pnpm caches keep their normal location. Use the packaged application for user previews: an unpackaged development window still observes workspace bundle rebuilds.
+
 <a id="known-limitations"></a>
 
 ## Known limitations

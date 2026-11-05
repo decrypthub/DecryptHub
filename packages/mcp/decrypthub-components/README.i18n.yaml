@@ -1,0 +1,34 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/mcp/decrypthub-components/README.md
+/:
+  en: 16e3faf322c8f475
+  zh: 98472848bbadd88d
+/deepseek-ai-dsh-decrypthub-components:
+  en: d332f49db1f11653
+  zh: d518973a58ea7b46
+/deepseek-ai-dsh-decrypthub-components/summary:
+  en: b4971032d1282bfc
+  zh: d9feec950fc4fc1e
+/deepseek-ai-dsh-decrypthub-components/table-of-contents:
+  en: 122f0d41696980b1
+  zh: d68bdb9c0ec2502c
+/deepseek-ai-dsh-decrypthub-components/use-this-package:
+  en: f8d1c84c9c3ebf12
+  zh: 6fac16094581e17c
+/deepseek-ai-dsh-decrypthub-components/understand-the-implementation:
+  en: dc603e4e96d9c8c4
+  zh: 6e04fb85c40698db
+/deepseek-ai-dsh-decrypthub-components/model-experience:
+  en: f242b51aa1a92389
+  zh: ed0f068aa7260abb
+/deepseek-ai-dsh-decrypthub-components/model-experience/kv-cache-effect:
+  en: d0a60470bb19de42
+  zh: 925715c7b0559a01
+/deepseek-ai-dsh-decrypthub-components/known-limitations-and-deferred-work:
+  en: 224ea2a95b2b69e6
+  zh: 8d89004f44bfadd9
+/deepseek-ai-dsh-decrypthub-components/known-limitations-and-deferred-work/dev-note:
+  en: 4ae2a569b8ab1199
+  zh: 01e38d233e12f274

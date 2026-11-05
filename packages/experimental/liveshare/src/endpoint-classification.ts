@@ -206,6 +206,16 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'goals/pause': 'owner-only', // owner pauses a goal
   'goals/resume': 'owner-only', // owner resumes a goal
   'pluginInventory/list': 'owner-only', // owner plugin inventory
+  'decrypthubComponents/cancelInstall': 'owner-only', // owner official component management
+  'decrypthubComponents/checkUpdates': 'owner-only', // owner official component management
+  'decrypthubComponents/configure': 'owner-only', // owner official component management
+  'decrypthubComponents/inspectBrowser': 'owner-only', // owner official component management
+  'decrypthubComponents/installComponent': 'owner-only', // owner official component management
+  'decrypthubComponents/installBrowser': 'owner-only', // owner official component management
+  'decrypthubComponents/reconnect': 'owner-only', // owner official component management
+  'decrypthubComponents/rollback': 'owner-only', // owner official component management
+  'decrypthubComponents/snapshot': 'owner-only', // owner official component management
+  'decrypthubComponents/watch': 'owner-only', // owner official component management
   'mcpManager/probe': 'owner-only', // owner MCP server management
   'mcpManager/restart': 'owner-only', // owner MCP server management
   'mcpManager/watch': 'owner-only', // owner MCP server management

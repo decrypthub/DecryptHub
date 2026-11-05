@@ -46,6 +46,9 @@
     },
     {
       "path": "../../packages/client/ui-file-actions"
+    },
+    {
+      "path": "../../packages/client/ui-settings-decrypthub-account"
     }
   ],
   "exclude": [

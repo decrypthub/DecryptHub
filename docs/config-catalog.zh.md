@@ -575,6 +575,22 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-client-shortcuts -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-client-ui-model-selection -->
+<a id="deepseek-aidsh-client-ui-model-selection"></a>
+
+## `@deepseek-ai/dsh-client-ui-model-selection`
+
+- `source`: [`packages/client/ui-model-selection/src/presentation.ts:5`](../packages/client/ui-model-selection/src/presentation.ts)
+
+```ts config-catalog
+/** Model selection presentation; provider metadata remains authoritative for supported efforts. */
+export interface Config {
+  /** Use the compact menu or a discrete reasoning slider in the composer. */
+  effortControl: 'menu' | 'slider'
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-client-ui-model-selection -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-client-ui-plugin-manager -->
 <a id="deepseek-aidsh-client-ui-plugin-manager"></a>
 
@@ -657,6 +673,10 @@ export type OnboardingProcess = 'compact' | 'standard' | 'detailed'
 export interface Config {
   /** Offer the browser API-key step when no native shell owns credential onboarding. */
   credentialOnboarding: boolean
+  /** Offer the installed provider directory; false keeps only configured channels and the custom API form. */
+  providerCatalog: boolean
+  /** Show the upstream preview notice on first browser launch. */
+  welcomeNotice: boolean
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-client-ui-settings-models -->
@@ -854,6 +874,85 @@ export interface Config {
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-credentials-local -->
+
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-decrypthub-components -->
+<a id="deepseek-aidsh-decrypthub-components"></a>
+
+## `@deepseek-ai/dsh-decrypthub-components`
+
+- `inject`: `settings` · `agents` · `mcpManager` · `subprocess`
+- `source`: [`packages/mcp/decrypthub-components/src/index.ts:24`](../packages/mcp/decrypthub-components/src/index.ts)
+
+```ts config-catalog
+/** Deployment-owned directories; no catalog can choose an executable. */
+export interface Config {
+  /** Absolute directory for component versions and activation pointers. */
+  directory: string
+  /** Optional verified WDH CLI included in the application. */
+  bundledWdhEntry: string
+  /** Local Python interpreter used for managed device components. */
+  pythonCommand: string
+  /** Deadline for release metadata and browser file inspection. */
+  requestTimeoutMs: number
+  /** Deadline for component and browser downloads. */
+  downloadTimeoutMs: number
+  /** Shutdown grace period for browser maintenance processes. */
+  processGraceMs: number
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-decrypthub-components -->
+
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-decrypthub-integrations -->
+<a id="deepseek-aidsh-decrypthub-integrations"></a>
+
+## `@deepseek-ai/dsh-decrypthub-integrations`
+
+- `inject`: `tools` · `workingDirectory` · `mcpManager`
+- `refs`: `Volatile` (`@deepseek-ai/cosmokit`)
+- `source`: [`packages/mcp/decrypthub-integrations/src/index.ts:77`](../packages/mcp/decrypthub-integrations/src/index.ts)
+
+```ts config-catalog
+/** Live product connection configuration. */
+export type Config = Volatile<IntegrationConfig>
+
+/** Deployment paths and optional device servers; credentials stay in their owning CLIs. */
+export interface IntegrationConfig {
+  /** Installed browser component and per-Agent profile storage. */
+  wdh: {
+    /** Start one client for each Agent on its first step. */
+    enabled: boolean
+    /** Absolute entry path in an installed WDH component. */
+    entry: string
+    /** Absolute storage root for isolated Agent browser profiles. */
+    dataDirectory: string
+    /** System browser by default; Cloak requires a separately installed kernel. */
+    browser: 'system' | 'cloak'
+  }
+  /** Optional Android CLI; configuration never installs or roots a device. */
+  adh: DeviceServer
+  /** Optional iOS CLI; credentials remain owned by that CLI. */
+  idh: DeviceServer
+  /** Budget for initial MCP negotiation and tool discovery. */
+  startupTimeoutMs: number
+  /** Budget for confirming transport and process cleanup. */
+  closeTimeoutMs: number
+  /** Maximum duration of an individual MCP tool call. */
+  toolCallTimeoutMs: number
+}
+
+/** Configurable executable for an independently installed device integration. */
+interface DeviceServer {
+  /** Start only after an explicit deployment choice. */
+  enabled: boolean
+  /** Installed CLI executable; no shell expansion is performed. */
+  command: string
+  /** Arguments passed directly to the installed CLI. */
+  args: string[]
+  /** Optional device daemon address, distinct from the local MCP transport. */
+  endpoint: string
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-decrypthub-integrations -->
 
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-deepseek-account-platform -->
 <a id="deepseek-aidsh-deepseek-account-platform"></a>
@@ -4910,6 +5009,7 @@ export interface Config {
 | `@deepseek-ai/dsh-client-ui-agent-team` | — | [`packages/client/ui-agent-team/src/index.ts`](../packages/client/ui-agent-team/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-approval` | — | [`packages/client/ui-approval/src/index.ts`](../packages/client/ui-approval/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-attachment` | — | [`packages/client/ui-attachment/src/index.ts`](../packages/client/ui-attachment/src/index.ts) |
+| `@deepseek-ai/dsh-client-ui-brand-decrypthub` | — | [`packages/client/ui-brand-decrypthub/src/index.ts`](../packages/client/ui-brand-decrypthub/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-brand-official` | — | [`packages/client/ui-brand-official/src/index.ts`](../packages/client/ui-brand-official/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-chat` | — | [`packages/client/ui-chat/src/index.ts`](../packages/client/ui-chat/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-commands` | — | [`packages/client/ui-commands/src/index.ts`](../packages/client/ui-commands/src/index.ts) |
@@ -4927,8 +5027,8 @@ export interface Config {
 | `@deepseek-ai/dsh-client-ui-input-trigger` | — | [`packages/client/ui-input-trigger/src/index.ts`](../packages/client/ui-input-trigger/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-jobs` | — | [`packages/client/ui-jobs/src/index.ts`](../packages/client/ui-jobs/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-layout` | — | [`packages/client/ui-layout/src/index.ts`](../packages/client/ui-layout/src/index.ts) |
+| `@deepseek-ai/dsh-client-ui-mcp` | — | [`packages/client/ui-mcp/src/index.ts`](../packages/client/ui-mcp/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-message-feedback` | — | [`packages/client/ui-message-feedback/src/index.ts`](../packages/client/ui-message-feedback/src/index.ts) |
-| `@deepseek-ai/dsh-client-ui-model-selection` | — | [`packages/client/ui-model-selection/src/index.ts`](../packages/client/ui-model-selection/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-open-in-app` | — | [`packages/client/ui-open-in-app/src/index.ts`](../packages/client/ui-open-in-app/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-permission-presets` | — | [`packages/client/ui-permission-presets/src/index.ts`](../packages/client/ui-permission-presets/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-plan` | — | [`packages/client/ui-plan/src/index.ts`](../packages/client/ui-plan/src/index.ts) |
@@ -4941,6 +5041,7 @@ export interface Config {
 | `@deepseek-ai/dsh-client-ui-session` | — | [`packages/client/ui-session/src/index.ts`](../packages/client/ui-session/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-settings` | — | [`packages/client/ui-settings/src/index.ts`](../packages/client/ui-settings/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-settings-agent-loop` | — | [`packages/client/ui-settings-agent-loop/src/index.ts`](../packages/client/ui-settings-agent-loop/src/index.ts) |
+| `@deepseek-ai/dsh-client-ui-settings-decrypthub-account` | — | [`packages/client/ui-settings-decrypthub-account/src/index.ts`](../packages/client/ui-settings-decrypthub-account/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-settings-general` | — | [`packages/client/ui-settings-general/src/index.ts`](../packages/client/ui-settings-general/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-settings-plugin-inventory` | — | [`packages/client/ui-settings-plugin-inventory/src/index.ts`](../packages/client/ui-settings-plugin-inventory/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-settings-plugins` | — | [`packages/client/ui-settings-plugins/src/index.ts`](../packages/client/ui-settings-plugins/src/index.ts) |

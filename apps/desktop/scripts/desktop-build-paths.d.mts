@@ -34,7 +34,7 @@ export function resolveDesktopBuildTarget(
 /**
  * Return the mutable preparation and artifact directories owned by one release target.
  * @param target - Supported Desktop target name.
- * @param environment - Packaging environment with an optional absolute cache directory.
+ * @param environment - Packaging environment with optional absolute build and cache directories.
  * @returns Target paths plus shared download and package caches.
  */
 export function desktopTargetBuildPaths(target: DesktopAutoUpdateTarget, environment?: NodeJS.ProcessEnv): DesktopTargetBuildPaths

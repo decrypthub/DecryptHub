@@ -1,0 +1,5 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renders the native login lifecycle through the settings slot and disposes its subscription > signed in with independent points and experience 1`] = `"DecryptHub 账号使用社区账号登录。模型 API 渠道单独配置。社社区成员@member积分23经验42刷新账号退出登录积分中心"`;
+
+exports[`renders the native login lifecycle through the settings slot and disposes its subscription > signed out 1`] = `"DecryptHub 账号使用社区账号登录。模型 API 渠道单独配置。未登录通过浏览器登录打开社区"`;

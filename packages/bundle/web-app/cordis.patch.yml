@@ -19,6 +19,20 @@
     personaPrefix: >-
       You are a coding agent powered by the {{model}} model.
 
+# The downstream product has no official session-log upload destination.
+- id: session-log-deepseek
+  disabled: true
+
+- id: session-telemetry-otel
+  disabled: true
+
+# Community identity does not authorize DeepSeek's account inference route.
+- id: llm-deepseek-account
+  disabled: true
+
+- id: deepseek-account
+  disabled: true
+
 # Full-text session search is opt-in (the base row's `openAt: never`). This
 # restatement keeps the Web values on one ephemeral in-memory index; a
 # deployment enabling content search overrides `openAt` to `first-search` in a
@@ -34,9 +48,37 @@
 # `dsh.client` rows are the browser roster the modules node half scans into
 # window.__DSH_BOOT__; the modules row is simultaneously a host row.
 - insert:
+    - id: decrypthub-components
+      name: '@deepseek-ai/dsh-decrypthub-components'
+      config:
+        directory: !!js (ctx.get('profileContext')?.home ?? process.env.DSH_HOME ?? '') + '/components'
+        bundledWdhEntry: !!js process.env.DSH_WDH_ENTRY ?? ''
+        pythonCommand: python3
+
+    - id: decrypthub-integrations
+      name: '@deepseek-ai/dsh-decrypthub-integrations'
+      inject: [decrypthubComponents]
+      config:
+        wdh:
+          enabled: !!js Boolean(process.env.DSH_WDH_ENTRY)
+          entry: !!js process.env.DSH_WDH_ENTRY ?? ''
+          dataDirectory: !!js process.env.DSH_WDH_DATA_DIR ?? ''
+          browser: cloak
+        adh:
+          enabled: false
+          command: adh
+          args: [mcp]
+        idh:
+          enabled: false
+          command: idh
+          args: [mcp]
+        startupTimeoutMs: 10000
+        closeTimeoutMs: 5000
+        toolCallTimeoutMs: 60000
+
     - id: desktop-product-telemetry
       name: '@deepseek-ai/dsh-host-product-telemetry-otel'
-      disabled: !!js "ctx.get('profileContext')?.name !== 'desktop'"
+      disabled: true
       config:
         scheduledDelayMillis: 30000
         timeoutMillis: 15000
@@ -48,7 +90,7 @@
 
     - id: product-analytics
       name: '@deepseek-ai/dsh-client-product-analytics'
-      disabled: !!js "ctx.get('profileContext')?.name !== 'desktop'"
+      disabled: true
       config:
         enabled: true
         appVersion: !!js process.env.DSH_CLIENT_VERSION
@@ -139,9 +181,17 @@
     # reports an actionable error when its settings-domain provider is absent.
     - id: ui-settings-account
       name: '@deepseek-ai/dsh-client-ui-settings-account'
+      disabled: true
+
+    - id: ui-mcp
+      name: '@deepseek-ai/dsh-client-ui-mcp'
+
+    - id: ui-settings-decrypthub-account
+      name: '@deepseek-ai/dsh-client-ui-settings-decrypthub-account'
 
     - id: account-controller
       name: '@deepseek-ai/dsh-api-account-controller'
+      disabled: true
 
     - id: settings-controller
       name: '@deepseek-ai/dsh-api-settings-controller'
@@ -257,6 +307,14 @@
 
     - id: ui-theme
       name: '@deepseek-ai/dsh-client-ui-theme'
+      config:
+        preference: system
+        fontSize: 14
+        codeFontSize: 13
+        terminalFontSize: 13
+        textFontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, Microsoft YaHei UI, sans-serif'
+        codeFontFamily: 'Cascadia Code, SFMono-Regular, Consolas, monospace'
+        terminalFontFamily: 'Cascadia Code, SFMono-Regular, Consolas, monospace'
 
     - id: locale
       name: '@deepseek-ai/dsh-client-locale'
@@ -309,12 +367,18 @@
 
     - id: ui-settings
       name: '@deepseek-ai/dsh-client-ui-settings'
+      config:
+        enabled: true
 
     - id: ui-settings-general
       name: '@deepseek-ai/dsh-client-ui-settings-general'
 
     - id: ui-settings-models
       name: '@deepseek-ai/dsh-client-ui-settings-models'
+      config:
+        credentialOnboarding: false
+        providerCatalog: true
+        welcomeNotice: false
 
     # Plugin management: the sidebar Plugins page installs, enables, disables,
     # and removes the profile's bundles through the `pluginManager` Remote.
@@ -339,9 +403,13 @@
     - id: ui-chat
       name: '@deepseek-ai/dsh-client-ui-chat'
 
-    # Official occupants for the sidebar brand slots and the home whale frame layer.
+    # Product identity uses the existing brand slots.
     - id: ui-brand-official
       name: '@deepseek-ai/dsh-client-ui-brand-official'
+      disabled: true
+
+    - id: ui-brand-decrypthub
+      name: '@deepseek-ai/dsh-client-ui-brand-decrypthub'
 
     - id: ui-attachment
       name: '@deepseek-ai/dsh-client-ui-attachment'
@@ -427,6 +495,8 @@
     # Model selection: the /model popupSelect + composer seat over session.models.
     - id: ui-model-selection
       name: '@deepseek-ai/dsh-client-ui-model-selection'
+      config:
+        effortControl: slider
 
     - id: ui-permission
       name: '@deepseek-ai/dsh-client-ui-permission-presets'
@@ -443,6 +513,7 @@
 
     - id: ui-settings-session-log
       name: '@deepseek-ai/dsh-client-ui-settings-session-log'
+      disabled: true
 
     # The Built-in plugins settings section: the navigation entry and the tab
     # row the inventory tab registers into. The official configuration pages

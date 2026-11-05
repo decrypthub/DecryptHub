@@ -28,6 +28,7 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+import { randomUUID } from '@deepseek-ai/dsh-util-crypto'
 import { apiKeyFailure } from './apiKey.ts'
 import { ApiKeyInput } from './ApiKeyInput.tsx'
 import { EditorFooter } from './EditorFooter.tsx'
@@ -65,6 +66,8 @@ function isHttpUrl(value: string): boolean {
 
 /** Props of {@link CustomProviderCard}. */
 export interface CustomProviderCardProps {
+  /** Generate the durable route identity internally and require a human-readable channel name. */
+  automaticId?: boolean
   /** Route ids already declared, so the card refuses to shadow one. */
   taken: readonly string[]
   /** Wire protocols the adapter can serve, in the order it reports them. */
@@ -101,7 +104,8 @@ export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
   const { taken, protocols, reasoningLevels, operations, t, onBusyChange } = props
   // The write is checked against the revision on which this draft was opened.
   const [openedAt] = useState(() => props.revision)
-  const [route, setRoute] = useState('')
+  const [route, setRoute] = useState(() => props.automaticId === true ? `channel-${randomUUID()}` : '')
+  const nameLabel = t(props.automaticId === true ? 'channelName' : 'customDisplayName')
   const [displayName, setDisplayName] = useState('')
   const [baseURL, setBaseURL] = useState('')
   const [protocol, setProtocol] = useState(protocols[0] ?? '')
@@ -136,6 +140,7 @@ export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
   // legitimately authenticate through the provider's own ambient discovery.
   const keyValue = keyDraft.trim()
   const ready = route.length > 0 && !routeInvalid && !routeTaken
+    && (props.automaticId !== true || displayName.trim().length > 0)
     && normalizedBaseURL.length > 0 && !baseUrlInvalid && models.length > 0 && modelFailure === undefined
     && keyFailure === undefined
   // The one blocked gate worth a line under the form. A satisfied card says
@@ -215,7 +220,7 @@ export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
 
   return (
     <div className={styles['editor']}>
-      <div className={styles['field']}>
+      {props.automaticId !== true && <div className={styles['field']}>
         <span className={styles['fieldLabel']}>{t('customRoute')}</span>
         <input
           className={styles['input']}
@@ -226,20 +231,20 @@ export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
           disabled={profileDisabled}
           onChange={(event) => { setRoute(event.target.value) }}
         />
-      </div>
+      </div>}
       {/* A rejected id reads as a fault, not as guidance — the same split the
           key field below already makes between its failure and its hint. */}
-      {routeInvalid || routeTaken
+      {props.automaticId === true ? null : routeInvalid || routeTaken
         ? <p className={styles['error']}>{t(routeInvalid ? 'customRouteInvalid' : 'customRouteTaken')}</p>
         : <p className={styles['advancedHint']}>{t('customRouteHint')}</p>}
       <div className={styles['field']}>
-        <span className={styles['fieldLabel']}>{t('customDisplayName')}</span>
+        <span className={styles['fieldLabel']}>{nameLabel}</span>
         <input
           className={styles['input']}
           type="text"
           value={displayName}
-          placeholder={route.length === 0 ? t('customDisplayName') : route}
-          aria-label={t('customDisplayName')}
+          placeholder={props.automaticId === true || route.length === 0 ? nameLabel : route}
+          aria-label={nameLabel}
           disabled={profileDisabled}
           onChange={(event) => { setDisplayName(event.target.value) }}
         />
@@ -315,7 +320,7 @@ export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
         t={t}
         busy={busy}
         submitDisabled={disabled || !ready}
-        submitLabelKey="create"
+        submitLabelKey={props.automaticId === true ? 'createChannel' : 'create'}
         submitBusyLabelKey="creating"
         onCancel={() => { props.onClose(committed) }}
         onSubmit={() => { void create() }}

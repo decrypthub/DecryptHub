@@ -43,15 +43,15 @@ import type { PropsLocale, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/d
 import type { ModelLabelOwner, ModelSelectInjected } from './slots.ts'
 import css from './ModelSelect.module.css'
 import { orderModelProviders } from './provider-order.ts'
+import { ReasoningSlider, type EffortChoice } from './ReasoningSlider.tsx'
 
 /** Which pane the dropdown shows: the two-row root or one drilled-in list. */
 type Pane = 'root' | 'model' | 'effort'
 
-/** One dynamic effort row; undefined means preserve the provider default. */
-interface EffortChoice {
-  key: string
-  effort: string | undefined
-  label: string
+/** Product copy for known effort identities; custom declarations retain their own labels. */
+const EFFORT_NAMES: Readonly<Record<string, string>> = {
+  off: 'Off', none: 'Off', minimal: 'Minimal', low: 'Low', medium: 'Medium',
+  high: 'High', xhigh: 'XHigh', max: 'Max',
 }
 
 /**
@@ -61,7 +61,7 @@ interface EffortChoice {
  * @returns the trigger and, while open, the two-level menu.
  */
 export function ModelSelect(
-  { locked, available, directory, load, select, resolveText, t, renderSlot }:
+  { locked, available, directory, load, select, resolveText, t, renderSlot, effortControl = 'menu' }:
   ModelSelectInjected & Pick<PropsRuntime<'conversation.input.model'>, 'locked'> & PropsLocale<'model'>
     & Omit<PropsRenderSlots<'conversation.input.model.label' | 'conversation.input.model.options'>, 'SessionProvider'>,
 ) {
@@ -134,7 +134,8 @@ export function ModelSelect(
       ? state.retainedEffort
       : effectiveEffort === undefined
         ? t('effort.providerDefault')
-        : reasoning.efforts.find(level => level.id === effectiveEffort)?.name ?? effectiveEffort
+        : (effortControl === 'slider' ? EFFORT_NAMES[effectiveEffort] : undefined)
+          ?? reasoning.efforts.find(level => level.id === effectiveEffort)?.name ?? effectiveEffort
   const effortChoices = useMemo<readonly EffortChoice[]>(() => reasoning === undefined
     ? []
     : [
@@ -144,9 +145,11 @@ export function ModelSelect(
       ...reasoning.efforts.map((effort: ModelReasoningEffort) => ({
         key: `effort:${effort.id}`,
         effort: effort.id,
-        label: effort.name,
+        label: effortControl === 'slider' ? EFFORT_NAMES[effort.id] ?? effort.name : effort.name,
       })),
-    ], [reasoning, t])
+    ], [reasoning, t, effortControl])
+  const sliderAvailable = effortControl === 'slider' && reasoning !== undefined
+    && effortChoices.some(choice => choice.effort === effectiveEffort)
   const { pending } = state
   const busy = pending !== null
 
@@ -281,6 +284,25 @@ export function ModelSelect(
       return
     }
     if (!open) return
+    if (pane === 'root' && sliderAvailable) {
+      // Radix owns the thumb's Arrow/Home/End keys. Tab traverses the model
+      // entry and thumb, and leaves the popup at either boundary.
+      const controls = Array.from(menuRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [role="slider"]:not([data-disabled])',
+      ) ?? [])
+      if (event.key === 'Tab') {
+        event.preventDefault()
+        const active = controls.findIndex(control => control === document.activeElement)
+        const next = active < 0 ? (event.shiftKey ? controls.length - 1 : 0) : active + (event.shiftKey ? -1 : 1)
+        if (controls[next] !== undefined) controls[next].focus()
+        else close(true)
+      } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp')
+        && !(event.target instanceof HTMLElement && event.target.getAttribute('role') === 'slider')) {
+        event.preventDefault()
+        controls[event.key === 'ArrowDown' ? 0 : controls.length - 1]?.focus()
+      }
+      return
+    }
     if (pane === 'model' && showSearch && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
       event.preventDefault()
       if (!busy && visibleModels.length > 0) {
@@ -346,10 +368,10 @@ export function ModelSelect(
     close()
   }
 
-  const settleSelection = (result: Awaited<ReturnType<ModelSelectInjected['select']>>): void => {
+  const settleSelection = (result: Awaited<ReturnType<ModelSelectInjected['select']>>, dismiss: boolean): void => {
     if (result === undefined) return
     if (result.ok) {
-      if (rootRef.current !== null) closeAfterSelection()
+      if (dismiss && rootRef.current !== null) closeAfterSelection()
       return
     }
     const { error } = result
@@ -362,12 +384,14 @@ export function ModelSelect(
     })
   }
 
-  const submit = (selection: ModelSelection): void => {
+  const submit = (selection: ModelSelection, dismiss = true): Promise<void> => {
     lastActionRef.current = 'select'
     // Disabled option rows cannot retain focus while a selection is pending.
-    setSelectionFocus(true)
-    triggerRef.current?.focus()
-    void select(selection).then(settleSelection)
+    if (dismiss) {
+      setSelectionFocus(true)
+      triggerRef.current?.focus()
+    }
+    return select(selection).then((result) => { settleSelection(result, dismiss) })
   }
 
   const choose = (selection: ModelSelection): void => {
@@ -375,7 +399,7 @@ export function ModelSelect(
       closeAfterSelection()
       return
     }
-    submit(selection)
+    void submit(selection)
   }
 
   const chooseEffort = (effort: string | undefined): void => {
@@ -389,7 +413,7 @@ export function ModelSelect(
       model: state.current.model,
       ...effort === undefined ? {} : { reasoningEffort: effort },
     }
-    submit(selection)
+    void submit(selection)
   }
 
   const waiting = currentChoice === undefined && state.status === 'loading'
@@ -482,26 +506,43 @@ export function ModelSelect(
           id={`${id}-menu`}
           className={css.menu}
           style={anchorStyle}
-          role={pane === 'model' ? 'group' : 'menu'}
+          role={pane === 'model' || (pane === 'root' && sliderAvailable) ? 'group' : 'menu'}
           aria-label={t('menu.aria')}
           aria-busy={state.status === 'loading' || busy}
         >
           {pane === 'root' && (
             <>
-              <button ref={itemRef()} type="button" role="menuitem" className={css.cell} onClick={() => { drill('model') }}>
-                <span className={css.cellLabel}>{t('menu.model')}</span>
-                <span className={css.cellValue}>
-                  {currentChoice === undefined ? modelLabel : renderModelLabel(currentChoice.group.provider, currentChoice.model, 'menu', true)}
-                </span>
-                <IconChevronRightOutlineRegular className={css.cellChevron} />
-              </button>
-              {reasoning !== undefined && (
-                <button ref={itemRef()} type="button" role="menuitem" className={css.cell} onClick={() => { drill('effort') }}>
-                  <span className={css.cellLabel}>{t('menu.effort')}</span>
-                  <span className={css.cellValue}>{effortLabel}</span>
+              {sliderAvailable ? <ReasoningSlider
+                choices={effortChoices} value={effectiveEffort} scope={directory}
+                modelName={modelLabel} label={t('menu.effort')} modelLabel={t('menu.model')}
+                modelIdentity={`${state.current?.provider ?? ''}/${state.current?.model ?? ''}`}
+                disabled={locked || busy} modelRef={itemRef()} onOpenModels={() => { drill('model') }}
+                onCommit={(effort) => {
+                  if (state.current === null || effectiveEffort === effort) return Promise.resolve()
+                  return submit({
+                    provider: state.current.provider, model: state.current.model,
+                    ...effort === undefined ? {} : { reasoningEffort: effort },
+                  }, false)
+                }}
+                onFailure={(error) => {
+                  setToast({ seq: ++toastSeq.current, text: t('error.action', { message: String(error) }) })
+                }}
+              /> : <>
+                <button ref={itemRef()} type="button" role="menuitem" className={css.cell} onClick={() => { drill('model') }}>
+                  <span className={css.cellLabel}>{t('menu.model')}</span>
+                  <span className={css.cellValue}>
+                    {currentChoice === undefined ? modelLabel : renderModelLabel(currentChoice.group.provider, currentChoice.model, 'menu', true)}
+                  </span>
                   <IconChevronRightOutlineRegular className={css.cellChevron} />
                 </button>
-              )}
+                {reasoning !== undefined && (
+                  <button ref={itemRef()} type="button" role="menuitem" className={css.cell} onClick={() => { drill('effort') }}>
+                    <span className={css.cellLabel}>{t('menu.effort')}</span>
+                    <span className={css.cellValue}>{effortLabel}</span>
+                    <IconChevronRightOutlineRegular className={css.cellChevron} />
+                  </button>
+                )}
+              </>}
               {renderSlot('conversation.input.model.options', {
                 locked: locked || busy,
                 dismiss: () => {

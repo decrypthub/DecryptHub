@@ -39,6 +39,8 @@ import styles from './ModelsSection.module.css'
 
 /** Injected dependencies of {@link ModelsSection} (slot `inject`). */
 export interface ModelsSectionInjected {
+  /** Whether unconfigured catalog providers are offered; false uses named API channels. */
+  providerCatalog?: boolean
   /** The page store (loaded on mount, refreshed on pushed invalidations). */
   controller: ModelsSettingsStore
   hooks: {
@@ -236,12 +238,12 @@ export function providerCopy(template: string, target: ProviderIdentity): string
  * @returns the section, or null while the shell has not injected yet.
  */
 export function ModelsSection(props: ModelsSectionProps): ReactNode {
-  const { controller, useSnapshot, operations, schema, t, renderSlot } = props
+  const { controller, useSnapshot, operations, schema, t, renderSlot, providerCatalog = true } = props
   if (
     controller === undefined || useSnapshot === undefined || operations === undefined
     || schema === undefined || t === undefined
   ) return null
-  return <Loaded injected={{ controller, useSnapshot, operations, schema, t }} renderSlot={renderSlot} />
+  return <Loaded injected={{ controller, useSnapshot, operations, schema, t, providerCatalog }} renderSlot={renderSlot} />
 }
 
 function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderSlot: ModelsRenderSlot }): ReactNode {
@@ -383,7 +385,7 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
   // the shown mode or has been shown since the card opened — derived, so a
   // refresh that changes which modes are offered can never leave the card
   // without a panel.
-  const catalogOffered = configurable.length > 0
+  const catalogOffered = injected.providerCatalog !== false && configurable.length > 0
   const catalogEnabled = addable.length > 0
   const customOffered = piAi !== undefined
   const customEnabled = protocols.length > 0
@@ -413,7 +415,7 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
   return (
     <div className={styles['section']}>
       <h2 className={styles['title']}>{t('title')}</h2>
-      <p className={styles['intro']}>{t('intro')}</p>
+      <p className={styles['intro']}>{t(injected.providerCatalog === false ? 'channelsIntro' : 'intro')}</p>
       {!state.writable && state.status === 'ready' ? <p className={styles['notice']}>{t('readOnly')}</p> : null}
       {savedIdentity === undefined
         ? null
@@ -601,7 +603,10 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                     // One mode alone has no switch to name it, so the card
                     // carries the mode as its title instead.
                     <div className={styles['editorHeader']}>
-                      <span className={styles['editorTitle']}>{t(mode === 'catalog' ? 'addCatalog' : 'addCustom')}</span>
+                      <span className={styles['editorTitle']}>
+                        {t(injected.providerCatalog === false
+                          ? 'addChannel' : mode === 'catalog' ? 'addCatalog' : 'addCustom')}
+                      </span>
                     </div>
                   )}
                 <p className={styles['advancedHint']}>
@@ -672,6 +677,7 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                     className={styles['addPanel']}
                   >
                     <CustomProviderCard
+                      automaticId={injected.providerCatalog === false}
                       taken={state.rows.map(row => row.entry.provider)}
                       protocols={protocols}
                       reasoningLevels={reasoningLevels}
@@ -711,7 +717,7 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                   }}
                 >
                   <IconPlusOutlineRegular size={14} />
-                  {t('add')}
+                  {t(injected.providerCatalog === false ? 'addChannel' : 'add')}
                 </button>
               </div>
             )

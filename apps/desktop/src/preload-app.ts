@@ -11,11 +11,26 @@ import { syncNativeTheme } from './preload-theme.ts'
 import { syncWindowsAppearance } from './preload-windows.ts'
 import { installMandatoryUpdateOverlay } from './preload-mandatory-overlay.ts'
 import { createDesktopBrowserBridge } from './preload-browser.ts'
+import { COMMUNITY_ACCOUNT_IPC } from './community-account-ipc.ts'
+import type { CommunityAccountSnapshot } from '@deepseek-ai/dsh-client-ui-settings-decrypthub-account/types'
 import type { FileDragHandle } from '@deepseek-ai/dsh-util-file-drag'
 
 function createProductApi(): DshDesktopProductApi {
   return {
     protocolVersion: 1,
+    communityAccount: {
+      get: () => ipcRenderer.invoke(COMMUNITY_ACCOUNT_IPC.get) as Promise<CommunityAccountSnapshot>,
+      refresh: () => ipcRenderer.invoke(COMMUNITY_ACCOUNT_IPC.refresh) as Promise<CommunityAccountSnapshot>,
+      start: () => ipcRenderer.invoke(COMMUNITY_ACCOUNT_IPC.start) as Promise<CommunityAccountSnapshot>,
+      cancel: () => ipcRenderer.invoke(COMMUNITY_ACCOUNT_IPC.cancel) as Promise<CommunityAccountSnapshot>,
+      signOut: () => ipcRenderer.invoke(COMMUNITY_ACCOUNT_IPC.signOut) as Promise<CommunityAccountSnapshot>,
+      open: page => ipcRenderer.invoke(COMMUNITY_ACCOUNT_IPC.open, page) as Promise<void>,
+      subscribe(listener) {
+        const handle = (_event: Electron.IpcRendererEvent, state: CommunityAccountSnapshot): void => { listener(state) }
+        ipcRenderer.on(COMMUNITY_ACCOUNT_IPC.changed, handle)
+        return () => { ipcRenderer.off(COMMUNITY_ACCOUNT_IPC.changed, handle) }
+      },
+    },
     fileActions: {
       save: request => ipcRenderer.invoke(DESKTOP_IPC.fileSave, request) as Promise<FileSaveResult>,
       readClipboardImage: url => ipcRenderer.invoke(DESKTOP_IPC.clipboardImageRead, url) as

@@ -58,6 +58,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** Injected business face of the composer model seat. */
 export interface ModelSelectInjected {
+  /** Application-selected reasoning control; omission preserves the standard menu. */
+  effortControl?: 'menu' | 'slider'
   /** Whether this session supports Agent-bound model inspection and selection. */
   available: boolean
   /** The session's shared directory store (same instance the /model popup reads). */

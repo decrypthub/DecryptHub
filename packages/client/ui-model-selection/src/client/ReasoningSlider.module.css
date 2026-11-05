@@ -1,0 +1,16 @@
+.root { display: grid; gap: 14px; padding: 16px; min-width: 250px; }
+.value { color: var(--dsw-alias-brand-text); font-size: 28px; font-weight: 600; text-align: center; }
+.model { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-width: 0; padding: 6px; border: 0; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; cursor: pointer; }
+.model span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model:focus-visible { outline: 2px solid var(--dsw-alias-brand-text); outline-offset: 2px; }
+.model:disabled { cursor: default; opacity: 0.5; }
+.slider { position: relative; display: flex; align-items: center; height: 44px; width: 100%; touch-action: none; user-select: none; }
+.track { position: relative; height: 38px; flex: 1; overflow: hidden; border-radius: 999px; background: var(--dsw-alias-border-l2); }
+.range { position: absolute; height: 100%; border-radius: inherit; background: var(--dsw-alias-button-primary-fill); }
+.ticks { position: absolute; inset: 0 16px; display: flex; align-items: center; justify-content: space-between; pointer-events: none; }
+.ticks i { width: 5px; height: 5px; border-radius: 50%; background: var(--dsw-alias-label-secondary); opacity: 0.55; }
+.ticks i[data-passed] { background: white; }
+.thumb { position: relative; display: block; width: 40px; height: 40px; border-radius: 50%; background: white; box-shadow: 0 1px 5px rgb(0 0 0 / 18%); cursor: grab; }
+.thumb:active { cursor: grabbing; }
+.thumb:focus-visible { outline: 2px solid var(--dsw-alias-brand-text); outline-offset: 3px; }
+.slider[data-disabled] { opacity: 0.5; }
