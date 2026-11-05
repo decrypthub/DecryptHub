@@ -1,8 +1,7 @@
 // 设置 → 记忆与技能：管理 AI 自己写的长期记忆和可复用技能。
 //
 // 三类内容的边界（与 sidecar/system-memory.mjs 一致）：
-//   · 系统记忆：产品内置 + 插件在 MCP initialize 里声明的环境事实。只读，本页不展示正文、不提供编辑，
-//     只说明它们存在，避免用户以为自己能改掉产品规则。
+//   · 系统记忆：产品内置 + 插件在 MCP initialize 里声明的环境事实。只读，本页可查看正文、不提供编辑。
 //   · 记忆：AI 通过 memory_manage 维护，也可由用户在这里删除。
 //   · 技能：AI 通过 skill_manage 维护，SKILL.md 带 name/description frontmatter。
 // 删除走独立 RPC（extension-admin-remove），必须带明确 scope + scopeId，不会按名字猜作用域。
@@ -132,14 +131,14 @@ export function MemoryPanel() {
     <Section title="系统记忆" desc="产品与已连接插件声明的环境事实，例如这台手机可以用设备通道操作。只读、不授予权限，也不在这里编辑。">
       <Card size="2">
         <Flex direction="column" gap="2">
-          {(sources?.sources || []).map(s => <Flex key={s.label} align="center" gap="2">
-            <Icon n="key" size={14} /><Text size="2">{s.label}</Text>
-            <Box flexGrow="1" /><Badge size="1" variant="soft" color="gray">内置 · 不可编辑</Badge>
-          </Flex>)}
-          {(sources?.pluginInstructions || []).map(p => <Flex key={p.name} align="center" gap="2">
-            <Icon n="mobile" size={14} /><Text size="2">{p.name}{p.version ? ' · v' + p.version : ''}</Text>
-            <Box flexGrow="1" /><Badge size="1" variant="soft" color="gray">插件声明 · 不可编辑</Badge>
-          </Flex>)}
+          {(sources?.sources || []).map(source => <details className="system-memory-entry" key={source.id || source.label}>
+            <summary><Icon n="key" size={14} /><span>{source.label}</span><Badge size="1" variant="soft" color="gray">内置 · 只读</Badge><Icon n="chevdown" size={13} /></summary>
+            <pre className="ext-text">{source.content}</pre>
+          </details>)}
+          {(sources?.pluginInstructions || []).map(plugin => <details className="system-memory-entry" key={plugin.name}>
+            <summary><Icon n="mobile" size={14} /><span>{plugin.name}{plugin.version ? ' · v' + plugin.version : ''}</span><Badge size="1" variant="soft" color="gray">插件声明 · 只读</Badge><Icon n="chevdown" size={13} /></summary>
+            <pre className="ext-text">{plugin.content}</pre>
+          </details>)}
           {!sources && <Text size="1" color="gray">读取中…</Text>}
           {sources && !sources.pluginInstructions?.length && <Text as="div" size="1" color="gray" style={{ lineHeight: 1.7 }}>
             目前没有插件声明环境说明。连接 ADH / IDH 后，它们对设备的说明会自动进入系统记忆。

@@ -8,6 +8,7 @@ import { REPLY_TOOLS } from './reply-tools.mjs';
 import { PLAN_TOOLS } from './plan-mode.mjs';
 import { SKILL_TOOLS } from './skill-files.mjs';
 import { GOAL_TOOLS } from './goal-tools.mjs';
+import { TEAM_TOOLS } from './team-tools.mjs';
 import { PATCH_TOOLS } from './workspace-patch.mjs';
 import { PERSISTENT_SHELL_TOOLS } from './persistent-shell.mjs';
 import { SESSION_QUERY_TOOLS } from './session-query-tools.mjs';
@@ -23,4 +24,4 @@ export const DEFAULT_TOOLS = [{name: 'component_list', description: '查看可�
     ? ctx.plugins.status().official.map(({id,installed,enabled,version,state,latest,runtimeInfo}) => ({id,installed,enabled,version,state,availableVersion:latest?.version||null,runtimeInfo}))
     : ['wdh','idh','adh'].map(id=>ctx.components?.info(id)||{id,installed:false});
   return {text:JSON.stringify({components})};
-}}, ...WORKSPACE_TOOLS, ...WORKSPACE_DEPENDENCY_TOOLS, ...PERSISTENT_SHELL_TOOLS, ...PATCH_TOOLS, ...TODO_TOOLS, ...AGENT_TOOLS, ...PLAN_TOOLS, ...SKILL_TOOLS, ...GOAL_TOOLS, ...SESSION_QUERY_TOOLS, ...HARNESS_TOOLS.map(t => t.name === 'goal_update' ? { ...t, group: 'legacy' } : t), ...EXTENSION_TOOLS, ...REPLY_TOOLS, ...BROWSER_TOOLS];
+}}, ...WORKSPACE_TOOLS, ...WORKSPACE_DEPENDENCY_TOOLS, ...PERSISTENT_SHELL_TOOLS, ...PATCH_TOOLS, ...TODO_TOOLS, ...AGENT_TOOLS, ...PLAN_TOOLS, ...SKILL_TOOLS, ...GOAL_TOOLS, ...TEAM_TOOLS, ...SESSION_QUERY_TOOLS, ...HARNESS_TOOLS.map(t => t.name === 'goal_update' ? { ...t, group: 'legacy' } : t), ...EXTENSION_TOOLS, ...REPLY_TOOLS, ...BROWSER_TOOLS];

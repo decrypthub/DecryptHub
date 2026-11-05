@@ -1,5 +1,9 @@
 # 项目工程约定
 
+## 2026-11-04 已改用 DSH 主干
+
+用户已明确选择改用 DSH 主干。新实现位于 `../DecryptHub-DSH` 的 `decrypthub/dsh-product-20261104` 分支；本仓保留过渡修复和现有数据，不再继续扩写仿制 UI。迁移状态及止损验证见 [主干迁移记录](docs/dsh-mainline-transition-20261104.md)。`../deepseek-harness` 仍是只读参考，新产品修改只发生在独立的 `DecryptHub-DSH`。
+
 ## 2026-11-04 跨设备交接
 
 当前工作阶段转为 UI 细节对齐，优先阅读 [UI 交接说明](docs/ui-handoff-20261104.md)。该文区分最新源码、已做的实际发布版体验和中途停止的待复验项；安装包和本机隔离数据不随 Git 分发。不要据旧文档的测试数字或本机 `BASELINE.md` 推断新设备状态。

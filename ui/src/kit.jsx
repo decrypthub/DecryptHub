@@ -3,7 +3,10 @@ import React, { forwardRef, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Theme, Box, Flex, Text, Button as RadixButton, IconButton as RadixIconButton, TextArea, Select, Dialog, Tooltip, Checkbox } from '@radix-ui/themes';
 import { PlayIcon, StopIcon, ArrowLeftIcon, ReloadIcon, ArrowRightIcon, GearIcon, SunIcon, MoonIcon, TrashIcon, ClockIcon, MagicWandIcon, GlobeIcon, CodeIcon, ActivityLogIcon, FileIcon, MixerHorizontalIcon, ArrowUpIcon, Cross2Icon, CheckIcon, DownloadIcon, FileTextIcon, InfoCircledIcon, ResetIcon, MinusIcon, SquareIcon, CopyIcon, PlusIcon, DotsHorizontalIcon, ChatBubbleIcon, ReaderIcon, DrawingPinIcon, LockClosedIcon, MagnifyingGlassIcon, StackIcon, ChevronUpIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, DotFilledIcon, ViewVerticalIcon, DashboardIcon, TargetIcon, DesktopIcon, ExternalLinkIcon, LightningBoltIcon, Pencil1Icon, MobileIcon, PersonIcon } from '@radix-ui/react-icons';
-import { renderMd, highlightHtml } from './md.js';
+import 'highlight.js/styles/github-dark.css';
+import { MarkdownBlocks } from './markdown-blocks.jsx';
+import { useCompositionGuard } from './use-composition-guard.js';
+import { isSubmitEnter } from './composition-guard.js';
 import { themeConfig } from './theme.js';
 import { PauseIcon, PaperPlaneIcon, ExitIcon } from '@radix-ui/react-icons';
 
@@ -12,6 +15,8 @@ function SidebarLeftGlyph(props) { return <svg viewBox="0 0 20 20" fill="none" s
 function SidebarRightGlyph(props) { return <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" {...props}><rect x="2" y="3" width="16" height="14" rx="2" /><path d="M13 3v14" /></svg>; }
 function ThumbUpGlyph(props) { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" /></svg>; }
 function ThumbDownGlyph(props) { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" /></svg>; }
+function BranchGlyph(props) { return <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="5" cy="4" r="2" /><circle cx="5" cy="16" r="2" /><circle cx="15" cy="5" r="2" /><path d="M5 6v8m2-3h2a6 6 0 0 0 6-4" /></svg>; }
+function TeamGlyph(props) { return <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" {...props}><circle cx="7" cy="6" r="3" /><path d="M1.5 17v-1.5a5.5 5.5 0 0 1 11 0V17m.5-13.5a3 3 0 0 1 0 6m3.5 7.5v-1.5a5.5 5.5 0 0 0-3-4.9" /></svg>; }
 // 权限三档的盾牌：同一副轮廓 + 不同的内芯，和 DSH 的 PermissionIcon 一样靠内芯区分档位，
 // 而不是三个互不相干的图标。轮廓是通用盾形，不是任何产品的标识。
 function PermShield(props) { return <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}><path d="M8 1.85l4.9 1.8v3.45c0 4.05-3.05 5.9-4.9 6.75-1.85-.85-4.9-2.7-4.9-6.75V3.65L8 1.85z" /><path d="M5.95 7.75l1.45 1.45 2.7-2.95" /></svg>; }
@@ -32,7 +37,7 @@ const ICONS = {
   target: TargetIcon, desktop: DesktopIcon, external: ExternalLinkIcon, bolt: LightningBoltIcon, edit: Pencil1Icon,
   pin: DrawingPinIcon, mobile: MobileIcon,
   user: PersonIcon, feedback: PaperPlaneIcon, logout: ExitIcon,
-  thumbup: ThumbUpGlyph, thumbdown: ThumbDownGlyph,
+  thumbup: ThumbUpGlyph, thumbdown: ThumbDownGlyph, branch: BranchGlyph, team: TeamGlyph,
   'shield-check': PermShield, 'shield-write': PermShieldWrite, 'shield-full': PermShieldFull,
 };
 
@@ -100,18 +105,14 @@ function useFlowText(text, streaming) {
     });
   }, [text, streaming]);
   React.useEffect(() => () => { if (frame.current) cancelAnimationFrame(frame.current); }, []);
-  return shown;
+  return streaming ? shown : text;
 }
 
 export function Markdown({ text, basePath, root, streaming = false }) {
   const ref = useRef();
   const open = React.useContext(DocumentLinks);
   const shown = useFlowText(text, streaming);
-  // 流式期间不跑高亮：dangerouslySetInnerHTML 每次都会重建 DOM，此时高亮的成果下一帧就被丢掉，
-  // 只是白白让每个 token 对全部代码块重复解析（代码块多的回复会明显闪）。
-  // 流式结束后统一高亮一次。
-  useEffect(() => { if (!streaming && ref.current) highlightHtml(ref.current); }, [shown, streaming]);
-  return <div className="md" ref={ref} onClick={e => { const link = e.target.closest('a[href]'); if (!link) return; e.preventDefault(); const href = link.getAttribute('href'); if (href?.startsWith('#')) { ref.current?.querySelector('[id="' + CSS.escape(href.slice(1)) + '"]')?.scrollIntoView(); return; } open?.(href, { basePath, root }); }} dangerouslySetInnerHTML={{ __html: renderMd(shown) }} />;
+  return <div className="md" ref={ref} onClick={e => { const link = e.target.closest('a[href]'); if (!link) return; e.preventDefault(); const href = link.getAttribute('href'); if (href?.startsWith('#')) { ref.current?.querySelector('[id="' + CSS.escape(href.slice(1)) + '"]')?.scrollIntoView(); return; } open?.(href, { basePath, root }); }}><MarkdownBlocks text={shown} streaming={streaming} /></div>;
 }
 
 export function Dropdown({ value, options = [], onChange, placeholder = '选择', title, label, width }) {
@@ -187,6 +188,7 @@ export function askRiskConfirm({ title, description, acknowledge = '我已了解
 export function askQuestion({ question, detail, options = [], kind, todos = [] } = {}) {
   return mountPromise(done => {
     const [text, setText] = useState('');
+    const composition = useCompositionGuard(question);
     const submit = () => done(text.trim());
     return <Dialog.Root open onOpenChange={o => { if (!o) done(''); }}>
       <Dialog.Content maxWidth="540px">
@@ -202,8 +204,8 @@ export function askQuestion({ question, detail, options = [], kind, todos = [] }
         </Box>}
         {options.length > 0 && <Flex wrap="wrap" gap="2" mt="3">{options.map(o => <Button key={o} size="2" variant="soft" color="gray" onClick={() => done(o)}>{o}</Button>)}</Flex>}
         <Box mt="3">
-          <TextArea size="2" autoFocus rows={3} value={text} onChange={e => setText(e.target.value)} placeholder="输入回答（Enter 提交 · Shift+Enter 换行 · Esc 跳过）"
-            onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); done(''); } else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); } }} />
+          <TextArea ref={composition.ref} size="2" autoFocus rows={3} value={text} onChange={e => setText(e.target.value)} placeholder="输入回答（Enter 提交 · Shift+Enter 换行 · Esc 跳过）"
+            onKeyDown={e => { if (composition.isComposing(e)) return; if (e.key === 'Escape') { e.preventDefault(); done(''); } else if (isSubmitEnter(e)) { e.preventDefault(); submit(); } }} />
         </Box>
         <Flex justify="end" gap="2" mt="4">
           <Button size="2" variant="soft" color="gray" onClick={() => done('')}>跳过</Button>

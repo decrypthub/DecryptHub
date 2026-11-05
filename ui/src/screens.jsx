@@ -14,7 +14,7 @@ import { Section, Row } from './settings-kit.jsx';
 import { MemoryPanel } from './memory-panel.jsx';
 import { handleWindowDrag } from './window-drag.js';
 import { AccountTab, useAccount } from './account.jsx';
-import { ProviderLogin } from './provider-login.jsx';
+import { API_FORMATS, apiFormat } from './api-formats.js';
 
 export function Screens() {
   const { view, setView } = useWorkbench();
@@ -87,8 +87,6 @@ function AiTab({ s, setS }) {
   const [edit, setEdit] = useState(null);
   const [mEdit, setMEdit] = useState(null);
   const [testing, setTesting] = useState(null);
-  const [catalog, setCatalog] = useState([]), [login, setLogin] = useState(null);
-  useEffect(() => { w.api.invoke('provider-catalog').then(setCatalog).catch(error => w.toast(error.message, 'err')); }, []);
   const list = s.providers || [];
   const activeId = s.activeProviderId || list[0]?.id;
   const patch = p => setEdit(e => ({ ...e, data: { ...e.data, ...p } }));
@@ -135,8 +133,7 @@ function AiTab({ s, setS }) {
   };
 
   return <>
-    {login && <ProviderLogin request={login} onClose={() => setLogin(null)} />}
-    <Section title="模型渠道" desc="支持内置供应商目录、供应商登录及自定义兼容接口。"
+    <Section title="模型渠道" desc="配置 Chat Completions、Responses 或 Messages 格式的 API。"
       actions={<Flex gap="2"><Button size="2" variant="soft" color="gray" onClick={async () => { await w.saveSettings({ ...s, onboarding: null }, true); w.setFirstRun(true); }}>重新运行引导</Button><Button size="2" onClick={openNew}><Icon n="plus" size={16} />添加</Button></Flex>}>
       <Card size="2" style={{ padding: 0 }}>
         {!list.length && <EmptyState icon="sparkles" title="连接第一个模型" description="添加 OpenAI 兼容端点或 Claude 原生渠道，开启 AI 辅助分析。"><Button size="2" onClick={openNew}><Icon n="plus" size={16} />添加模型渠道</Button></EmptyState>}
@@ -147,7 +144,7 @@ function AiTab({ s, setS }) {
               <Text size="2" weight="bold">{p.name || '未命名渠道'}</Text>
               {!p.catalogId && p.name !== (p.type === 'anthropic' ? 'Claude 原生' : p.api === 'openai-responses' ? 'OpenAI Responses' : 'OpenAI 兼容') && <Badge size="1" variant="soft" color="gray">{p.type === 'anthropic' ? 'Claude 原生' : p.api === 'openai-responses' ? 'OpenAI Responses' : 'OpenAI 兼容'}</Badge>}
               {activeId === p.id && <Badge size="1" variant="soft" color="tomato">使用中</Badge>}
-              {!(p.hasKey || p.apiKey) && <Badge size="1" variant="soft" color="amber">{p.catalogId ? '凭据由供应商解析' : '没有密钥'}</Badge>}
+              {!(p.hasKey || p.apiKey || p.authentication?.configured) && <Badge size="1" variant="soft" color="amber">没有密钥</Badge>}
             </Flex>
             <Text as="div" size="1" color="gray" mt="1">
               {(p.models || []).length ? (p.models || []).map(m => typeof m === 'string' ? m : (m.name || m.id)).join(' · ') : '还没有配置模型'}
@@ -155,8 +152,6 @@ function AiTab({ s, setS }) {
             </Text>
           </div>
           <Flex className="row-actions" align="center" gap="2">
-            {p.catalogId && p.authentication?.configured && <Button size="2" variant="soft" color="gray" onClick={async () => { try { const saved=await w.api.invoke('provider-auth-logout',{routeId:p.id}); w.setSettings(saved); } catch(error){ w.toast(error.message,'err'); } }}>退出认证</Button>}
-            {(catalog.find(item => item.id === p.catalogId)?.methods || []).map(method => <Button size="2" key={method.id} variant="soft" color="gray" onClick={async () => { if (await w.saveSettings(s, true)) setLogin({ routeId: p.id, method: method.id }); }}>{method.id === 'oauth' ? '登录' : '配置认证'}</Button>)}
             {activeId !== p.id && <Button size="2" variant="soft" color="gray" onClick={() => makeActive(p)}>设为当前</Button>}
             <Button size="2" variant="soft" color="gray" disabled={testing === p.id} onClick={() => test(p)}>{testing === p.id ? '测试中…' : '测试'}</Button>
             <ActionIcon icon="edit" onClick={() => openEdit(i)} title="编辑" />
@@ -170,52 +165,41 @@ function AiTab({ s, setS }) {
       <Dialog.Content maxWidth="600px">
         <Dialog.Title size="3">{edit?.i >= 0 ? '编辑渠道' : '添加渠道'}</Dialog.Title>
         {edit && <>
-          <Box mt="3"><Text as="div" size="1" color="gray" mb="1">供应商</Text><Dropdown value={edit.data.catalogId || 'custom'} label="供应商目录" options={[{ value: 'custom', label: '自定义渠道' }, ...catalog.map(item => ({ value: item.id, label: item.name }))]} onChange={value => {
-            if (edit.i >= 0 && value !== (edit.data.catalogId || 'custom')) { w.toast('更换供应商请新建渠道', 'err'); return; }
-            const provider = catalog.find(item => item.id === value);
-            patch(provider ? { catalogId: value, name: provider.name, type: 'openai', api: undefined, baseUrl: provider.baseUrl, models: provider.models.slice(0, 1), apiKey: '', hasKey: false } : { catalogId: undefined, api: undefined });
-          }} /></Box>
           <Box mt="3"><Text as="div" size="1" color="gray" mb="1">名称</Text>
             <TextField.Root size="2" value={edit.data.name} onChange={e => patch({ name: e.target.value })} placeholder="例如 OpenAI 官方 / 公司中转" /></Box>
-          <Flex gap="3" mt="3">
-            <Box flexGrow="1">
-              <Text as="div" size="1" color="gray" mb="1">接口类型</Text>
-              {edit.data.catalogId ? <Text size="2">{catalog.find(item => item.id === edit.data.catalogId)?.name || edit.data.catalogId}</Text> : <SegmentedControl.Root size="2" value={edit.data.api === 'openai-responses' ? 'responses' : edit.data.type} style={{ width: '100%' }}
-                onValueChange={v => patch({ type: v === 'responses' ? 'openai' : v, api: v === 'responses' ? 'openai-responses' : undefined,
-                  baseUrl: v === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1',
-                  models: (edit.data.models || []).map(model => typeof model !== 'object' || !model.thinking ? model : { ...model, thinking: { ...model.thinking,
-                    transport: model.thinking.transport === 'none' ? 'none' : v === 'anthropic' ? 'budget' : v === 'responses' ? 'effort' : deriveTransport(model.id, 'openai') } }) })}>
-                <SegmentedControl.Item value="openai" style={{ flex: 1 }}>OpenAI 兼容</SegmentedControl.Item>
-                <SegmentedControl.Item value="responses" style={{ flex: 1 }}>Responses</SegmentedControl.Item>
-                <SegmentedControl.Item value="anthropic" style={{ flex: 1 }}>Claude 原生</SegmentedControl.Item>
-              </SegmentedControl.Root>}
-            </Box>
-            <Box flexGrow="1">
-              <Text as="div" size="1" color="gray" mb="1">Base URL</Text>
-              <TextField.Root size="2" value={edit.data.baseUrl} onChange={e => patch({ baseUrl: e.target.value })} />
-            </Box>
-          </Flex>
+          <Box mt="3"><Text as="div" size="1" color="gray" mb="1">接口类型</Text>
+            <Dropdown label="接口类型" value={apiFormat(edit.data).id} width="100%" options={API_FORMATS.map(format => ({ value: format.id, label: format.label }))} onChange={id => {
+              const format = API_FORMATS.find(item => item.id === id);
+              const previous = apiFormat(edit.data);
+              patch({ type: format.type, api: format.api, catalogId: undefined,
+                baseUrl: !edit.data.baseUrl || edit.data.baseUrl === previous.baseUrl ? format.baseUrl : edit.data.baseUrl,
+                models: (edit.data.models || []).map(model => typeof model !== 'object' || !model.thinking ? model : { ...model, thinking: { ...model.thinking,
+                  transport: model.thinking.transport === 'none' ? 'none' : id === 'messages' ? 'budget' : id === 'responses' ? 'effort' : deriveTransport(model.id, 'openai') } }) });
+            }} />
+          </Box>
+          <Box mt="3"><Text as="div" size="1" color="gray" mb="1">Base URL</Text>
+            <TextField.Root aria-label="Base URL" size="2" value={edit.data.baseUrl} onChange={e => patch({ baseUrl: e.target.value })} spellCheck={false} />
+          </Box>
           <Box mt="3"><Text as="div" size="1" color="gray" mb="1">API Key {edit.data.hasKey && <Text size="1" color="gray">（已保存，留空表示不改）</Text>}</Text>
             <TextField.Root size="2" type="password" value={edit.data.apiKey || ''} onChange={e => patch({ apiKey: e.target.value })} placeholder={edit.data.hasKey ? '••••••••' : 'sk-…'} /></Box>
           <Box mt="3">
-            {edit.data.catalogId && <Box mb="3"><Text as="div" size="1" color="gray" mb="1">从供应商目录添加模型</Text><Dropdown label="供应商模型目录" options={(catalog.find(item => item.id === edit.data.catalogId)?.models || []).map(model => ({ value: model.id, label: model.name || model.id }))} onChange={id => {
-              const model = catalog.find(item => item.id === edit.data.catalogId)?.models.find(model => model.id === id); if (model && !(edit.data.models || []).some(item => item.id === id)) patch({ models: [...(edit.data.models || []), model] });
-            }} /></Box>}
             <Flex justify="between" align="center" mb="2">
               <Text size="1" color="gray">模型</Text>
               <Button size="1" variant="soft" color="gray" onClick={() => setMEdit({ i: -1, data: { id: '', name: '', contextWindow: 0, vision: false } })}><Icon n="plus" size={12} />添加模型</Button>
             </Flex>
             <Flex direction="column" gap="1">
               {(edit.data.models || []).map((m, idx) => <div className="model-row" key={m.id}>
-                <Icon n="sparkles" size={14} />
-                <strong>{m.name || m.id}</strong>
-                <span className="mono model-id">{m.id}</span>
-                {m.contextWindow ? <Badge size="1" variant="soft" color="gray">{fmtK(m.contextWindow)}</Badge> : null}
-                {m.vision ? <Badge size="1" variant="soft" color="gray">图片</Badge> : null}
-                {m.thinking?.levels?.length ? <Badge size="1" variant="soft" color="gray" title={'思考强度：' + levelsLabel(m.thinking.levels) + (m.thinking.default ? '（默认' + levelLabel(m.thinking.default) + '）' : '')}>思考 {levelsLabel(m.thinking.levels)}</Badge> : null}
-                <Box flexGrow="1" />
+                <div className="model-details"><div className="model-heading"><Icon n="sparkles" size={14} /><strong title={m.name || m.id}>{m.name || m.id}</strong></div>
+                {m.name && m.name !== m.id && <span className="mono model-id" title={m.id}>{m.id}</span>}
+                <div className="model-capabilities">
+                  {m.contextWindow ? <Badge size="1" variant="soft" color="gray">{fmtK(m.contextWindow)}</Badge> : null}
+                  {m.vision ? <Badge size="1" variant="soft" color="gray">图片</Badge> : null}
+                  {m.thinking?.levels?.length ? <Badge size="1" variant="soft" color="gray" title={'思考强度：' + levelsLabel(m.thinking.levels) + (m.thinking.default ? '（默认 ' + levelLabel(m.thinking.default) + '）' : '')}>思考 {m.thinking.levels.length} 档{m.thinking.default ? ' · ' + levelLabel(m.thinking.default) : ''}</Badge> : null}
+                </div></div>
+                <div className="model-actions">
                 <ActionIcon icon="edit" size="1" onClick={() => setMEdit({ i: idx, data: { ...m } })} title="编辑模型" />
                 <ActionIcon icon="trash" size="1" variant="soft" color="red" onClick={() => removeModel(idx)} title="删除模型" />
+                </div>
               </div>)}
               {!(edit.data.models || []).length && <Text size="1" color="gray">还没有模型：点「添加模型」配置 ID、上下文长度和图片能力。</Text>}
             </Flex>
@@ -311,6 +295,7 @@ function ThinkingEditor({ data, type, onChange }) {
 function RuntimeTab({ s, up }) {
   const c = s.provider === 'anthropic' ? 'anthropic' : 'openai';
   return <>
+    <Section title="发送行为"><Row label="AI 运行中按 Enter" desc="Cmd/Ctrl+Enter 使用另一种方式；空草稿时插话发送全部排队消息。"><Dropdown label="运行中 Enter 的行为" value={s.busyEnter || 'queue'} options={[{ value: 'queue', label: '加入下一轮队列' }, { value: 'steer', label: '插话发送' }]} onChange={value => up('busyEnter', value)} /></Row></Section>
     <Section title="任务运行">
       <Row label="工具轮数预算" desc="0 表示不限轮数，持续工作直到完成或手动停止；设置正数时，到预算后保存进展并收尾">
         <TextField.Root aria-label="工具轮数预算" size="2" type="number" style={{ width: 120 }} min="0" step="1" value={s.maxSteps ?? 0} onChange={e => up('maxSteps', Math.max(0, Math.floor(+e.target.value)))} />

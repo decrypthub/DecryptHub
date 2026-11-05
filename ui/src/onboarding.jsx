@@ -1,8 +1,9 @@
 // 首次启动引导：记录用户的逆向领域、水平和模型渠道，供 Agent 调整解释深度。
 import React, { useState } from 'react';
-import { Dialog, Flex, Text, TextField, Button, Badge, SegmentedControl } from '@radix-ui/themes';
+import { Dialog, Flex, Text, TextField, Button, Badge } from '@radix-ui/themes';
 import { useWorkbench } from './bus.jsx';
-import { Icon, LogoMark } from './kit.jsx';
+import { Icon, LogoMark, Dropdown } from './kit.jsx';
+import { API_FORMATS, apiFormat } from './api-formats.js';
 
 const DOMAINS = [
   { id: 'web', label: 'Web 安全', desc: '前端、接口、JS 混淆与浏览器调试' },
@@ -17,19 +18,15 @@ const LEVELS = [
   { id: 'elite', label: '精英', desc: '能定位疑难问题' },
   { id: 'master', label: '大佬', desc: '直接讨论边界与取舍' },
 ];
-const PROVIDERS = [
-  { id: 'openai', label: 'OpenAI 兼容', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o' },
-  { id: 'anthropic', label: 'Claude 原生', baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-4-5' },
-];
-
 export function OnboardingDialog() {
   const w = useWorkbench();
   const s = w.settings || {};
   const [step, setStep] = useState(0);
   const [domains, setDomains] = useState(s.onboarding?.domains || []);
   const [level, setLevel] = useState(s.onboarding?.level || '');
-  const [provider, setProvider] = useState(s.provider === 'anthropic' ? 'anthropic' : 'openai');
+  const [provider, setProvider] = useState(apiFormat(s.providers?.find(p => p.id === s.activeProviderId) || { type: s.provider }).id);
   const [apiKey, setApiKey] = useState('');
+  const [model, setModel] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [showBase, setShowBase] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -54,10 +51,11 @@ export function OnboardingDialog() {
       let activeProviderId = s.activeProviderId;
       let activeModel = s.activeModel;
       if (!skipKey && apiKey.trim()) {
-        const meta = PROVIDERS.find(p => p.id === provider);
-        const entry = { id: 'p' + Math.random().toString(36).slice(2, 8), name: meta.label, type: meta.id, baseUrl: baseUrl.trim() || meta.baseUrl, models: [{ id: meta.model, name: meta.model }], apiKey: apiKey.trim() };
+        const meta = API_FORMATS.find(p => p.id === provider);
+        if (!model.trim()) throw Error('请填写模型 ID');
+        const entry = { id: 'p' + Math.random().toString(36).slice(2, 8), name: meta.label, type: meta.type, api: meta.api, baseUrl: baseUrl.trim() || meta.baseUrl, models: [{ id: model.trim(), name: model.trim() }], apiKey: apiKey.trim() };
         providers = [...providers, entry];
-        activeProviderId = entry.id; activeModel = meta.model;
+        activeProviderId = entry.id; activeModel = model.trim();
       }
       setSaved(true);
       await w.saveSettings({ ...s, providers, activeProviderId, activeModel, onboarding: profile }, true);
@@ -86,15 +84,14 @@ export function OnboardingDialog() {
       {step === 2 && <>
         <Dialog.Title size="6">连接模型</Dialog.Title>
         <Dialog.Description size="2" color="gray" mb="4">粘贴 API Key 即可开始；也可以稍后在设置里配置。</Dialog.Description>
-        <SegmentedControl.Root value={provider} onValueChange={setProvider} size="2" className="onboarding-provider">
-          {PROVIDERS.map(p => <SegmentedControl.Item key={p.id} value={p.id}>{p.label}</SegmentedControl.Item>)}
-        </SegmentedControl.Root>
+        <Dropdown label="接口类型" value={provider} options={API_FORMATS.map(format => ({ value: format.id, label: format.label }))} onChange={setProvider} />
         <div className="onboarding-form">
           <TextField.Root type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={hasKey ? '已配置模型，留空则保持不变' : 'API Key'} aria-label="模型 API Key" autoComplete="off" spellCheck={false} />
-          {showBase ? <TextField.Root value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder={PROVIDERS.find(p => p.id === provider)?.baseUrl} aria-label="模型接口地址" spellCheck={false} />
+          <TextField.Root value={model} onChange={e => setModel(e.target.value)} placeholder="模型 ID" aria-label="模型 ID" spellCheck={false} />
+          {showBase ? <TextField.Root value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder={API_FORMATS.find(p => p.id === provider)?.baseUrl} aria-label="模型接口地址" spellCheck={false} />
             : <button type="button" className="onboarding-link" onClick={() => setShowBase(true)}>使用自定义接口地址</button>}
           <Text as="p" size="1" color="gray">
-            {provider === 'anthropic' ? 'Anthropic Console → API Keys' : 'OpenAI Platform → API keys'}；密钥只保存在本机系统密钥库。
+            密钥只保存在本机系统密钥库。
           </Text>
         </div>
       </>}

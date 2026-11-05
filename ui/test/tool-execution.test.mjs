@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { terminalResult, toolState } from '../src/tool-execution.js';
+import { terminalResult, toolState, toolErrorSummary } from '../src/tool-execution.js';
 import { conversationTurns, historyEvents, toolPresentation } from '../src/conversation.js';
 import { sessionReducer } from '../src/state.js';
 
@@ -62,4 +62,13 @@ test('user cancellation remains stopped through live updates and history restora
   assert.equal(toolState(live), 'cancelled'); assert.equal(toolState(restored), 'cancelled');
   assert.equal(conversationTurns([live])[0].failures, 0);
   assert.equal(conversationTurns([restored])[0].failures, 0);
+});
+
+test('generic error summaries expose the first reason while cancellation and explicit exits keep their own cues', () => {
+  const event = { name: 'workspace_read', args: { path: 'missing.txt' }, result: '文件不存在\n详细诊断', isError: true };
+  assert.equal(toolErrorSummary(event), '文件不存在');
+  assert.equal(event.result, '文件不存在\n详细诊断');
+  assert.equal(toolErrorSummary({ ...event, cancelled: true }), null);
+  assert.equal(toolErrorSummary({ ...event, name: 'pwsh', result: 'diagnostic\n[exit code: 7]' }), null);
+  assert.equal(toolErrorSummary({ ...event, isError: false }), null);
 });

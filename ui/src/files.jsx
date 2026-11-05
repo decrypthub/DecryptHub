@@ -12,9 +12,9 @@
 // 与本仓既有实现的两处有意保留（详见交付说明）：
 //   · 方向键 / Home / End 的树内导航。DSH 没有自定义键盘逻辑（纯 Tab 顺序），
 //     但这里已存在且更好用，用户明确要求保留；ARIA 角色改成合法的组合。
-//   · 「Git 改动」与多根目录切换。DSH 没有对应概念，属于本仓业务能力。
+//   · 多根目录切换：只读附加目录沿用项目授权。
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Text, Code, Tabs } from '@radix-ui/themes';
+import { Text } from '@radix-ui/themes';
 import { useWorkbench } from './bus.jsx';
 import { Button, ActionIcon, Icon, EmptyState, Dropdown } from './kit.jsx';
 import { fmtSize } from './state.js';
@@ -45,9 +45,7 @@ function failureText(failure) {
 export function WorkspaceFiles() {
   const w = useWorkbench(), { api, sid, session, cur, toast, addAtt } = w;
   const [rootId, setRootId] = useState('primary');
-  const [fileView, setFileView] = useState('local');
   const [tree, setTree] = useState(null);
-  const [git, setGit] = useState(null);
   const [width, setWidth] = useState(readWidth);
   const [hidden, setHidden] = useState(false);
   const [focusPath, setFocusPath] = useState('');
@@ -94,19 +92,14 @@ export function WorkspaceFiles() {
     });
     const paths = tree?.expanded || [rootPath];
     for (const path of paths) load(path, generation);
-    if (rootId === 'primary') {
-      api.invoke('git-status', { sessionId: sid })
-        .then(value => { if (generation === epoch.current) setGit(value); })
-        .catch(error => { if (generation === epoch.current) setGit({ available: false, error: error.message }); });
-    }
-  }, [api, sid, rootId, rootPath, tree?.expanded, load]);
+  }, [rootPath, tree?.expanded, load]);
 
   // 换会话 / 换根：整棵树重建（旧层的键全部失效），并把已打开的文件收起来。
   useEffect(() => {
     epoch.current++;
     reading.current++;
     setTree(rootPath ? emptyTree(rootPath) : null);
-    setGit(null); setSelected(null); setContent(''); setFocusPath('');
+    setSelected(null); setContent(''); setFocusPath('');
   }, [identity]);
 
   // 首次有根就开始读根这一层。
@@ -151,14 +144,12 @@ export function WorkspaceFiles() {
   function open(item) {
     if (item.type === 'other') return;
     if (item.directory) { setTree(current => current ? toggleExpanded(current, item.path) : current); if (!tree?.expanded.includes(item.path)) load(item.path, epoch.current); return; }
-    // Git 视图的行带 diff 标记：要显示的是「这次改了什么」，不是整份文件。
-    const diff = !!item.diff;
     w.tabs.openDocument(item.path, { root: rootId });
-    setSelected({ path: item.path, diff });
+    setSelected({ path: item.path });
     setContent('正在读取…');
     const request = ++reading.current;
-    const args = { sessionId: sid, root: rootId === 'primary' ? undefined : rootId, ...(diff ? { path: item.path } : { file: 'workspace/' + item.path }) };
-    api.invoke(diff ? 'git-diff' : 'read-file', args)
+    const args = { sessionId: sid, root: rootId === 'primary' ? undefined : rootId, file: 'workspace/' + item.path };
+    api.invoke('read-file', args)
       .then(value => { if (request === reading.current) setContent(typeof value === 'string' ? value : value.text); })
       .catch(error => { if (request === reading.current) setContent(error.message); });
   }
@@ -255,19 +246,14 @@ export function WorkspaceFiles() {
     </React.Fragment>;
   };
 
-  return <Tabs.Root value={fileView} onValueChange={value => { reading.current++; setSelected(null); setFileView(value); if (value === 'git') setRootId('primary'); }} className="workspace-files">
-    <div className="bar">
-      <Tabs.List size="1" aria-label="工作区文件视图" className="file-tabs"><Tabs.Trigger value="local">本地文件</Tabs.Trigger><Tabs.Trigger value="git">Git 改动</Tabs.Trigger></Tabs.List>
-      <ActionIcon ref={toggleRef} icon={hidden ? 'folder' : 'folder'} variant="soft" color="gray" aria-pressed={!hidden} onClick={() => setHidden(value => !value)} title={hidden ? '显示文件树' : '隐藏文件树'} />
+  return <div className="workspace-files">
+    <div className="files-header">
+      <span className="files-path" title={rootPath}>{rootPath || '项目目录不可用'}</span>
+      {selected && <ActionIcon ref={toggleRef} icon="sidebar" variant="soft" color="gray" aria-pressed={!hidden} onClick={() => setHidden(value => !value)} title={hidden ? '显示文件树' : '隐藏文件树'} />}
       <ActionIcon icon="reload" variant="soft" color="gray" onClick={refresh} title="重新读取" />
+      <ActionIcon icon="copy" title="复制工作目录路径" onClick={() => navigator.clipboard.writeText(rootPath || '').then(() => toast('工作目录已复制', 'ok')).catch(e => toast(e.message, 'err'))} />
     </div>
-    <Tabs.Content value="local" className="files-content">
-      <div className="workspace-tree-root" title={rootPath}>
-        <Icon n="folder" size={14} />
-        <Text size="1" className="ellipsis" style={{ flex: 1 }}>{ws?.label || '会话工作区'}</Text>
-        <ActionIcon icon="copy" size="1" title="复制工作目录路径" onClick={() => navigator.clipboard.writeText(rootPath || '')
-          .then(() => toast('工作目录已复制', 'ok')).catch(e => toast(e.message, 'err'))} />
-      </div>
+    <div className="files-content">
       {ws?.roots?.length > 1 && <div className="project-file-root"><Dropdown label="文件目录" value={rootId} options={ws.roots.map(r => ({ value: r.primary ? 'primary' : r.id, label: r.label + (r.primary ? ' · 主目录' : ' · 只读') }))} onChange={setRootId} /></div>}
       {hidden ? <Text as="p" size="1" color="gray" m="3">文件树已收起。点上方文件夹按钮或按 Esc 可再次显示。</Text> : <div className="file-list workspace-tree" ref={navigator} role="group" aria-label="工作区目录">
         {rootState?.loading && <Text as="p" size="1" color="gray" m="3">正在读取目录…</Text>}
@@ -279,7 +265,7 @@ export function WorkspaceFiles() {
         {rows.map(rowFor)}
       </div>}
       {/* 宽度调节：可拖，也可用方向键 / Home / End（DSH 的 separator 语义）。 */}
-      {!hidden && <div className="tree-width" role="separator" aria-orientation="horizontal" aria-label="调整文件树宽度"
+      {!hidden && selected && <div className="tree-width" role="separator" aria-orientation="horizontal" aria-label="调整文件树宽度"
         aria-valuemin={NAVIGATOR_MIN} aria-valuemax={NAVIGATOR_MAX} aria-valuenow={width} tabIndex={0}
         onKeyDown={event => {
           const map = { ArrowUp: width + NAVIGATOR_STEP, ArrowDown: width - NAVIGATOR_STEP, Home: NAVIGATOR_MIN, End: NAVIGATOR_MAX };
@@ -303,15 +289,7 @@ export function WorkspaceFiles() {
           target.addEventListener('lostpointercapture', stop);
         }} />
       </div>}
-    </Tabs.Content>
-    <Tabs.Content value="git" className="files-content">
-      {!git ? <Text size="1" color="gray" m="3">正在读取 Git 状态…</Text>
-        : !git.available ? <EmptyState icon="code" title="当前目录没有可用的 Git 仓库" description="本地文件仍可正常浏览。" />
-        : !git.files.length ? <EmptyState icon="check" title="没有未提交的改动" />
-        : <div className="file-list" aria-label="Git 改动列表">{git.files.map(file => <button className="file-row" key={file.name} onClick={() => open({ ...file, path: file.name, type: 'file', diff: true })}>
-          <Code>{file.status}</Code><span className="mono ellipsis">{file.name}</span>
-        </button>)}</div>}
-    </Tabs.Content>
+    </div>
     {selected && <div className="detail">
       <div className="detail-head">
         <Text size="1" className="mono ellipsis" style={{ flex: 1 }} title={selected.path}>{selected.path}</Text>
@@ -323,5 +301,5 @@ export function WorkspaceFiles() {
       </div>
       <pre className="raw" style={{ flex: 1, maxHeight: 'none' }}>{content}</pre>
     </div>}
-  </Tabs.Root>;
+  </div>;
 }

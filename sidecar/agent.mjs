@@ -1,16 +1,18 @@
 // Agent 循环：ReAct + 流式 + 可见工具调用 + 中断。统一工具注册表（MCP 工具 + 本地工具）。
 // 历史是只追加的事件日志（./history.mjs），本文件只做「决策 + 执行」。
 import {chat} from './llm.mjs';
+import { appendQueuedSteering } from './queued-steering.mjs';
 import pathx from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { withModelRetries } from './model-retry.mjs';
 import { goalContext } from './goals.mjs';
+import { TEAM_GUIDANCE } from './agent-team.mjs';
 import { imageContent, validateAttachments } from './attachments.mjs';
 import { normalizeReplyImages } from './reply-image.mjs';
 import { contentHash } from './changes.mjs';
 import { resolveIn, containsPath } from './paths.mjs';
-import { contextTokens, limitInfo, compactTrigger, breakdown, buildSummaryRequest, summaryFits, trimToolOutput, readRef, resolveAttachments, estimateTokens } from './context.mjs';
+import { contextTokens, contextMetrics, breakdown, buildSummaryRequest, summaryFits, trimToolOutput, readRef, resolveAttachments, estimateTokens } from './context.mjs';
 import { History } from './history.mjs';
 import { closeHistoryTail } from './history-repair.mjs';
 import { validateArgs } from './contract.mjs';
@@ -69,6 +71,15 @@ ask_user 的结果要分清：用户「跳过」表示他不要提供这条信�
 
 const DISCOVER = { name: 'discover_tools', description: '按需启用工具组：browser=页面阅读、交互和抓包；debugger=脚本源码、搜索、文本/XHR断点、暂停/单步/调用栈/作用域求值、控制台与WebSocket；mcp=用户连接的服务。网站分析先打开浏览器再启用 debugger。不会授予额外权限。', schema: { type: 'object', properties: { group: { type: 'string', enum: ['browser', 'debugger', 'mcp'] } }, required: ['group'] } };
 
+export function agentSystemText(settings, plugins = [], plan = null) {
+  return SYSTEM + profilePrompt(settings) + '\n\n' + systemMemoryPrompt({ plugins }) + (plan?.active ? '\n\n' + PLAN_POLICY : '');
+}
+export function contextToolDefinitions(localTools, context, groups = new Set(['core'])) {
+  return localTools.filter(tool => groups.has(tool.group || 'core') && (!tool.available || tool.available(context)))
+    .map(({ name, description, schema }) => ({ name, description, schema }));
+}
+export const CONTEXT_META_TOOLS = [REF_TOOL, DISCOVER];
+
 class Agent {
   constructor({ mcp, mcpHost, browser, projectDir, getSettings, emit, relaunch, getMode, getReview, getAllows, approve, ask, getTodos, setTodos, currentUrl, fileSize, chatFn, tools, getToolContext, getWorkspace, getGoal, getPlan, hasApprovalListener, record, retryPolicy }) {
     this.mcp = mcp; this.mcpHost = mcpHost || null; this.browser = browser; this.projectDir = projectDir; this.relaunch = relaunch;
@@ -112,16 +123,8 @@ class Agent {
   ctxDir() { return this.projectDir ? pathx.join(this.projectDir, '.ctx') : null; }
   // 上下文用量：估算 × 校准系数（由真实 prompt_tokens 校准）+ 分类明细
   stats() {
-    const settings = this.getSettings();
     const tools = this.allTools();
-    const { limit, inferred } = limitInfo(settings);
-    const view = this.wire(true);
-    const raw = breakdown(view, tools);
-    const k = this.calib;
-    const parts = Object.fromEntries(Object.entries(raw).map(([n, v]) => [n, Math.round(v * k)]));
-    const used = Object.values(parts).reduce((x, y) => x + y, 0);
-    const trigger = compactTrigger(limit, settings.compactAt);
-    return { used, limit, inferred, pct: Math.min(1, used / limit), trigger, compactAt: settings.compactAt || 0.85, parts, messages: view.length - 1, compressions: this.compressions, compressing: this.compressing };
+    return contextMetrics(this.getSettings(), this.wire(true), tools, { calibration: this.calib, compressions: this.compressions, compressing: this.compressing });
   }
   emitContext(extra) { try { this.emit('context', { ...this.stats(), ...(extra || {}) }); } catch {} }
 
@@ -234,7 +237,7 @@ class Agent {
   systemMemory() {
     try {
       const plugins = (this.mcpHost?.status?.() || [])
-        .filter(p => p.state === 'ready' && p.instructions)
+        .filter(p => p.state === 'ready')
         .map(p => ({ name: p.name, id: pluginIdFromServerName(p.name), instructions: p.instructions }));
       return systemMemoryPrompt({ plugins });
     } catch { return systemMemoryPrompt(); }
@@ -247,7 +250,7 @@ class Agent {
     const mcpTools = this.groups.has('debugger') ? (this.mcp.tools || []).map(t => ({ name: t.name, description: t.description, schema: t.inputSchema })) : [];
     // 用户接入的 MCP 服务：工具名已带「服务名__」前缀
     const ext = this.groups.has('mcp') ? (this.mcpHost?.tools?.() || []).map(t => ({ name: t.name, description: t.description, schema: t.inputSchema })) : [];
-    const local = this.localTools.filter(t => this.groups.has(t.group || 'core') && (!t.available || t.available({ getPlan: this.getPlan }))).map(t => ({ name: t.name, description: t.description, schema: t.schema }));
+    const local = contextToolDefinitions(this.localTools, { getPlan: this.getPlan, ...this.getToolContext() }, this.groups);
     return [...mcpTools, ...ext, ...local, REF_TOOL, DISCOVER].sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
   }
 
@@ -436,6 +439,8 @@ class Agent {
       approval: this.approvalPolicySentence(), plan: this.getPlan(), settings,
     }), this.turnId);
     appendContext(this.hist, 'goal-context', goalContext(this.getGoal()) || '【目标状态】当前没有正在执行的目标。之前的目标状态不再生效。', this.turnId);
+    const team = this.getToolContext().team?.snapshot();
+    if (team && (team.enabled || this.hist.events.some(e => e.source?.kind === 'team-context'))) appendContext(this.hist, 'team-context', team.enabled ? TEAM_GUIDANCE : '当前没有启用团队共享任务板。', this.turnId);
   }
 
   // keepMeta=true 仅用于统计（视图已包含裁剪与检查点，这里只决定是否剥离内部字段）
@@ -561,7 +566,7 @@ class Agent {
     return outcomes;
   }
 
-  async send(userText, { auto, maxSteps: stepsOverride, tokenBudget, attachments, runId, directHuman = false, continuation = false, continuationSource = null, continuationNotice = null } = {}) {
+  async send(userText, { auto, maxSteps: stepsOverride, tokenBudget, attachments, messageId, runId, directHuman = false, continuation = false, continuationSource = null, continuationNotice = null } = {}) {
     if (this.running) throw new Error('Agent 正在运行');
     this.running = true; this.acceptingSteer = true; this.abort = new AbortController();
     const usage = { prompt: 0, completion: 0, reasoning: 0, cached: 0, calls: 0, ms: 0 };
@@ -573,7 +578,7 @@ class Agent {
     const referenceInput = directHuman && !continuation ? parseSessionReferenceText(content) : { text: content, references: [] };
     attachments = validateAttachments(this.projectDir, attachments || [], { workRoot: this.getWorkspace()?.root, vision: !!((settings.provider === 'anthropic' ? settings.anthropic : settings.openai) || {}).vision });
     const att = attachments?.length ? await resolveAttachments(attachments, { browser: this.browser, projectDir: this.projectDir, workRoot: this.getWorkspace()?.root, vision: !!((settings.provider === 'anthropic' ? settings.anthropic : settings.openai) || {}).vision }).catch(e => '附件解析失败: ' + e.message) : '';
-    const images = attachments.filter(a => a.kind === 'attachment' && a.image).map(a => a.id), userId = crypto.randomUUID();
+    const images = attachments.filter(a => a.kind === 'attachment' && a.image).map(a => a.id), userId = messageId || crypto.randomUUID();
     this.hist.append({ t: continuation ? 'continuation' : 'user', id: userId, turnId: this.turnId, displayContent: content, ...(referenceInput.references.length ? { renderedContent: referenceInput.text } : {}), attachments, images, content: [continuation ? '【Harness 内部接续事件】上一轮已经结束。根据当前目标状态、计划和工具结果选择下一项必要工作；先核对已有证据。' : referenceInput.text || (attachments.length ? '请查看附件，并根据其内容回答。' : ''), att].filter(Boolean).join('\n\n'), ...(att ? { att: estimateTokens(att) + images.length * 2048 } : {}), ...(continuation && continuationSource ? { source: continuationSource } : {}), ...(continuation && continuationNotice ? { notice: continuationNotice } : {}) });
     if (directHuman && !continuation) {
       const invoked = /^\/([a-z0-9][a-z0-9-]{0,63})(?:\s|$)/.exec(content)?.[1];
@@ -604,6 +609,7 @@ class Agent {
           const prepared = await prepareSessionReferences(ctx.sessionQuery, ctx, referenceInput.references, { contextWindow: this.stats().limit });
           this.hist.append({ t: 'continuation', turnId: this.turnId, content: prepared.content, source: { kind: 'session-reference', references: prepared.metadata } });
         }
+        await appendQueuedSteering(this);
         this.getToolContext().planBoundary?.();
         this.refreshContext(settings);
         // ① 自动压缩决策（触发线 + 失败次数 + 冷却）
@@ -657,6 +663,7 @@ class Agent {
           // 收尾步骤里模型仍然给了工具调用：补占位结果，避免留下悬空 tool_calls（下一轮会 400）
           for (const tc of res.toolCalls || []) this.hist.append({ t: 'tool', id: tc.id, name: tc.name, content: '[已收尾，未执行]' });
           if (!final && (await this.getToolContext().subagents?.join?.(this.abort.signal) || this.notices.length)) continue;
+          if (!final && this.getToolContext().pendingSteering?.().length) continue;
           if (!stop) stop = 'completed';
           break;
         }

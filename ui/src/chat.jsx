@@ -1,6 +1,6 @@
 ﻿// 对话区：顶栏（会话身份与任务进度）、消息流、输入坞。
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Flex, Text, Badge, Callout, Spinner, TextArea, Separator, Popover } from '@radix-ui/themes';
+import { Box, Flex, Text, Badge, Callout, Spinner, Popover } from '@radix-ui/themes';
 import { useWorkbench } from './bus.jsx';
 import { Button, ActionIcon, Icon, Markdown } from './kit.jsx';
 import { fmtK, sessionLabel } from './state.js';
@@ -11,37 +11,71 @@ import { ReplyMarkdown } from './reply-markdown.jsx';
 import { conversationTurns, toolPresentation, elapsedLabel } from './conversation.js';
 import { shouldDropPaste, insertWithUndoBoundary } from './paste-drop.js';
 import { TurnTrigger } from './turn-trigger.jsx';
+import { submitMode } from './submission-policy.js';
 import { commandMatches } from './commands.js';
-import { CommandMenu, CommandFeedback, CommandDialogs } from './harness.jsx';
-import { SubagentButton, TurnSubagents } from './subagents.jsx';
+import { CommandInput } from './command-input.jsx';
+import { CommandMenu, CommandFeedback, CommandDialogs, commandMenuItems } from './harness.jsx';
+import { SubagentButton, TurnSubagents, SubagentNavigation } from './subagents.jsx';
+import { SubagentConversation } from './subagent-conversation.jsx';
+import { TeamButton } from './team.jsx';
+import { TurnFiles } from './turn-files.jsx';
 import { TurnNavigator } from './turn-navigator.jsx';
 import { handleWindowDrag } from './window-drag.js';
 import { PlanButton } from './plan.jsx';
 import { GoalDetails, GoalResumeBanner } from './goal-details.jsx';
 import { Reasoning } from './reasoning.jsx';
 import { processPresentation } from './process-presentation.js';
-import { terminalResult, toolState } from './tool-execution.js';
+import { terminalResult, toolState, toolErrorSummary } from './tool-execution.js';
+import { installStopShortcut } from './stop-shortcut.js';
 import { reasoningOpen, toggleReasoning } from './reasoning-state.js';
 import { QueuedMessages } from './queue-strip.jsx';
 import { ModelSeat } from './thinking-picker.jsx';
 import { modelThinking, effectiveThinking, effectiveTransport } from '../../sidecar/thinking.mjs';
 import { useSessionReferences } from './session-references.jsx';
+import { useCompositionGuard } from './use-composition-guard.js';
+import { isSubmitEnter } from './composition-guard.js';
 
 const CTX_PARTS = [['system', '系统提示'], ['tools', '工具定义'], ['summary', '压缩摘要'], ['history', '对话'], ['attachments', '附件'], ['toolResults', '工具结果']];
 
 export function ChatStage({ railOpen, onExpandRail }) {
   const w = useWorkbench();
+  const stageRef = useRef(null), stopState = useRef(null);
   const fileRef = useRef(null), [dragging, setDragging] = useState(false);
-  const [commandIndex, setCommandIndex] = useState(0), [commandDismissed, setCommandDismissed] = useState(false);
+  const [commandName, setCommandName] = useState(null), [commandDismissed, setCommandDismissed] = useState(false);
+  const [childView, setChildView] = useState(null);
+  const [skillCatalog, setSkillCatalog] = useState({ identity: '', items: [] });
   const { cur, session, input, setInput, send, atts, rmAtt, pickModel, inv, refs } = w;
+  const composition = useCompositionGuard(w.sid, refs.inputRef);
+  const childPath = childView?.sessionId === w.sid ? childView.path : [];
+  const navigateChild = path => setChildView({ sessionId: w.sid, path });
   const references = useSessionReferences({ input, setInput, inputRef: refs.inputRef, sid: w.sid, api: w.api, toast: w.toast });
+  const catalogIdentity = `${w.sid}:${session?.workspace?.id}:${session?.workspace?.revision}`;
+  const menuActive = /^\/[a-z0-9-]*$/i.test(input);
+  const skills = skillCatalog.identity === catalogIdentity ? skillCatalog.items : [];
+  useEffect(() => {
+    if (!w.sid || !menuActive && skillCatalog.identity === catalogIdentity) return;
+    let live = true;
+    w.api.invoke('extensions-list', { sessionId: w.sid, kind: 'skill' }).then(items => {
+      if (live) setSkillCatalog({ identity: catalogIdentity, items: items.filter(item => item.userInvocable !== false).slice(0, 256) });
+    }).catch(() => { if (live) setSkillCatalog({ identity: catalogIdentity, items: [] }); });
+    return () => { live = false; };
+  }, [menuActive, catalogIdentity, w.api]);
   const selected = cur.modelSelection || session?.modelSelection;
   const settings = selected ? { ...w.settings, activeProviderId: selected.providerId, activeModel: selected.model, activeThinking: selected.thinking } : w.settings;
   const turns = useMemo(() => conversationTurns(cur.events, cur.run, cur.agentRunning, cur.subagents), [cur.events, cur.run, cur.agentRunning, cur.subagents]);
   const responding = cur.agentRunning || cur.subagents?.some(a => a.status === 'running');
+  const pendingInteraction = !!cur.approvals?.length || !!cur.question;
+  stopState.current = { sessionId: w.sid, runId: cur.run?.id, enabled: !childPath.length && w.view === 'chat' && w.conn === 'connected' && !!cur.agentRunning, pendingInteraction };
+  const cancelTurn = (sessionId, runId) => w.api.invoke('agent-cancel-turn', { sessionId, runId }).catch(error => w.toast('停止失败：' + error.message, 'err'));
+  const stopResponse = () => cur.agentRunning && cur.run?.id ? cancelTurn(w.sid, cur.run.id) : inv('agent-interrupt').catch(error => w.toast('停止失败：' + error.message, 'err'));
+  useEffect(() => {
+    if (!session || !stageRef.current) return;
+    return installStopShortcut(stageRef.current, () => stopState.current, cancelTurn);
+  }, [w.sid, cur.run?.id, cur.agentRunning, pendingInteraction, w.conn, w.view, !!session, childPath.length]);
   const hasDraft = !!input.trim() || !!atts.length;
   const primaryStops = responding && !w.sending && (!hasDraft || session?.workspace?.availability !== 'ready');
-  const primaryLabel = primaryStops ? '停止响应' : w.sending ? '正在发送' : w.editTarget ? '重新发送（Enter）' : cur.agentRunning && hasDraft && !input.trimStart().startsWith('/') ? '加入下一轮队列（Enter）' : '发送（Enter）';
+  const mode = submitMode(w.settings.busyEnter, !!cur.agentRunning);
+  const primaryLabel = primaryStops ? '停止响应' : w.sending ? '正在发送' : w.editTarget ? '重新发送（Enter）' : cur.agentRunning && hasDraft && !input.trimStart().startsWith('/') ? mode === 'steer' ? '插话发送（Enter）' : '加入下一轮队列（Enter）' : '发送（Enter）';
   const providers = settings.providers || [];
   const activeProvider = providers.find(p => p.id === settings.activeProviderId);
   const legacyProvider = settings.provider === 'anthropic' ? settings.anthropic : settings.openai;
@@ -53,27 +87,37 @@ export function ChatStage({ railOpen, onExpandRail }) {
   // 发送方式由端点推断（deriveTransport），不听 settings 里存的 transport —— 那是旧版让用户手挑的字段名。
   const declaredThinking = { ...modelThinking(typeof modelInfo === 'object' ? modelInfo?.thinking : null, model), transport: effectiveTransport(typeof modelInfo === 'object' ? modelInfo?.thinking : null, model, activeProvider?.type) };
   const thinking = effectiveThinking(declaredThinking, settings.activeThinking);
-  const commands = commandDismissed || references.active ? [] : commandMatches(input), commandId = 'composer-commands-' + w.sid;
+  const builtins = commandMatches(input);
+  const candidates = menuActive ? [...builtins, ...skills.filter(item => item.name.startsWith(input.slice(1).toLowerCase()) && !commandMatches('/').some(c => c.name === item.name)).map(item => ({ ...item, label: item.name, kind: 'skill' }))] : [];
+  const commands = commandDismissed || references.active ? [] : commandMenuItems(candidates), commandId = 'composer-commands-' + w.sid;
+  const commandIndex = Math.max(0, commands.findIndex(item => item.name === commandName));
   const chooseCommand = c => { setInput('/' + c.name + ' '); setCommandDismissed(true); setTimeout(() => refs.inputRef.current?.focus(), 0); };
   const composerKey = e => {
-    if (e.nativeEvent.isComposing) return;
+    if (composition.isComposing(e)) return;
     if (references.onKeyDown(e)) return;
     if (commands.length && ['ArrowUp', 'ArrowDown', 'Tab', 'Escape', 'Enter'].includes(e.key)) {
       if (e.key === 'Escape') { e.preventDefault(); setCommandDismissed(true); return; }
-      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); setCommandIndex(i => (i + (e.key === 'ArrowDown' ? 1 : -1) + commands.length) % commands.length); return; }
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); setCommandName(commands[(commandIndex + (e.key === 'ArrowDown' ? 1 : -1) + commands.length) % commands.length].name); return; }
       if (e.key === 'Tab' || (e.key === 'Enter' && input !== '/' + commands[Math.min(commandIndex, commands.length - 1)].name)) { e.preventDefault(); chooseCommand(commands[Math.min(commandIndex, commands.length - 1)]); return; }
     }
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(false); }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (!isSubmitEnter(e)) return;
+      const accelerated = e.metaKey || e.ctrlKey;
+      if (accelerated && !hasDraft && cur.agentRunning) { w.steerQueue().catch(error => w.toast(error.message, 'err')); return; }
+      send(false, undefined, submitMode(w.settings.busyEnter, !!cur.agentRunning, accelerated));
+    }
   };
 
 
+  if (childPath.length && session) return <SubagentConversation key={w.sid + ':' + childPath.join('/')} path={childPath} onNavigate={navigateChild} renderTool={event => <ToolEvent e={event} />} />;
   if (!session) return <div className="chat is-empty">
     <header className="stage-head" data-window-drag-region onMouseDown={e => handleWindowDrag(e, native)}>
       {!railOpen && <ActionIcon icon="sidebar" variant="soft" color="gray" onClick={onExpandRail} title="展开会话列表" />}
     </header>
     <div className="welcome"><div className="welcome-inner"><h1>{w.projects.length ? '从项目开始工作' : '添加第一个项目'}</h1><Button mt="4" variant="soft" color="gray" onClick={() => w.setProjectEditor({})}><Icon n="folder" />添加项目目录</Button></div></div>
   </div>;
-  return <div className={'chat' + (!cur.events.length ? ' is-empty' : '')}>
+  return <SubagentNavigation.Provider value={navigateChild}><div ref={stageRef} data-conversation-session={w.sid} className={'chat' + (!cur.events.length ? ' is-empty' : '')}>
     <header className="stage-head" data-window-drag-region onMouseDown={e => handleWindowDrag(e, native)}>
       {!railOpen && <ActionIcon icon="sidebar" variant="soft" color="gray" onClick={onExpandRail} title="展开会话列表" />}
       <div className="stage-identity">
@@ -81,6 +125,7 @@ export function ChatStage({ railOpen, onExpandRail }) {
       </div>
       <Box flexGrow="1" />
       <div className="stage-progress" aria-label="目标、计划与子代理">
+        <TeamButton key={'team-' + w.sid} onOpen={id => navigateChild([id])} />
         {cur.goal && <GoalDetails key={'goal-' + w.sid} goal={cur.goal} />}
         <PlanButton key={'plan-' + w.sid} />
         <SubagentButton key={'agents-' + w.sid} />
@@ -98,27 +143,28 @@ export function ChatStage({ railOpen, onExpandRail }) {
     <GoalResumeBanner />
     {session?.workspace?.availability !== 'ready' && <div className="banner amber"><Icon n="info" size={13} /><Text size="1">项目目录不可用，执行已停止。聊天记录保留。</Text><Button size="1" variant="ghost" onClick={() => w.api.invoke('projects-check').catch(e => w.toast(e.message, 'err'))}>重新检查</Button><Button size="1" onClick={() => w.setProjectEditor({ ...(w.projects.find(p => p.id === session?.projectId) || {}), relink: true })}>重新选择目录</Button></div>}
 
-    <div className="transcript" key={'transcript-' + w.sid}>
-    <div className="msgs" ref={refs.bindChat} role="region" aria-label="对话内容" tabIndex={0}>
+    <div className="transcript" data-conversation-region="chat" key={'transcript-' + w.sid}>
+    <div className="msgs" ref={refs.bindChat} role="region" aria-label="对话内容" tabIndex={0}
+      onClickCapture={event => { if (event.target instanceof Element && event.target.closest('.tool-head, .reason-head, .turn-process > summary, .turn-flow-head')) refs.scrollController.current?.pauseFollowing(); }}>
       {cur.historyLoading && <Flex justify="center" p="3" gap="2"><Spinner size="1" /><Text size="1" color="gray">正在读取对话…</Text></Flex>}
       {cur.historyError && <Callout.Root color="red"><Callout.Text>{cur.historyError}</Callout.Text><Button size="1" variant="soft" onClick={w.reloadHistory}>重新读取</Button></Callout.Root>}
       {!!cur.historyStart && <Flex justify="center" p="3"><Button size="1" variant="soft" color="gray" disabled={cur.historyLoading} onClick={w.loadEarlierHistory}>加载更早的对话</Button></Flex>}
       {cur.events.length === 0
         ? <Welcome onPick={t => { setInput(t); setTimeout(() => refs.inputRef.current?.focus(), 30); }} onOpen={() => { w.setSide('browser'); w.setSideOpen(true); setTimeout(() => { refs.urlRef.current?.focus(); refs.urlRef.current?.select(); }, 60); }} running={cur.status.running} />
-        : <div className="msgs-in">
+        : <div className="msgs-in" ref={refs.bindChatContent}>
             <MessageStream turns={turns} />
-            {!turns.length && <CompactingLine />}
+            <div className="transcript-commands"><CommandFeedback /><CompactingLine /></div>
           </div>}
+      {!cur.events.length && <div className="transcript-commands"><CommandFeedback /><CompactingLine /></div>}
     </div>
     <TurnNavigator turns={turns} scrollRef={refs.chatRef} scrollController={refs.scrollController} />
     </div>
 
-    <div className="composer-wrap">
+    <div className="composer-wrap" data-conversation-region="composer">
       {(cur.plan?.active || cur.plan?.pending === true) && <div className="banner" role="status"><Icon n="layers" size={13} /><Text size="1">{cur.plan.pending !== null ? '计划模式将在下一步切换' : '计划模式 · 确认计划后实施'}</Text><Button size="1" variant="ghost" onClick={() => w.api.invoke('plan-set', { sessionId: w.sid, active: false }).catch(e => w.toast(e.message, 'err'))}>退出计划模式</Button></div>}
-      <CommandFeedback />
       <PendingActions />
       <CommandDialogs />
-      <QueuedMessages />
+      <QueuedMessages key={w.sid} />
       {w.editTarget && <div className="edit-banner" role="status"><Icon n="edit" size={13} /><Text size="1">正在编辑已发送的消息，发送后创建分支并保留原对话</Text><span className="spacer" /><Button size="1" variant="ghost" color="gray" onClick={w.cancelEdit}>取消</Button></div>}
       <Box className={'composer' + (dragging ? ' drag-over' : '')} p="3"
         onDragOver={e => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDragging(true); } }}
@@ -128,7 +174,7 @@ export function ChatStage({ railOpen, onExpandRail }) {
         {w.uploading && <Flex align="center" gap="2" mb="2"><Spinner size="1" /><Text size="1" color="gray">正在添加附件…</Text></Flex>}
         {atts.some(a => a.image) && !vision && <Flex gap="2" align="center" mb="2" wrap="wrap"><Text size="1" color="amber">当前模型未启用图片输入</Text><Button size="1" variant="ghost" color="gray" onClick={w.enableImages} title="仅在该模型支持图片时启用">启用图片输入</Button></Flex>}
         {dragging && <div className="drop-hint">松开以添加图片或文件</div>}
-        <TextArea className="composer-input" size="2" variant="soft" color="gray" resize="none" ref={refs.inputRef} value={input} rows={2}
+        <CommandInput className="composer-input" size="2" variant="soft" color="gray" resize="none" ref={composition.ref} value={input} skills={skills} rows={2}
           onPaste={e => {
             const files = Array.from(e.clipboardData?.items || []).filter(item => item.kind === 'file').map(item => item.getAsFile()).filter(Boolean);
             if (files.length) { e.preventDefault(); w.addFiles(files); return; }
@@ -140,14 +186,14 @@ export function ChatStage({ railOpen, onExpandRail }) {
             e.preventDefault();
             insertWithUndoBoundary(e.currentTarget, text, setInput, e.currentTarget.selectionStart, e.currentTarget.selectionEnd);
           }}
-          onChange={e => { references.update(e.currentTarget); setInput(e.target.value); setCommandIndex(0); setCommandDismissed(false); e.target.style.height = 'auto'; e.target.style.height = Math.min(180, e.target.scrollHeight) + 'px'; }}
+          onChange={e => { references.update(e.currentTarget); setInput(e.target.value); setCommandName(null); setCommandDismissed(false); e.target.style.height = 'auto'; e.target.style.height = Math.min(180, e.target.scrollHeight) + 'px'; }}
           onClick={e => references.update(e.currentTarget)} onKeyUp={e => { if (!['Escape', 'Enter', 'Tab', 'ArrowUp', 'ArrowDown'].includes(e.key)) references.update(e.currentTarget); }}
           onKeyDown={composerKey}
           aria-controls={references.items.length ? references.id : commands.length ? commandId : undefined} aria-activedescendant={references.items.length ? references.id + '-' + references.selected : commands.length ? commandId + '-' + Math.min(commandIndex, commands.length - 1) : undefined} aria-autocomplete="list" aria-expanded={commands.length > 0 || references.items.length > 0}
           aria-label="任务指令"
           title="Enter 发送，Shift+Enter 换行"
-          placeholder={w.editTarget ? '修改后按 Enter 重新发送…' : cur.agentRunning ? '补充要求，或输入 / 查看命令…' : '输入任务，粘贴图片，或输入 / 查看命令…'} />
-        {!!commands.length && <CommandMenu items={commands} selected={Math.min(commandIndex, commands.length - 1)} choose={chooseCommand} anchor={refs.inputRef} id={commandId} />}
+          placeholder={w.editTarget ? '修改后按 Enter 重新发送…' : cur.agentRunning ? (!hasDraft && cur.queuedItems?.length ? 'Cmd/Ctrl+Enter 插话发送全部排队消息' : mode === 'steer' ? '补充要求，Enter 插话发送…' : '补充要求，Enter 排队，Cmd/Ctrl+Enter 插话…') : '输入任务，粘贴图片，或输入 / 查看命令…'} />
+        {!!commands.length && <CommandMenu items={commands} selected={commandIndex} choose={chooseCommand} anchor={refs.inputRef} id={commandId} onHighlight={index => setCommandName(commands[index].name)} onDismiss={() => setCommandDismissed(true)} />}
         {!!references.items.length && <CommandMenu items={references.items} selected={references.selected} choose={references.choose} anchor={refs.inputRef} id={references.id} ariaLabel="引用历史会话" />}
         <div className="composer-bar">
           <input ref={fileRef} type="file" hidden multiple aria-label="选择附件文件" accept="image/png,image/jpeg,image/webp,image/gif,.md,.txt,.json,.js,.mjs,.cjs,.ts,.tsx,.jsx,.py,.html,.css,.csv,.yaml,.yml,.toml,.rs,.go,.java,.sh,.ps1" onChange={e => { w.addFiles(e.target.files); e.target.value = ''; }} />
@@ -160,14 +206,14 @@ export function ChatStage({ railOpen, onExpandRail }) {
             levels={declaredThinking.levels} value={thinking.level}
             defaultLevel={declaredThinking.default}
             onPickModel={(pid, m) => pickModel(pid, m)} onPickThinking={level => w.pickThinking(level)} /></div>
-          {responding && w.sending && <ActionIcon icon="stop" variant="ghost" color="gray" onClick={() => inv('agent-interrupt')} title="停止响应" />}
-          <ActionIcon icon={primaryStops ? 'stop' : 'send'} className="send-button" variant="solid" onClick={() => primaryStops ? inv('agent-interrupt') : send(false)}
+          {responding && w.sending && <ActionIcon icon="stop" variant="ghost" color="gray" onClick={stopResponse} title="停止响应（Esc Esc）" />}
+          <ActionIcon icon={primaryStops ? 'stop' : 'send'} className="send-button" variant="solid" onClick={() => primaryStops ? stopResponse() : send(false, undefined, mode)}
             disabled={!primaryStops && (w.session?.workspace?.availability !== 'ready' || w.sending || w.uploading || !hasDraft)}
-            title={primaryLabel} />
+            title={primaryStops && cur.agentRunning ? '停止响应（Esc Esc）' : primaryLabel} />
         </div>
       </Box>
     </div>
-  </div>;
+  </div></SubagentNavigation.Provider>;
 }
 
 function MessageStream({ turns }) {
@@ -180,20 +226,11 @@ function MessageStream({ turns }) {
       {turn.user && <Event e={turn.user} turn={turn} canEdit={!turn.active} />}
       {turn.trigger && <TurnTrigger trigger={turn.trigger} turn={turn} />}
       <TurnProcess turn={turn} />
-      {turn.answers.map((e, i) => <Event key={e.id || i} e={e} turn={turn} />)}
-      <TurnFiles turn={turn} />
+      {!turn.answers.length && <TurnFiles turn={turn} />}
       {turn.alerts.map((e, i) => <Event key={e.id || i} e={e} />)}
-      {/* 压缩进行中的分隔线挂在最后一轮末尾：完成后的 compact 事件也落在这一轮，位置一致。 */}
-      {index === turns.length - 1 && <CompactingLine />}
+      {turn.markers.map(e => <Event key={e.id} e={e} />)}
     </section>;
   });
-}
-
-function TurnFiles({ turn }) {
-  const w = useWorkbench(), run = w.cur.run, ws = w.session?.workspace;
-  if (run?.workspaceId !== ws?.id || run?.workspaceRevision !== ws?.revision) return null;
-  const files = turn.tools.filter(e => e.runId === run.id && e.result !== undefined && !e.isError && !e.cancelled && ['workspace_write', 'workspace_edit', 'workspace_append'].includes(e.name)).map(e => e.args?.path || e.args?.file).filter(Boolean);
-  return files.length ? <div className="turn-files">{[...new Set(files)].map(path => <Button key={path} size="2" variant="soft" color="gray" onClick={() => w.tabs.openDocument(path)}><Icon n="file" />{path.split(/[\\/]/).pop()}<Icon n="external" size={12} /></Button>)}</div> : null;
 }
 
 function TurnProcess({ turn }) {
@@ -210,16 +247,23 @@ function TurnProcess({ turn }) {
   for (const item of turn.tools) { const title = toolPresentation(item).title; kinds.set(title, (kinds.get(title) || 0) + 1); }
   const kindSummary = [...kinds.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([title, n]) => n > 1 ? `${title} ${n}` : title);
   const count = [hasReasoning && '思考', kindSummary.join(' · ') || (turn.tools.length ? `${turn.tools.length} 项操作` : ''), turn.subagents.length && `子代理 ${turn.subagents.length}`, turn.failures && `失败 ${turn.failures}`].filter(Boolean).join(' · ');
-  if (!turn.process.length && !turn.subagents.length) return turn.active ? <div className="turn-meta" role="status"><span className="tool-state run"><Spinner size="1" /></span><span className="turn-process-label" title={label}>{label}</span></div> : null;
   const stopped = ['cancelled', 'stopped'].includes(turn.status);
   const header = <><span className={'tool-state ' + (turn.active ? 'run' : turn.failures ? 'err' : stopped ? 'cancelled' : 'ok')}>{turn.active ? <Spinner size="1" /> : <Icon n={stopped ? 'stop' : turn.failures ? 'info' : 'check'} size={13} />}</span><span className="turn-process-label" title={label}>{label}</span>{turn.active && elapsed && <span className="turn-process-elapsed">{elapsed}</span>}{count && <span className="tool-count" title={count}>{count}</span>}</>;
-  const content = <div className="turn-process-items">{turn.process.map((e, i) => e.type === 'tool' ? <ToolEvent key={e.itemId || i} e={e} /> : e.type === 'reasoning' ? <Reasoning key={e.id} event={e} open={reasoningOpen(view, e)} onToggle={ev => { const next = toggleReasoning(view, ev); if (next) view.setReasoningOpen(next); }} /> : e.type === 'assistant' ? <div className="process-message" key={e.id || i}><Markdown text={e.content} streaming={e.phase === 'streaming'} /></div> : <Event key={e.id || i} e={e} />)}<TurnSubagents agents={turn.subagents} /></div>;
-  // Keep the same parent as a short live turn grows, preserving open tool details.
-  return <details className={'turn-process tool-group' + (!presentation.foldable ? ' turn-process-inline' : '')} open={!presentation.foldable || open}>
-    <summary hidden={!presentation.foldable} aria-label="执行过程" onClick={e => { e.preventDefault(); setExpanded(!open); }}>{header}<Icon n={open ? 'chevup' : 'chevdown'} size={12} /></summary>
-    <div className="turn-meta" hidden={presentation.foldable} aria-label="执行状态">{header}</div>
-    {(!presentation.foldable || open) && content}
-  </details>;
+  const answers = new Map(turn.answers.map(event => [event.id, event]));
+  const rows = [];
+  for (const [index, event] of turn.items.entries()) {
+    if (['compact', 'error'].includes(event.type)) continue;
+    const identity = event.itemId || event.id || index;
+    if (event.type === 'assistant' && event.reasoning) rows.push(<div className="turn-flow-item turn-work-item" hidden={!open} key={'reasoning-' + identity}><Reasoning event={{ type: 'reasoning', id: 'reasoning-' + event.id, content: event.reasoning, finished: event.finished, at: event.at, turnId: event.turnId }} open={reasoningOpen(view, { id: 'reasoning-' + event.id })} onToggle={ev => { const next = toggleReasoning(view, ev); if (next) view.setReasoningOpen(next); }} /></div>);
+    if (event.type === 'assistant' && !event.content) continue;
+    const answer = answers.get(event.id), work = !answer && event.type !== 'user';
+    rows.push(<div className={'turn-flow-item' + (work ? ' turn-work-item' : '')} hidden={work && !open} key={'item-' + identity}>{event.type === 'tool' ? <ToolEvent e={event} /> : <Event e={answer || event} turn={turn} />}</div>);
+  }
+  const hasWork = !!turn.process.length || !!turn.subagents.length || turn.active;
+  return <div className="turn-flow">
+    {hasWork && <button type="button" className="turn-meta turn-flow-head" aria-label="执行过程" aria-expanded={open} onClick={() => setExpanded(!open)}>{header}<Icon n={open ? 'chevup' : 'chevdown'} size={12} /></button>}
+    <div className="turn-flow-items" key="flow">{rows}{!!turn.subagents.length && <div className="turn-flow-item turn-work-item" hidden={!open}><TurnSubagents agents={turn.subagents} /></div>}</div>
+  </div>;
 }
 
 function ToolEvent({ e }) {
@@ -230,24 +274,26 @@ function ToolEvent({ e }) {
   const format = value => typeof value === 'string' ? value : JSON.stringify(value, null, 2);
   const duration = e.ms == null ? '' : e.ms < 1000 ? `${e.ms} ms` : `${(e.ms / 1000).toFixed(1)} s`;
   const presentation = toolPresentation(e);
-  return <div className={'tool' + (open ? ' expanded' : '')}>
+  const errorSummary = toolErrorSummary(e), detail = errorSummary ?? presentation.detail;
+  return <div className={'tool' + (open ? ' expanded' : '')} data-state={st}>
     <button className="tool-head" onClick={() => setOpen(o => !o)} aria-expanded={open}>
+      {st !== 'ok' && <span className="sr-only">{st === 'run' ? '执行中' : st === 'cancelled' ? '已停止' : '执行失败'}</span>}
       <span className={'tool-state ' + st}>{st === 'run' ? <Spinner size="1" /> : <Icon n={st === 'err' ? 'info' : st === 'cancelled' ? 'stop' : 'check'} size={13} />}</span>
       <span className="tool-name" title={e.name}>{presentation.title}</span>
-      <span className="tool-arg mono" title={presentation.detail}>{presentation.detail ? '· ' + presentation.detail : ''}</span>
+      <span className={'tool-arg mono' + (errorSummary ? ' is-error' : '')} title={detail}>{detail ? '· ' + detail : ''}</span>
       {resultLabel && <span className={'tool-result-status' + (terminal?.failed ? ' is-error' : '')} title={resultLabel}>{resultLabel}</span>}
       <span className="tool-duration">{duration}</span>
       <Icon n={open ? 'chevup' : 'chevdown'} size={11} />
     </button>
-    {open && <div className="tool-body"><div className="tool-section-label">{e.name}<span>{duration}</span></div><ToolPayload label="输入" text={format(e.args || {})} />{terminal?.label && <div className={'tool-execution-status' + (terminal.failed ? ' is-error' : '')} role="status">{terminal.label}</div>}<ToolPayload label="输出" text={e.result === undefined ? '执行中…' : terminal?.output ?? format(e.result)} /></div>}
+    {open && <div className="tool-body"><div className="tool-section-label">{e.name}<span>{duration}</span></div><div className="tool-io"><ToolPayload label="输入" text={format(e.args || {})} />{terminal?.label && <div className={'tool-execution-status' + (terminal.failed ? ' is-error' : '')} role="status">{terminal.label}</div>}<ToolPayload label="输出" text={e.result === undefined ? '执行中…' : terminal?.output ?? format(e.result)} state={st} /></div></div>}
     {/* 截图等工具产出的图片：折叠状态下也贴在工具条下方，用户和模型都不用再转述。 */}
     {!!e.images?.length && <div className="tool-images"><ReplyImages items={e.images} sessionId={w.sid} invoke={w.api.invoke} /></div>}
   </div>;
 }
 
-function ToolPayload({ label, text }) {
+function ToolPayload({ label, text, state }) {
   const { toast } = useWorkbench();
-  return <section className="tool-payload" aria-label={'工具' + label}><div className="tool-section-label">{label}<ActionIcon icon="copy" size="1" variant="ghost" color="gray" title={'复制工具' + label} onClick={async () => { try { await navigator.clipboard.writeText(text); toast('已复制', 'ok'); } catch { toast('复制失败', 'err'); } }} /></div><pre tabIndex={0}>{text}</pre></section>;
+  return <section className="tool-payload" aria-label={'工具' + label}><div className="tool-payload-label">{label}</div><pre tabIndex={0} data-state={state}>{text}</pre><ActionIcon className="tool-payload-copy" icon="copy" size="1" variant="ghost" color="gray" title={'复制工具' + label} onClick={async () => { try { await navigator.clipboard.writeText(text); toast('已复制', 'ok'); } catch { toast('复制失败', 'err'); } }} /></section>;
 }
 
 function AssistantMessage({ e, turn, copy }) {
@@ -259,17 +305,19 @@ function AssistantMessage({ e, turn, copy }) {
   const calls = usage?.calls || 0;
   const pct = w.cur.ctx?.used && w.cur.ctx?.limit ? Math.round(w.cur.ctx.used / w.cur.ctx.limit * 100) : null;
   const usageTitle = usage ? [`本轮累计计费 ${fmtK(tokens)} tok`, calls ? `共 ${calls} 次模型调用` : '', pct != null ? `当前窗口占用 ${pct}%` : '', '计费是累加值，窗口占用看输入框右侧的圆环'].filter(Boolean).join('\n') : '';
-  const complete = e.phase === 'final_answer' && !!turn?.endedAt;
+  const closing = e.phase === 'final_answer' && turn?.answers.at(-1)?.id === e.id;
+  const complete = closing && !!turn?.endedAt;
   const time = complete ? new Date(turn.endedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '';
   const final = e.phase === 'final_answer';
   // 本轮所有工具产出的图片（截图、reply_image）。正文里用 image:<id> 指过位置的会被排除，
   // 剩下的附在回复末尾——否则模型把图发在中间步骤时，用户只看得到一句「已发送图片」。
-  const images = useMemo(() => final ? (turn?.tools || []).flatMap(t => t.images || []) : [], [final, turn]);
-  return <article aria-label="模型回复" className={'msg assistant' + (final ? '' : ' commentary') + (e.phase === 'streaming' ? ' is-streaming' : '')}>
+  const images = useMemo(() => closing ? (turn?.tools || []).flatMap(t => t.images || []) : [], [closing, turn]);
+  return <article aria-label="模型回复" className={'msg assistant' + (e.phase === 'commentary' ? ' commentary' : '') + (e.phase === 'streaming' ? ' is-streaming' : '')}>
     <div className="bubble"><ReplyMarkdown text={e.content} images={images} sessionId={w.sid} invoke={w.api.invoke} streaming={e.phase === 'streaming'} /></div>
-    {final && <div className="message-foot">
+    {complete && turn.answers.at(-1)?.id === e.id && <TurnFiles turn={turn} />}
+    {closing && <div className="message-foot">
       <ActionIcon icon="copy" size="1" variant="ghost" color="gray" onClick={copy} title="复制回复" aria-label="复制回复" />
-      {complete && Number.isSafeInteger(turn.end.seq) && <Button size="1" variant="ghost" color="gray" onClick={() => w.api.invoke('session-fork', { sessionId: w.sid, atSeq: turn.end.seq }).catch(error => w.toast(error.message, 'err'))}>从此处分支</Button>}
+      {complete && Number.isSafeInteger(turn.end.seq) && <ActionIcon icon="branch" size="1" variant="ghost" color="gray" title="从此处分支" onClick={() => w.api.invoke('session-fork', { sessionId: w.sid, atSeq: turn.end.seq }).catch(error => w.toast(error.message, 'err'))} />}
       <ActionIcon icon="thumbup" size="1" variant="ghost" color={rating === 'up' ? 'tomato' : 'gray'} onClick={() => w.rate(e.id, 'up')} title={rating === 'up' ? '取消“有帮助”' : '标记为有帮助'} aria-label="有帮助" aria-pressed={rating === 'up'} />
       <ActionIcon icon="thumbdown" size="1" variant="ghost" color={rating === 'down' ? 'tomato' : 'gray'} onClick={() => w.rate(e.id, 'down')} title={rating === 'down' ? '取消“没帮助”' : '标记为没帮助'} aria-label="没帮助" aria-pressed={rating === 'down'} />
       <span className="spacer" />
@@ -289,12 +337,9 @@ function Event({ e, turn, canEdit = false }) {
   if (e.type === 'compact') {
     const label = e.stage === 'pruned' ? `收起 ${e.pruned} 个旧工具结果` : `${e.reason === 'auto' ? '自动' : e.reason === 'overflow' ? '上游超限后' : ''}压缩 ${e.summarized || ''} 条较早消息`;
     return <div className="compact-line">
-      <Separator size="4" style={{ flex: 1 }} />
       <button className="compact-trigger" disabled={!e.summary} onClick={() => setOpen(o => !o)} aria-expanded={open} title={`${label} · ${fmtK(e.before)} → ${fmtK(e.after)}`}>
-        <Icon n="layers" size={11} /><Text size="1" color="gray">上下文已压缩</Text>
-        {e.summary && <Icon n={open ? 'chevup' : 'chevdown'} size={10} />}
+        <Icon n={open ? 'chevdown' : 'layers'} size={14} /><span>上下文已压缩</span><span className="command-separator">·</span><span className="compact-count">{fmtK(e.before)} → {fmtK(e.after)} tokens</span>
       </button>
-      <Separator size="4" style={{ flex: 1 }} />
       {open && <div className="compact-body"><Text size="1" color="gray">{label} · {fmtK(e.before)} → {fmtK(e.after)}</Text><Markdown text={e.summary} /></div>}
     </div>;
   }
@@ -308,12 +353,10 @@ function Event({ e, turn, canEdit = false }) {
  */
 function CompactingLine() {
   const w = useWorkbench(), ctx = w.cur.ctx;
-  if (!ctx?.compressing) return null;
   const busy = w.commandFeedback?.state === 'running' && w.commandFeedback?.name === 'compact';
+  if (!ctx?.compressing || busy) return null;
   return <div className="compact-line compacting" role="status">
-    <Separator size="4" style={{ flex: 1 }} />
-    <span className="compact-trigger"><Spinner size="1" /><Text size="1" color="gray">{busy ? '正在压缩上下文…' : '上下文接近上限，正在自动压缩…'}</Text></span>
-    <Separator size="4" style={{ flex: 1 }} />
+    <span className="compact-trigger"><Spinner size="1" /><span>正在压缩上下文…</span></span>
   </div>;
 }
 
@@ -347,6 +390,7 @@ function CtxMeter() {
   const tone = !ctx ? 'idle' : pct >= at ? 'full' : pct >= at - 0.2 ? 'warn' : 'ok';
   const R = 7.6, C = 2 * Math.PI * R;
   const text = ctx ? `${Math.round(pct * 100)}%` : '—';
+  if (!ctx?.limit) return null;
   return <Popover.Root open={open} onOpenChange={setOpen}>
     <Popover.Trigger>
       <button type="button" className={'ctx-meter ' + tone} aria-label="上下文用量" aria-expanded={open}
@@ -361,7 +405,7 @@ function CtxMeter() {
     <Popover.Content width="340px" align="end" aria-label="上下文用量" data-overlay>
       <div className="ctx-head">
         <span className="ctx-head-num">{Math.round(pct * 100)}<i>%</i></span>
-        <span className="ctx-head-tokens">已用 {fmtK(ctx?.used)} / {fmtK(ctx?.limit)}</span>
+        <span className="ctx-head-tokens">已用 ~{fmtK(ctx?.used)} / {fmtK(ctx?.limit)}</span>
       </div>
       <div className="ctx-bar">{CTX_PARTS.map(([k]) => parts[k] > 0 && <i key={k} className={'sw-' + k} style={{ flex: parts[k] }} />)}{ctx?.limit > 0 && <i className="ctx-rest" style={{ flex: Math.max(0, ctx.limit - (ctx.used || 0)) }} />}<span className="ctx-limit" style={{ left: at * 100 + '%' }} title={`${Math.round(at * 100)}% 自动压缩`} /></div>
       <div className="ctx-rows">{CTX_PARTS.map(([k, l]) => <Flex key={k} justify="between" align="center" style={{ opacity: parts[k] ? 1 : .45 }}>

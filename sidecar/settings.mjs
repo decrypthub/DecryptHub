@@ -23,6 +23,7 @@ const DEFAULTS = {
   // 浏览器显示方式：auto = Windows 有头时嵌入真实 Chrome 窗口，其它平台/无头用 screencast；embedded / screencast 强制
   embedMode: 'auto',
   kernel: KERNEL, // 固定 CloakBrowser；下载由 WDH 组件写入 kernels/cloak.json
+  busyEnter: 'queue',
   compactAt: 0.85, // 自动压缩阈值（占上下文窗口比例）；窗口本身随模型保存在 openai/anthropic.contextWindow，未设置则按模型名推断
   // 会话标题前缀：纯展示配置，渲染时拼在标题前，不写入任何 title 字段（见 session-titles.mjs）
   titlePrefix: '',
@@ -65,6 +66,7 @@ export function load() {
   // The old default of 40 was an implicit product limit, not a user budget.
   if (!raw.runLimitsVersion && Number(raw.maxSteps) === 40) s.maxSteps = 0;
   s.runLimitsVersion = 1;
+  s.busyEnter = s.busyEnter === 'steer' ? 'steer' : 'queue';
   s.maxSteps = Number.isFinite(Number(s.maxSteps)) ? Math.max(0, Math.floor(Number(s.maxSteps))) : 0;
   s.tokenBudget = Number.isFinite(Number(s.tokenBudget)) ? Math.max(0, Math.floor(Number(s.tokenBudget))) : 0;
   // 迁移：旧版全局 contextWindow → 当前 provider 的模型配置

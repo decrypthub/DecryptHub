@@ -2,10 +2,10 @@
 //
 // 三类记忆的边界：
 //   1. 系统记忆（本文件 + 插件在 MCP initialize 里返回的 instructions）：产品/插件拥有，只读，
-//      设置页不展示、不可编辑。模型只能读，不能改写，也不能把它当作权限来源。
+//      设置页可查看、不可编辑。模型只能读，不能改写，也不能把它当作权限来源。
 //   2. AI 自己的记忆（extensions/user|project|session/<id>/memory/*.md）：模型通过 memory_manage 维护。
 //   3. 技能（extensions/.../skill/<name>/SKILL.md）：模型通过 skill_manage 维护。
-// 第 2、3 类在设置里可见可管；第 1 类不出现，避免用户以为自己能改掉产品规则。
+// 三类都可查看，只有第 2、3 类可管理。
 //
 // 这里的内容不是权限：它只说「事实怎么判断」，不授予任何动作。长度按每轮注入计费，
 // 所以设备相关条目只在对应插件真的连上时才出现。
@@ -64,5 +64,16 @@ export function systemMemoryPrompt({ plugins = [] } = {}) {
   return parts.join('\n\n');
 }
 
-/** 设置页「记忆与技能」用来区分来源的稳定标识；系统记忆本身不返回内容。 */
+/** 设置页使用与模型相同的产品正文和插件说明，不暴露编辑入口。 */
+export function systemMemorySources(plugins = []) {
+  const active = plugins.filter(p => p.state === 'ready');
+  const mobile = active.some(p => MOBILE.has(p.id || pluginIdFromServerName(p.name)));
+  return {
+    sources: [{ id: 'attribution', label: '产品内置归因纪律', content: ATTRIBUTION, editable: false },
+      ...(mobile ? [{ id: 'device', label: '移动设备操作', content: DEVICE, editable: false }] : [])],
+    pluginInstructions: active.filter(p => String(p.instructions || '').trim()).map(p => ({ name: p.name, version: p.version, content: clip(p.instructions, 3200), editable: false })),
+  };
+}
+
+/** 保留旧来源标识供已有调用者使用。 */
 export const SYSTEM_MEMORY_SOURCES = Object.freeze(['产品内置归因纪律', '插件声明的环境事实']);

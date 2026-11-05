@@ -23,6 +23,7 @@ const READ = new Set([
   'context_ref_read', 'load_workspace_dependencies',
   'session_search', 'session_event_search', 'session_trace', 'session_event_trace', 'session_event_read',
   'agent_spawn', 'agent_message', 'agent_wait', 'agent_list', 'agent_cancel', 'goal_update', 'get_goal', 'create_goal', 'update_goal',
+  'team_task_list', 'team_task_get', 'team_task_create', 'team_task_update',
   'workspace_list', 'workspace_read', 'workspace_grep', 'workspace_glob', 'workspace_job_output',
   'detect_crypto', 'diff_requests', 'find_signature_params',
   'grep_file', 'read_file_slice', 'list_project_files',

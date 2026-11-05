@@ -1,12 +1,13 @@
 // Presentation-only identities. Browser page and terminal process IDs are separate resources.
 export const emptyDock = () => ({ tabs: [], activeId: null });
 export const workspaceKey = ws => [ws?.id, ws?.revision, ws?.projectRevision, ws?.root].join(':');
-const kinds = new Set(['browser', 'files', 'document', 'terminal']);
+const kinds = new Set(['browser', 'files', 'document', 'terminal', 'change']);
 export function normalizeDock(value) {
   const seen = new Set();
   const tabs = (Array.isArray(value?.tabs) ? value.tabs : []).filter(t => t && /^[\w-]{1,80}$/.test(t.id) && kinds.has(t.kind) && !seen.has(t.id) && seen.add(t.id)).slice(0, 32).map(t => ({
-    id: t.id, kind: t.kind, title: String(t.title || ({ browser: '浏览器', files: '工作区文件', terminal: '终端', document: '文档' })[t.kind]).slice(0, 120),
+    id: t.id, kind: t.kind, title: String(t.title || ({ browser: '浏览器', files: '文件', terminal: '终端', document: '文档', change: '文件改动' })[t.kind]).slice(0, 120),
     ...(t.kind === 'browser' ? { pageId: typeof t.pageId === 'string' ? t.pageId : null, mode: t.mode === 'network' ? 'network' : 'page', network: { query: String(t.network?.query || '').slice(0, 512), type: ['all', 'api', 'js', 'doc', 'other'].includes(t.network?.type) ? t.network.type : 'api' } } : {}),
+    ...(t.kind === 'change' ? { path: String(t.path || '').slice(0, 4096), runId: String(t.runId || '').slice(0, 200), workspace: String(t.workspace || '').slice(0, 4096) } : {}),
     ...(t.kind === 'document' ? { path: String(t.path || '').slice(0, 4096), root: String(t.root || 'primary'), workspace: String(t.workspace || '').slice(0, 4096) } : {}),
   }));
   return { tabs, activeId: tabs.some(t => t.id === value?.activeId) ? value.activeId : tabs.at(-1)?.id || null };

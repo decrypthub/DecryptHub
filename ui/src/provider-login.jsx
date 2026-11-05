@@ -2,8 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Dialog, Flex, Text, TextField, Spinner } from '@radix-ui/themes';
 import { Button } from './kit.jsx';
 import { useWorkbench } from './bus.jsx';
+import { useCompositionGuard } from './use-composition-guard.js';
+import { isSubmitEnter } from './composition-guard.js';
 export function ProviderLogin({ request, onClose }) {
   const w = useWorkbench(), [state, setState] = useState(null), [answer, setAnswer] = useState(''), id = useRef(null);
+  const composition = useCompositionGuard(request.routeId + ':' + (state?.prompt?.id || ''));
   useEffect(() => {
     let active = true;
     const off = w.api.on('provider-authorization', update => { if (active && update.routeId === request.routeId) { id.current = update.id; setState(update); } });
@@ -20,7 +23,7 @@ export function ProviderLogin({ request, onClose }) {
     {state?.notice?.userCode && <Text as="div" size="5" my="3" className="mono">{state.notice.userCode}</Text>}
     {state?.prompt && <div key={state.prompt.id}><Text as="div" size="2" mt="3" mb="2">{state.prompt.message}</Text>
       {state.prompt.type === 'select' ? <Flex direction="column" gap="2">{state.prompt.options.map(option => <Button key={option.id} variant="soft" onClick={() => respond(option.id)}>{option.label}</Button>)}</Flex>
-        : <><TextField.Root type={state.prompt.type === 'secret' ? 'password' : 'text'} value={answer} onChange={event => setAnswer(event.target.value)} placeholder={state.prompt.placeholder} aria-label="供应商登录输入" onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) respond(answer); }} /><Button mt="2" size="2" onClick={() => respond(answer)}>继续</Button></>}
+        : <><TextField.Root ref={composition.ref} type={state.prompt.type === 'secret' ? 'password' : 'text'} value={answer} onChange={event => setAnswer(event.target.value)} placeholder={state.prompt.placeholder} aria-label="供应商登录输入" onKeyDown={event => { if (!composition.isComposing(event) && isSubmitEnter(event)) { event.preventDefault(); respond(answer); } }} /><Button mt="2" size="2" onClick={() => respond(answer)}>继续</Button></>}
     </div>}
     {state?.error && <Text as="div" color="red" my="3">{state.error}</Text>}
     {state?.status === 'completed' && <Text as="div" color="green" my="3">已完成认证并保存凭据。</Text>}

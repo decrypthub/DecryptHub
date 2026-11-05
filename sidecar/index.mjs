@@ -37,13 +37,15 @@ async function startServer() {
   const { selectReadRoot } = await import('./workspaces.mjs');
   const { ProjectService } = await import('./project-service.mjs');
   const { ExtensionStore } = await import('./extensions.mjs');
-  const { SYSTEM_MEMORY_SOURCES } = await import('./system-memory.mjs');
+  const { systemMemorySources } = await import('./system-memory.mjs');
   const { COMMANDS } = await import('./commands.mjs');
   const { publicSettings, decryptSecrets, mirrorProvider } = await import('./secrets.mjs');
   const { registerAttachment, attachmentPreview } = await import('./attachments.mjs');
   const { savePastedText } = await import('./paste-drop.mjs');
   const { conversationMarkdown } = await import('./transcript.mjs');
   const { sessionSnapshot, passiveHistory } = await import('./session-snapshots.mjs');
+  const { turnFiles, turnFileDetail } = await import('./turn-files.mjs');
+  const { inspectSubagent, subagentOwner } = await import('./subagent-inspection.mjs');
   const { exportSessionArchive } = await import('./session-export.mjs');
   const { catalogEntries, configureCatalogCredentials, credentialStore } = await import('./provider-catalog.mjs');
   const { ProviderAuthorization } = await import('./provider-authorization.mjs');
@@ -215,11 +217,7 @@ async function startServer() {
       const ctx = { admin: true, scopeId: String(a.scopeId), sessionId: String(a.scopeId), projectId: a.scope === 'project' ? String(a.scopeId) : null };
       return extensions.remove(a.kind, { ...a, scope: a.scope }, ctx);
     },
-    'system-memory-sources': () => ({
-      // 只报告来源与容量，不返回正文：系统记忆由产品与插件拥有，界面不提供查看或编辑。
-      sources: SYSTEM_MEMORY_SOURCES.map(label => ({ label, editable: false })),
-      pluginInstructions: (mcpHost.status() || []).filter(x => x.instructions).map(({ name, version }) => ({ name, version, editable: false })),
-    }),
+    'system-memory-sources': () => systemMemorySources(mcpHost.status() || []),
     'component-info': () => sessions.components.info(),
     'doctor': async () => ({runtime:runtimeInfo,hostIntegrity:await windowsRuntime.hostIntegrity(),component:sessions.components.info(),chrome:[],chromeOk:sessions.components.info().installed,downloading:!!downloading,version:process.env.JSRA_APP_VERSION||''}),
     'kernel-info': async () => {
@@ -264,6 +262,8 @@ async function startServer() {
     },
     'session-export-archive': (a, context) => exportSessionArchive(S(a), a.path, { signal: context?.signal, includeDescendants: a.includeDescendants !== false }),
     'changes-list': a => { const s = S(a); return s.changes.list(s.workspace.id); },
+    'turn-files': a => { const s = S(a); return turnFiles(s.changes, s.workspace.id, a?.runId); },
+    'turn-file-detail': a => { const s = S(a); return turnFileDetail(s.changes, s.workspace.id, a?.runId, a?.path); },
     'change-detail': a => { const s = S(a); return s.changes.detail(a.id, s.workspace.id, { offset: a?.offset ?? 0, maxChars: a?.maxChars ?? 80000 }); },
     'change-undo': a => { const s = S(a); if (s.agent?.running) throw new Error('任务运行中，请先停止后撤销'); if (s.mode === 'read-only') throw new Error('只读权限下不能撤销文件改动'); sessions.workspaces.verify(s.workspace); const result = s.changes.undo(a.id, s.workspace); s.emit('changes-updated', { workspaceId: s.workspace.id }); return result; },
     'browser-launch': async a => S(a).launch({url:a?.url,isolated:a?.isolated}),
@@ -313,6 +313,7 @@ async function startServer() {
     'agent-send': a => S(a).send(a),
     'agent-queue-resume': a => S(a).resumeQueue(),
     'agent-queue-remove': a => S(a).removeQueued(a?.id),
+    'agent-queue-steer': a => S(a).steerQueued(a?.id, a?.runId),
     'agent-queue-edit': a => S(a).editQueued(a?.id, a?.text),
     'agent-turn-edit': a => S(a).editTurn(a?.turnId, a?.text, a?.attachments, a?.atSeq),
     'session-fork': async a => ({ sessionId: (await sessions.forkSession(S(a).id, a?.atSeq)).id }),
@@ -327,6 +328,10 @@ async function startServer() {
     'subagent-start': a => S(a).subagents.spawn(a.task),
     'subagent-result': a => { const s = S(a); return s.subagents.wait(a.id, { waitMs: 0, workspaceId: s.workspace.id }); },
     'subagent-cancel': a => ({ ok: S(a).subagents.cancel(a.id) }),
+    'subagent-view': a => inspectSubagent(S(a), a.path, { ...(a.beforeSeq === undefined ? {} : { beforeSeq: a.beforeSeq }), turns: a.turns ?? 20 }),
+    'subagent-message': a => { const { manager, id } = subagentOwner(S(a), a.path); return manager.message(id, a.text, { fromUser: true }); },
+    'subagent-stop': a => { const { manager, id } = subagentOwner(S(a), a.path); return { ok: manager.cancel(id) }; },
+    'agent-team-set': a => S(a).team.select(a.enabled),
     'session-snapshot': a => sessionSnapshot(S(a), { beforeSeq: a?.beforeSeq, turns: a?.turns ?? 50 }),
     'test-seed-history': a => {
       if (process.env.JSRA_TEST_FIXTURES !== '1') throw new Error('disabled');
@@ -363,6 +368,7 @@ async function startServer() {
     },
     'debug-resume': async a => { const s = S(a); if (!s.mcp.client) return { ok: false, error: '调试器没有连接' }; await s.ensureAgent().bindBrowserTarget(); const r = await s.mcp.call('pause_or_resume', { action: 'resume' }); const ok = !r.isError || /already running|not paused/i.test(r.text || ''); if (ok) { s.debuggerPaused = false; s.emit('agent-debugger-state', { paused: false }); } return { ok, error: ok ? '' : r.text }; },
     'agent-interrupt': a => { S(a).interrupt(); return true; },
+    'agent-cancel-turn': a => S(a).cancelTurn(a?.runId),
     'agent-wrapup': a => { S(a).agent?.finishSoon(); return true; },
     'agent-reset': a => { S(a).ensureAgent().reset(); return true; },
     'agent-new-chat': a => { const s = S(a); if (s.agent?.running) return false; s.ensureAgent().newChat(); return true; },

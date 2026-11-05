@@ -17,6 +17,7 @@ import { captureSelection, selectionSettings } from './model-selection.mjs';
 import { PERSISTENT_SHELL_TOOLS } from './persistent-shell.mjs';
 import { SESSION_QUERY_TOOLS } from './session-query-tools.mjs';
 import { WORKSPACE_DEPENDENCY_TOOLS } from './workspace-dependencies.mjs';
+import { TEAM_TOOLS } from './team-tools.mjs';
 
 // 委派深度：顶级会话 0，子代理 = 父 + 1。
 // 参考 DSH `subagent/depth.ts`：**持久化值才是权威，运行时值只能加深不能降低**。
@@ -49,6 +50,14 @@ export class ResearchAgents {
   }
   list(workspaceId) { return this.records.filter(r => !workspaceId || r.workspaceId === workspaceId).map(({ summary, ...r }) => ({ ...r, preview: summary?.slice(0, 180) || '' })); }
   save() { if (this.closing) return; atomicJson(this.file, this.records.slice(-30)); this.emit(this.list()); }
+  trimResumable(keepId) {
+    while (this.resumable.size > 10) {
+      const entry = [...this.resumable].find(([id, agent]) => id !== keepId && !agent.running && !agent.delegatedChildren?.jobs.size);
+      if (!entry) break;
+      const [id, agent] = entry;
+      agent.delegatedChildren?.cancelAll(); void agent.delegatedResources?.close(); agent.hist.close(); this.resumable.delete(id);
+    }
+  }
   dispose() {
     this.closing = true;
     const agents = [...this.resumable.values(), ...[...this.jobs.values()].map(job => job.agent)];
@@ -89,19 +98,19 @@ export class ResearchAgents {
         usage.prompt += child.usage?.prompt || 0; usage.completion += child.usage?.completion || 0;
       },
     });
-    agent = this.createAgent({ tools: [...WORKSPACE_TOOLS, ...WORKSPACE_DEPENDENCY_TOOLS, ...PERSISTENT_SHELL_TOOLS, ...PATCH_TOOLS, ...TODO_TOOLS, ...EXTENSION_TOOLS, ...SKILL_TOOLS, ...PLAN_TOOLS, ...SESSION_QUERY_TOOLS, ...HARNESS_TOOLS.filter(t => t.name !== 'goal_update')],
+    agent = this.createAgent({ tools: [...WORKSPACE_TOOLS, ...WORKSPACE_DEPENDENCY_TOOLS, ...PERSISTENT_SHELL_TOOLS, ...PATCH_TOOLS, ...TODO_TOOLS, ...EXTENSION_TOOLS, ...SKILL_TOOLS, ...PLAN_TOOLS, ...TEAM_TOOLS, ...SESSION_QUERY_TOOLS, ...HARNESS_TOOLS.filter(t => t.name !== 'goal_update')],
       browser: null, mcp: { tools: [], has: () => false }, mcpHost: ctx.mcpHost, projectDir,
       getSettings: () => inherited, getMode: () => resources.mode, hasApprovalListener: () => false, approve: async () => false,
       getPlan: () => plan.snapshot(),
       getWorkspace: () => ({ ...resources.workspace, roots: ctx.projectRoots || [] }), getToolContext: toolContext,
       getTodos: () => todos, setTodos: list => { todos = list; },
-      emit: (ev, data) => { if (ev === 'tool-start') { record.lastTool = data.name; this.save(); } if (ev === 'error') record.error = String(data).slice(0, 2000); },
+      emit: (ev, data) => { if (ev === 'tool-start') { record.lastTool = data.name; this.save(); } if (ev === 'usage') { record.liveUsage = data.total; this.save(); } if (ev === 'error') record.error = String(data).slice(0, 2000); },
     });
     agent.delegatedResources = resources; agent.delegatedChildren = children;
     return agent;
   }
   runChild(id, agent, prompt, record, ctx) {
-    record.usage = null; record.descendantUsage = { prompt: 0, completion: 0 };
+    record.usage = null; record.liveUsage = null; record.descendantUsage = { prompt: 0, completion: 0 };
     const job = { agent, record, done: null }; this.jobs.set(id, job); this.save();
     this.capacity.active++;
     const configured = this.settings().tokenBudget || 0;
@@ -121,11 +130,7 @@ export class ResearchAgents {
       this.capacity.active--; record.endedAt = Date.now(); this.jobs.delete(id);
       if (!record.cancelled && record.status !== 'failed') {
         this.resumable.set(id, agent);
-        if (this.resumable.size > 10) {
-          const oldest = this.resumable.keys().next().value;
-          const evicted = this.resumable.get(oldest); evicted.delegatedChildren?.cancelAll();
-          void evicted.delegatedResources?.close(); evicted.hist.close(); this.resumable.delete(oldest);
-        }
+        this.trimResumable(id);
       } else this.resumable.delete(id);
       this.onUsage(record); this.save(); this.onSettled(record);
     });
@@ -164,12 +169,12 @@ export class ResearchAgents {
     this.runChild(id, agent, prompt, record, ctx);
     return { id, status: 'running', title: record.title, mode: record.mode, access: record.access, depth };
   }
-  message(id, task) {
+  message(id, task, { fromUser = false } = {}) {
     task = String(task || '').trim(); if (!task || task.length > 12000) throw new Error('追加内容需要 1–12000 个字符');
     const record = this.records.find(r => r.id === id); if (!record) throw new Error('子代理不存在');
     const running = this.jobs.get(id);
     if (running) {
-      if (!running.agent.queueSteer(task)) throw new Error('子代理正在结束，请稍后再追加要求');
+      if (!running.agent.queueSteer(fromUser ? '用户补充：' + task : task)) throw new Error('子代理正在结束，请稍后再追加要求');
       record.lastSteerAt = Date.now(); this.save();
       return { id, status: 'running', steered: true, title: record.title };
     }
@@ -188,8 +193,20 @@ export class ResearchAgents {
     }
     record.status = 'running'; record.startedAt = Date.now(); record.endedAt = null; record.summary = undefined; record.error = undefined; record.timedOut = false; record.turns = (record.turns || 1) + 1;
     this.save();
-    this.runChild(id, agent, '父代理追加了新的研究要求，请结合之前的上下文继续：\n' + task, record, ctx);
+    this.runChild(id, agent, fromUser ? task : '父代理追加了新的研究要求，请结合之前的上下文继续：\n' + task, record, ctx);
     return { id, status: 'running', title: record.title, turns: record.turns };
+  }
+
+  restoreChild(id) {
+    const ctx = this.context(), record = this.records.find(row => row.id === id);
+    if (!record || record.workspaceId !== ctx.workspaceId || record.workRoot !== ctx.workRoot) throw Error('子代理不属于当前工作区');
+    const existing = this.jobs.get(id)?.agent || this.resumable.get(id);
+    if (existing) return existing;
+    const agent = this.childAgent(path.join(this.directory, '.subagents', id), ctx, record);
+    try { agent.restore(); } catch (error) { agent.delegatedChildren?.dispose(); void agent.delegatedResources?.close(); throw error; }
+    this.resumable.set(id, agent);
+    this.trimResumable(id);
+    return agent;
   }
 
   async wait(id, { waitMs = 10000, signal, workspaceId } = {}) {

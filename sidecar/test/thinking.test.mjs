@@ -28,8 +28,8 @@ test('档位表照 DSH 规范序，且发送值一一对应', () => {
     assert.ok(reasoningEffort(level.id), level.id + ' 缺少 reasoning_effort');
     assert.ok(thinkingBudget(level.id) >= 1024, level.id + ' 的思考预算必须 ≥ 1024');
   }
-  for (const id of ALL_LEVELS) assert.ok(levelLabel(id).length > 0, id + ' 缺少中文标签');
-  assert.equal(levelLabel('xhigh'), '极高');
+  for (const id of ALL_LEVELS) assert.ok(levelLabel(id).length > 0, id + ' 缺少英文标签');
+  assert.equal(levelLabel('xhigh'), 'XHigh');
   assert.deepEqual(THINKING_TRANSPORTS.map(t => t.id), ['effort', 'budget', 'switch', 'none']);
 });
 
@@ -37,7 +37,7 @@ test('声明归一：档位去重排序、未知值丢弃、默认档必须落�
   assert.deepEqual(normalizeThinkingLevels(['high', 'off', 'high', 'bogus']), ['off', 'high']);
   assert.deepEqual(normalizeThinkingLevels('medium'), ['medium']);
   assert.deepEqual(normalizeThinkingLevels(undefined), []);
-  assert.equal(levelsLabel(['off', 'high']), '关闭 / 高');
+  assert.equal(levelsLabel(['off', 'high']), 'Off / High');
 
   // 默认档不在声明里：回落到 medium，再回落到第一项，绝不留下矛盾配置。
   assert.equal(normalizeThinking({ levels: ['low', 'medium'], default: 'high' }).default, 'medium');
@@ -66,7 +66,7 @@ test('未声明时按模型名推断，认不出来就如实声明「不发送�
 test('可选档（xhigh / max）只来自模型显式声明，推断不会带出来', () => {
   const declared = normalizeThinking({ levels: ['off', 'high', 'xhigh', 'max'], default: 'xhigh', transport: 'effort' });
   assert.deepEqual(declared.levels, ['off', 'high', 'xhigh', 'max']);
-  assert.equal(levelLabel(declared.default), '极高');
+  assert.equal(levelLabel(declared.default), 'XHigh');
   assert.equal(reasoningEffort('max'), 'max');
   assert.equal(thinkingBudget('xhigh'), 32000);
   // 显式声明时，用户在界面上选到的「极高」必须真的发出去。

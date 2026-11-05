@@ -86,6 +86,7 @@ export function Workbench({ children }) {
   const inputRef = useRef();      // 输入框
   const chatRef = useRef();       // 消息滚动区
   const [chatElement, setChatElement] = useState(null);
+  const [chatContent, bindChatContent] = useState(null);
   const bindChat = useCallback(element => { chatRef.current = element; setChatElement(element); }, []);
   const [uploads, setUploads] = useState({});
   const [sending, setSending] = useState({});
@@ -260,6 +261,7 @@ export function Workbench({ children }) {
       on('sessions', v => setSessions(v)),
       on('goal', (v, s) => dispatch({ t: 'patch', sid: s, patch: { goal: v } })),
       on('subagents', (v, s) => dispatch({ t: 'patch', sid: s, patch: { subagents: v } })),
+      on('agent-team', (v, s) => dispatch({ t: 'patch', sid: s, patch: { team: v } })),
       on('subagent-finished', (v, s) => { if (s === sidRef.current) toast(`子代理${v.status === 'completed' ? '已完成' : '已结束'}：${v.title}`, v.status === 'completed' ? 'ok' : 'warn', 5000); }),
       on('agent-debugger-state', (v, s) => dispatch({ t: 'patch', sid: s, patch: { debuggerPaused: !!v.paused } })),
       on('settings-changed', v => setSettings(v)),
@@ -345,7 +347,7 @@ export function Workbench({ children }) {
       api.invoke('session-snapshot', { sessionId: s.id }).then(v => {
         if (hydration.current.get(s.id) !== updates) return;
         const events = historyEvents(v.events, v.partial, v.partialItem, v.partialReasoning, v.startSeq || 0);
-        dispatch({ t: 'patch', sid: s.id, patch: { events, historyStart: v.startSeq || 0, historyLoading: false, historyError: null, ctx: v.context, mode: v.state.mode, review: v.state.review || 'manual', modelSelection: v.state.modelSelection, plan: v.state.plan, todos: v.state.todos, approvals: v.state.approvals || [], question: v.state.questions?.[0] || null, run: v.state.run, ratings: v.state.ratings || {}, retry: v.state.modelRetry || null, debuggerPaused: !!v.state.debuggerPaused, goal: v.state.goal, subagents: v.state.subagents || [] } });
+        dispatch({ t: 'patch', sid: s.id, patch: { events, historyStart: v.startSeq || 0, historyLoading: false, historyError: null, ctx: v.context, mode: v.state.mode, review: v.state.review || 'manual', modelSelection: v.state.modelSelection, plan: v.state.plan, todos: v.state.todos, approvals: v.state.approvals || [], question: v.state.questions?.[0] || null, run: v.state.run, ratings: v.state.ratings || {}, retry: v.state.modelRetry || null, debuggerPaused: !!v.state.debuggerPaused, goal: v.state.goal, team: v.state.team, subagents: v.state.subagents || [] } });
         const queued = hydration.current.get(s.id) || []; hydration.current.delete(s.id);
         for (const update of queued) if (update.revision == null || update.revision > v.revision) update.apply();
       }).catch(error => {
@@ -386,53 +388,16 @@ export function Workbench({ children }) {
   const scrollRef = useRef(null);
   const viewsRef = useRef(presentation.views); viewsRef.current = presentation.views;
   const setScrollRef = useRef(presentation.setScroll); setScrollRef.current = presentation.setScroll;
-  useEffect(() => {
-    const el = chatElement;
-    if (!el) return;
-    const ctrl = new ChatScroll();
-    scrollRef.current = ctrl;
-    let frame = 0;
-    ctrl.attach(el, {
-      onUserMove: () => {
-        // 用户滚动后把语义锚点落盘（节流到一帧）。贴底时锚点是 null → 清空记录。
-        if (frame) return;
-        frame = requestAnimationFrame(() => {
-          frame = 0;
-          if (scrollRef.current !== ctrl || sidRef.current !== sid) return;
-          setScrollRef.current(ctrl.currentAnchor, sid);
-        });
-      },
-    });
-    // 进入会话：有保存的锚点就回锚点，否则贴底。
+  useLayoutEffect(() => {
+    if (!chatElement || !chatContent || cur.historyLoading) return;
+    const ctrl = new ChatScroll(); scrollRef.current = ctrl;
+    ctrl.attach(chatElement, { content: chatContent, onUserMove: () => {
+      if (scrollRef.current === ctrl && sidRef.current === sid) setScrollRef.current(ctrl.currentAnchor, sid);
+    } });
     ctrl.restore(sessionView(viewsRef.current, sid)?.scroll || null);
-    const resize = new ResizeObserver(() => ctrl.contentGrew());
-    resize.observe(el);
-    return () => {
-      resize.disconnect();
-      if (frame) cancelAnimationFrame(frame);
-      if (scrollRef.current === ctrl) scrollRef.current = null;
-      ctrl.detach();
-    };
-  }, [sid, chatElement]);
-
-  // 历史异步加载会多次改变高度。只要仍在跟随态就贴底；
-  // 用户上翻过（following=false）则完全不介入——这正是旧版缺失的尊重。
-  useEffect(() => {
-    const el = chatRef.current;
-    if (!el) return;
-    let raf = 0, stable = 0, lastHeight = -1, frames = 0;
-    const tick = () => {
-      const ctrl = scrollRef.current;
-      if (!ctrl || chatRef.current !== el) return;
-      const h = el.scrollHeight;
-      if (h !== lastHeight) { lastHeight = h; stable = 0; ctrl.contentGrew(); }
-      else if (++stable >= 3) return;          // 高度稳定，收手
-      if (++frames > 180) return;              // 安全上限（~3 秒）
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [cur.events, sid, chatElement]);
+    return () => { if (scrollRef.current === ctrl) scrollRef.current = null; ctrl.detach(); };
+  }, [sid, chatElement, chatContent, !!cur.historyLoading]);
+  useLayoutEffect(() => { scrollRef.current?.contentGrew(); }, [cur.events, commandFeedback[sid], cur.ctx?.compressing]);
 
   // 画面区尺寸变化 → 通知 sidecar 调整无头视口
   const runningNow = !!cur?.status?.running;
@@ -598,7 +563,7 @@ export function Workbench({ children }) {
     setScrollRef.current(null, target);
   }
 
-  async function send(auto, override) {
+  async function send(auto, override, delivery = 'queue') {
     if (!sid) { setProjectEditor({}); return; }
     const target = sid, sentDraft = input;
     if (sending[target]) return;
@@ -621,7 +586,11 @@ export function Workbench({ children }) {
     }
     const parsedCommand = !auto && parseCommand(text);
     const command = parsedCommand?.known ? parsedCommand : null;
-    const feedback = (state, message) => setCommandFeedback(m => ({ ...m, [target]: { name: command?.name || '', state, text: message } }));
+    const commandAt = Date.now();
+    const feedback = (state, message) => {
+      setCommandFeedback(m => ({ ...m, [target]: { name: command?.name || '', state, text: message, at: commandAt } }));
+      if (state === 'running' || state === 'success') followAcceptedSubmission(target);
+    };
     if (command) {
       const commandAttachments = atts[target] || [];
       if (!command.known) { toast('未知命令。输入 / 查看可用命令。', 'warn'); return; }
@@ -664,6 +633,8 @@ export function Workbench({ children }) {
         text = request;
       } else {
       feedback('running', '正在执行 /' + command.name + '…');
+      setDrafts(m => m[target] === sentDraft ? { ...m, [target]: '' } : m);
+      if (inputRef.current) inputRef.current.style.height = '';
       if (command.name === 'status') { feedback('success', ['会话 ID：' + target, session?.workspace?.root, '权限：' + presetLabel(currentPreset(cur.mode, cur.review)), cur.goal ? '目标：' + cur.goal.objective : ''].filter(Boolean).join('\n')); }
       else {
         if (command.name === 'compact' && cur.agentRunning) { feedback('error', '请先停止当前任务，再压缩上下文。'); return; }
@@ -679,7 +650,7 @@ export function Workbench({ children }) {
           }
           if (command.name === 'agent') { await api.invoke('subagent-start', { sessionId: target, task: command.argument }); r = { ok: true }; }
           if (command.name === 'agents') { dispatch({ t: 'patch', sid: target, patch: { subagents: (await api.invoke('agent-state', { sessionId: target })).subagents || [] } }); toast('从对话顶部的子代理入口，或所属轮次的执行过程中查看状态和结论。', 'info'); }
-          if (command.name === 'stop') await api.invoke('agent-interrupt', { sessionId: target });
+          if (command.name === 'stop') await api.invoke(cur.agentRunning && cur.run?.id ? 'agent-cancel-turn' : 'agent-interrupt', { sessionId: target, runId: cur.run?.id });
           if (command.name === 'new') await newSession();
           if (r?.ok === false) { feedback('error', r.error || '命令未执行'); return; }
           if (command.name === 'goal' && !['pause', 'clear'].includes(command.argument)) followAcceptedSubmission(target);
@@ -697,7 +668,7 @@ export function Workbench({ children }) {
     let r;
     setSending(m => ({ ...m, [target]: true }));
     // 是否入队交给 sidecar 判断：本地 agentRunning 可能比实际状态晚一拍。
-    try { r = await api.invoke('agent-send', { sessionId: target, text, auto, enqueue: true, attachments: list.map(({ key, ...a }) => a) }); }
+    try { r = await api.invoke('agent-send', { sessionId: target, text, auto, enqueue: true, delivery, attachments: list.map(({ key, ...a }) => a) }); }
     catch (e) { toast('发送失败：' + e.message, 'err'); return; }
     finally { setSending(m => ({ ...m, [target]: false })); }
     if (!r?.ok) {
@@ -705,8 +676,8 @@ export function Workbench({ children }) {
       if (sidRef.current === target && /API Key/.test(r?.error || '')) setView('settings');
       return;
     }
-    if (r.queued) toast('已加入下一轮队列', 'info');
-    if (!r.queued) followAcceptedSubmission(target);
+    if (r.queued && !r.steered) toast('已加入下一轮队列', 'info');
+    if (!r.queued || r.steered) followAcceptedSubmission(target);
     if (!auto) {
       const sent = new Set(list.map(a => a.key));
       setAtts(m => ({ ...m, [target]: (m[target] || []).filter(a => !sent.has(a.key)) }));
@@ -723,14 +694,16 @@ export function Workbench({ children }) {
     setView('chat');
     const target = sidRef.current;
     if (cur.agentRunning) { toast('请先停止当前任务，再压缩上下文。', 'warn'); return; }
-    setCommandFeedback(m => ({ ...m, [target]: { name: 'compact', state: 'running', text: '正在执行 /compact…' } }));
+    const at = Date.now();
+    followAcceptedSubmission(target);
+    setCommandFeedback(m => ({ ...m, [target]: { name: 'compact', state: 'running', text: '正在执行 /compact…', at } }));
     try {
       const r = await inv('agent-compress', { instructions });
-      if (r?.cancelled) { setCommandFeedback(m => ({ ...m, [target]: { name: 'compact', state: 'idle', text: '已取消压缩，历史保持不变。' } })); return; }
-      if (!r?.ok) { setCommandFeedback(m => ({ ...m, [target]: { name: 'compact', state: 'error', text: r?.error || '压缩失败' } })); return; }
-      setCommandFeedback(m => ({ ...m, [target]: { name: 'compact', state: 'done', text: `上下文已压缩：${r.before} → ${r.after} tokens` } }));
+      if (r?.cancelled) { setCommandFeedback(m => ({ ...m, [target]: { name: 'compact', at, state: 'idle', text: '已取消压缩，历史保持不变。' } })); return; }
+      if (!r?.ok) { setCommandFeedback(m => ({ ...m, [target]: { name: 'compact', at, state: 'error', text: r?.error || '压缩失败' } })); return; }
+      setCommandFeedback(m => ({ ...m, [target]: { name: 'compact', at, state: 'done', text: `上下文已压缩：${r.before} → ${r.after} tokens` } }));
     } catch (e) {
-      setCommandFeedback(m => ({ ...m, [target]: { name: 'compact', state: 'error', text: e.message || '压缩失败' } }));
+      setCommandFeedback(m => ({ ...m, [target]: { name: 'compact', at, state: 'error', text: e.message || '压缩失败' } }));
     }
   }
 
@@ -796,9 +769,11 @@ export function Workbench({ children }) {
   // ---- 快捷键 ----
   useEffect(() => {
     const h = e => {
+      if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
       if (e.target.closest?.('.terminal-screen') && !e.altKey) return;
-      if (mod(e) && e.key === 'Enter') { e.preventDefault(); send(false); }
-      else if (mod(e) && e.key.toLowerCase() === 'l') { e.preventDefault(); if (!sid) { setWorkspacePrompt('create'); return; } setView('chat'); setSide('browser'); setSideOpen(true); setTimeout(() => { urlRef.current?.focus(); urlRef.current?.select(); }, 60); }
+      // Submission belongs to the focused composer. A global Cmd/Ctrl+Enter
+      // bypasses IME and overlay ownership, and double-submits local gestures.
+      if (mod(e) && e.key.toLowerCase() === 'l') { e.preventDefault(); if (!sid) { setWorkspacePrompt('create'); return; } setView('chat'); setSide('browser'); setSideOpen(true); setTimeout(() => { urlRef.current?.focus(); urlRef.current?.select(); }, 60); }
       else if (mod(e) && e.key.toLowerCase() === 't') { e.preventDefault(); newSession(); }
       else if (mod(e) && e.key === ',') { e.preventDefault(); setView(v => v === 'settings' ? 'chat' : 'settings'); }
       else if (mod(e) && /^[1-4]$/.test(e.key) && e.altKey) {
@@ -833,7 +808,15 @@ export function Workbench({ children }) {
     atts: atts[sid] || [], addAtt, rmAtt, addFiles, dropPaste, uploading: !!uploads[sid], sending: !!sending[sid], enableImages,
     send, sendInput, compactNow, pickModel, pickThinking, inv, loadEarlierHistory, reloadHistory: () => { seen.current.delete(sidRef.current); setSessions(value => ({ ...value })); },
     setTheme,
-    refs: { viewRef: bindViewport, canvasRef: bindCanvas, urlRef, inputRef, chatRef, bindChat, scrollController: scrollRef },
+    followSubmission: followAcceptedSubmission,
+    steerQueue: async () => {
+      for (const item of cur.queuedItems || []) {
+        const result = await api.invoke('agent-queue-steer', { sessionId: sid, id: item.id, runId: cur.run?.id });
+        if (!result.ok) { if (!['queue-item-not-found', 'steer-unavailable'].includes(result.code)) toast(result.error, 'err'); break; }
+      }
+      followAcceptedSubmission(sid);
+    },
+    refs: { viewRef: bindViewport, canvasRef: bindCanvas, urlRef, inputRef, chatRef, bindChat, bindChatContent, scrollController: scrollRef },
     embedOn, embedCovered, embedPending,
     isApi, fmt: { hostOf: undefined },
   };

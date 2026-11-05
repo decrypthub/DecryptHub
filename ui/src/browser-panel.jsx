@@ -3,9 +3,12 @@ import { resolveAddress } from '../../sidecar/url.mjs';
 import { Box, DropdownMenu, Text, TextField, Spinner } from '@radix-ui/themes';
 import { ActionIcon, Button, EmptyState, Icon } from './kit.jsx';
 import { useWorkbench } from './bus.jsx';
+import { useCompositionGuard } from './use-composition-guard.js';
+import { isSubmitEnter } from './composition-guard.js';
 
 export function BrowserPanel({ children }) {
   const { cur, inv, sid, launching, cleanRetry, refs, sendInput, embedOn, embedCovered, embedPending, setView, toast, tabs } = useWorkbench();
+  const composition = useCompositionGuard(sid, refs.urlRef);
   const tab = tabs.activeTab, page = cur.status.pages.find(p => p.id === tab?.pageId);
   const network = tab?.mode === 'network';
   const [address, setAddress] = useState(page?.url || ''), dirty = useRef(false);
@@ -48,9 +51,9 @@ export function BrowserPanel({ children }) {
       <ActionIcon icon="back" variant="soft" color="gray" disabled={!running} onClick={() => inv('go-back')} title="后退" />
       <ActionIcon icon="reload" variant="soft" color="gray" disabled={!running} onClick={() => inv('reload')} title="刷新" />
       <Box flexGrow="1" style={{ minWidth: 0 }}>
-        <TextField.Root ref={refs.urlRef} size="2" radius="full" value={address} aria-label="目标网址"
+        <TextField.Root ref={composition.ref} size="2" radius="full" value={address} aria-label="目标网址"
           onChange={e => { dirty.current = true; setAddress(e.target.value); }}
-          onKeyDown={e => { if (e.key === 'Enter') { dirty.current = false; tabs.navigate(resolveAddress(e.currentTarget.value)); } }} onFocus={e => e.target.select()}
+          onKeyDown={e => { if (!composition.isComposing(e) && isSubmitEnter(e)) { e.preventDefault(); dirty.current = false; tabs.navigate(resolveAddress(e.currentTarget.value)); } }} onFocus={e => e.target.select()}
           placeholder="输入网址，按回车前往（Ctrl+L）" spellCheck={false}><TextField.Slot><Icon n="globe" size={13} /></TextField.Slot>{(launching[sid] || tabs.pending === tab.id) && <TextField.Slot side="right"><Spinner size="1" /></TextField.Slot>}</TextField.Root>
       </Box>
       <ActionIcon icon="network" variant="soft" color="gray" title={network ? '返回网页' : '显示网络请求'} aria-pressed={network} onClick={() => tabs.updateTab(tab.id, { mode: network ? 'page' : 'network' })} />

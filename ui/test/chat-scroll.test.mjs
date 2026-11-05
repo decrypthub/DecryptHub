@@ -5,7 +5,7 @@
 //   2. 跟随意图是显式状态，不靠几何量反推
 //   3. 保存位置用语义锚点（轮次+偏移），不用绝对像素
 //
-// 这里用最小 DOM 替身验证状态机；真实 DOM 行为由 verify-scroll-stick.mjs 覆盖。
+// 最小 DOM 替身按浏览器规则约束滚动范围；实际交互另做可见验证。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ChatScroll, BOTTOM_TOLERANCE, normalizeAnchor } from '../src/chat-scroll.js';
@@ -14,7 +14,9 @@ import { ChatScroll, BOTTOM_TOLERANCE, normalizeAnchor } from '../src/chat-scrol
 function fakeScroller({ turnCount = 10, turnHeight = 400, viewport = 600 } = {}) {
   const listeners = new Map();
   const el = {
-    scrollTop: 0,
+    _top: 0,
+    get scrollTop() { return this._top; },
+    set scrollTop(value) { this._top = Math.min(Math.max(0, this.scrollHeight - this.clientHeight), Math.max(0, value)); },
     clientHeight: viewport,
     get scrollHeight() { return turnCount * turnHeight; },
     style: {
@@ -44,7 +46,7 @@ function fakeScroller({ turnCount = 10, turnHeight = 400, viewport = 600 } = {})
       };
     },
     /** 模拟用户滚动（会派发 scroll 事件） */
-    userScrollTo(top) { el.scrollTop = top; listeners.get('scroll')?.(); },
+    userScrollTo(top) { el.scrollTop = top; listeners.get('scroll')?.(); listeners.get('scrollend')?.(); },
     /** 模拟用户手势 */
     userIntent() { listeners.get('wheel')?.(); },
   };
@@ -63,7 +65,7 @@ test('restore(null) 贴底，并清空锚点', () => {
   const r = s.restore(null);
   assert.equal(r.atBottom, true);
   assert.equal(s.currentAnchor, null, '贴底不该留下锚点');
-  assert.equal(el.scrollTop, el.scrollHeight, '必须落到真实底部');
+  assert.equal(el.scrollTop, el.scrollHeight - el.clientHeight, '必须落到真实底部');
 });
 
 test('restore(anchor) 回到锚定的轮次', () => {
@@ -87,8 +89,8 @@ test('内容变长后，锚点仍指向同一轮（这是像素方案做不到�
   const s2 = new ChatScroll();
   s2.attach(grew);
   s2.restore({ turnId: 'turn-5', offset: 100 });
-  // turn-5 顶部 = 5*600 = 3000，减 offset 100
-  assert.equal(grew.scrollTop, 2900, '锚点必须按新几何重算，而不是回放旧像素');
+  // turn-5 顶部 = 5*600 = 3000，加 offset 100（视口顶部已进入该轮 100px）
+  assert.equal(grew.scrollTop, 3100, '锚点必须按新几何重算，而不是回放旧像素');
   assert.notEqual(grew.scrollTop, before, '内容高度变了，像素值必然不同——这正是旧实现的错');
 });
 
@@ -101,6 +103,20 @@ test('用户上翻后停止跟随，内容增长不再抢位置', () => {
   const held = el.scrollTop;
   assert.equal(s.contentGrew(), false, '非跟随态不该动');
   assert.equal(el.scrollTop, held);
+});
+
+test('显式展开阅读在高度变化前释放贴底，后续内容增长不抢位置', () => {
+  const s = new ChatScroll(), el = fakeScroller();
+  let saved = null;
+  s.attach(el, { onUserMove: () => { saved = s.currentAnchor; } });
+  s.follow();
+  const top = el.scrollTop;
+  s.pauseFollowing();
+  assert.equal(s.isFollowing, false);
+  assert.ok(saved?.turnId, '阅读意图应保存语义锚点');
+  assert.equal(s.contentGrew(), false);
+  assert.equal(el.scrollTop, top);
+  s.follow(); assert.equal(s.isFollowing, true, '显式回到底部后仍能恢复跟随');
 });
 
 test('用户滚回底部后恢复跟随并清空锚点', () => {
@@ -124,7 +140,7 @@ test('跟随态下内容增长会贴底', () => {
   s.restore(null);
   count = 20;                                  // 新消息进来
   assert.equal(s.contentGrew(), true);
-  assert.equal(el.scrollTop, count * 400, '必须跟到新底部');
+  assert.equal(el.scrollTop, count * 400 - el.clientHeight, '必须跟到新底部');
 });
 
 test('jumpToTurn 末轮 = 精确贴底，不留偏移', () => {
@@ -133,7 +149,7 @@ test('jumpToTurn 末轮 = 精确贴底，不留偏移', () => {
   s.restore({ turnId: 'turn-2', offset: 0 });
   const r = s.jumpToTurn('turn-9', { atBottom: true });
   assert.equal(r.atBottom, true);
-  assert.equal(el.scrollTop, el.scrollHeight, '末轮必须精确贴底（旧实现差 12~68px）');
+  assert.equal(el.scrollTop, el.scrollHeight - el.clientHeight, '末轮必须精确贴底（旧实现差 12~68px）');
 });
 
 test('jumpToTurn 中间轮留 12px 呼吸空间，且不再跟随', () => {

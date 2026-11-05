@@ -46,6 +46,14 @@ export function useWorkspaceTabs({ presentation, sid, cur, session, api, toast, 
     if (dock.tabs.length >= 32 && !dock.tabs.some(t => t.kind === 'document' && t.path === path && t.root === root && t.workspace === workspace)) { toast('请先关闭一些工作标签页', 'warn'); return; }
     presentation.update(sid, view => { const found = view.dock.tabs.find(t => t.kind === 'document' && t.path === path && t.root === root && t.workspace === workspace); return { dock: found ? { ...view.dock, activeId: found.id } : addDockTab(view.dock, 'document', { path, root, workspace, title: path.split(/[\\/]/).pop() }), sideOpen: true, manuallyClosed: false }; });
   }
+  function openChange(runId, path) {
+    const workspace = workspaceKey(session?.workspace);
+    if (dock.tabs.length >= 32 && !dock.tabs.some(tab => tab.kind === 'change' && tab.runId === runId && tab.path === path && tab.workspace === workspace)) { toast('请先关闭一些工作标签页', 'warn'); return; }
+    presentation.update(sid, view => {
+      const found = view.dock.tabs.find(tab => tab.kind === 'change' && tab.runId === runId && tab.path === path && tab.workspace === workspace);
+      return { dock: found ? { ...view.dock, activeId: found.id } : addDockTab(view.dock, 'change', { runId, path, workspace, title: path.split(/[\\/]/).pop() + ' · 改动' }), sideOpen: true, manuallyClosed: false };
+    });
+  }
   async function navigate(url, requestedTab) {
     url = normalizeTargetUrl(url); if (!url) return;
     const intent = ++sequence.current, tab = requestedTab || activeTab;
@@ -70,5 +78,5 @@ export function useWorkspaceTabs({ presentation, sid, cur, session, api, toast, 
     navigate(url, next.tabs.find(t => t.id === next.activeId));
   }
   const browserReady = activeTab?.kind === 'browser' && activeTab.mode !== 'network' && (!cur.status.running || !!activeTab.pageId && cur.status.pages.some(p => p.id === activeTab.pageId && p.active));
-  return { dock, activeTab, browserReady, pending: pending?.sid === sid ? pending.id : null, newTab, selectTab, closeTab, updateTab, openDocument, openWebLink, navigate, consumeTerminalStart: id => terminalStarts.current.delete(id) };
+  return { dock, activeTab, browserReady, pending: pending?.sid === sid ? pending.id : null, newTab, selectTab, closeTab, updateTab, openDocument, openChange, openWebLink, navigate, consumeTerminalStart: id => terminalStarts.current.delete(id) };
 }

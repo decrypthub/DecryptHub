@@ -2,6 +2,7 @@
 // Reference: DSH api/session-controller/history/{controller.ts,history.ts}.
 import path from 'node:path';
 import { History } from './history.mjs';
+import { inspectContext } from './context-inspection.mjs';
 
 export function historyWindow(events, { beforeSeq = events.length, turns = 50 } = {}) {
   if (!Number.isSafeInteger(beforeSeq) || beforeSeq < 0 || beforeSeq > events.length) throw Error('历史切点无效，请重新加载');
@@ -19,7 +20,8 @@ export function passiveHistory(session) {
 }
 
 export function sessionSnapshot(session, request = {}) {
-  const agent = session.agent, window = historyWindow(passiveHistory(session), request);
+  const agent = session.agent, history = agent?.hist || History.load(path.join(session.projectDir, '.agent-history.json'), '');
+  const window = historyWindow(history.events, request);
   return { ...window, revision: session.eventRevision || 0, state: session.publicState(), partial: agent?.partial || '', partialReasoning: agent?.partialReasoning || '',
-    partialItem: agent?.currentItem || null, context: agent?.stats() || null };
+    partialItem: agent?.currentItem || null, context: inspectContext(session, history) };
 }

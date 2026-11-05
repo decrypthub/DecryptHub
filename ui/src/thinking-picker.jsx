@@ -8,16 +8,12 @@
 //   · 没有声明推理等级的模型不渲染强度那一块（DSH 里 reasoning === undefined 时该行整个不出现），
 //     而不是留一个拖了没反应的滑杆。
 //
-// 视觉照产品给的设计图：大号档位名（右侧复位），其下模型行（带箭头），
-// 再往下是分段进度条与档位刻度，底部如实写出这一档会放进请求体的参数。
-// 设计图顶部的闪电图标已按要求去掉；触发器上也不留。
-//
-// 档位是「分段进度条」而不是滑杆：条被切成与档位一一对应的等宽小块，点哪块就跳到哪档，
-// 没有可拖的把手，也就不会有「拖到两档之间」这种不存在的状态。
-// 自己实现而不引 @radix-ui/react-slider：它只是 Radix Themes 的传递依赖，
-// 直接 import 会在依赖提升变化时突然找不到，而这里要的恰恰不是 slider 语义。
+// 视觉按用户提供的 ChatGPT 参考图：居中的当前英文档位、模型入口、胶囊滑杆。
+// 不提供快速模式或复位按钮，不在底部挤放全部档位名称。
+// Slider 使用直接声明的 Radix Primitive；连续拖动预览，松开后只提交最终声明档位。
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Popover, Text } from '@radix-ui/themes';
+import * as Slider from '@radix-ui/react-slider';
 import { Icon } from './kit.jsx';
 import { levelLabel, normalizeThinkingLevels } from '../../sidecar/thinking.mjs';
 
@@ -37,15 +33,17 @@ export function ModelSeat({
   const [open, setOpen] = useState(false);
   const [pane, setPane] = useState('effort');
   const [query, setQuery] = useState('');
+  const [preview, setPreview] = useState(null);
   const searchRef = useRef(null);
   const groups = useMemo(() => modelGroups(providers), [providers]);
   const list = normalizeThinkingLevels(levels);
+  const levelSignature = list.join('|');
   const hasEffort = list.length > 0;
-  const current = indexOf(list, value);
-  const shown = current >= 0 ? levelLabel(list[current]) : '默认';
+  const effectiveValue = list.includes(value) ? value : list.includes(defaultLevel) ? defaultLevel : value;
+  const current = indexOf(list, list.includes(preview) ? preview : effectiveValue);
+  const shown = current >= 0 ? levelLabel(list[current]) : 'Default';
   const active = (groups.find(g => g.id === providerId)?.models || []).find(m => m.id === model);
   const modelName = active?.name || model || '选择模型';
-  const isReset = hasEffort && !!defaultLevel && value !== defaultLevel && list.includes(defaultLevel);
   const searchable = groups.reduce((n, g) => n + g.models.length, 0) > 4;
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -59,6 +57,7 @@ export function ModelSeat({
 
   // 打开时回到强度面（那是这个座位的主要动作），并把上一轮的搜索词清掉。
   useEffect(() => { if (!open) { setPane('effort'); setQuery(''); } }, [open]);
+  useEffect(() => { setPreview(null); }, [open, pane, providerId, model, effectiveValue, levelSignature]);
   useEffect(() => { if (open && pane === 'model' && searchable) searchRef.current?.focus(); }, [open, pane, searchable]);
 
   const pickModel = (groupId, m) => { onPickModel(groupId, m.id); setOpen(false); };
@@ -71,7 +70,7 @@ export function ModelSeat({
         <Icon n="chevdown" size={12} className="seat-chevron" />
       </button>
     </Popover.Trigger>
-    <Popover.Content className="seat-pop" width="300px" sideOffset={8} collisionPadding={16} align="end" data-overlay>
+    <Popover.Content className="seat-pop" width="320px" sideOffset={8} collisionPadding={16} align="end" data-overlay>
       {pane === 'model'
         ? <div className="seat-pane">
             <div className="seat-pane-head">
@@ -93,71 +92,51 @@ export function ModelSeat({
               {!filtered.length && <Text as="div" size="1" color="gray" className="seat-empty">没有匹配的模型</Text>}
             </div>
           </div>
-        : <div className="seat-pane">
+        : <div className="seat-pane seat-effort-pane">
             {hasEffort && <div className="seat-head">
               <Text as="div" className="thinking-level" aria-live="polite">{shown}</Text>
-              {isReset && <button type="button" className="thinking-reset" onClick={() => onPickThinking(defaultLevel)} title="恢复模型默认强度" aria-label="恢复模型默认强度"><Icon n="reload" size={13} /></button>}
             </div>}
             <button type="button" className="seat-modelrow" onClick={() => setPane('model')} aria-label={'选择模型，当前 ' + modelName}>
               <span className="seat-modelrow-name">{modelName}</span>
               <Icon n="chevright" size={12} className="seat-chevron" />
             </button>
-            {hasEffort && <LevelSlider levels={list} value={value} onChange={onPickThinking} label={'思考强度：' + shown} />}
-            {!hasEffort && <Text as="div" size="1" color="gray" className="seat-note">该模型没有声明思考强度：请求里不会带思考参数，由端点自行决定。</Text>}
+            {hasEffort && <LevelSlider key={providerId + '|' + model} levels={list} value={effectiveValue} onChange={onPickThinking} onPreview={setPreview} showValue={false} label="思考强度" />}
+            {!hasEffort && <Text as="div" size="1" color="gray" className="seat-note">该模型不支持调整思考强度</Text>}
           </div>}
     </Popover.Content>
   </Popover.Root>;
 }
 
-/**
- * 档位条本身：一张「N 段进度条」，每一段就是一个档位，点哪段跳哪档。
- * 没有把手、没有拖动，因此不存在「停在两档之间」的状态。
- * value 为空表示跟随默认（一段都不点亮），此时方向键从第一档开始。
- */
-export function LevelSlider({ levels, value, onChange, label = '默认强度', describedBy }) {
+/** 离散档位、连续拖动；指针、触摸、方向键和 Home/End 由 Radix 统一处理。 */
+export function LevelSlider({ levels, value, onChange, onPreview, showValue = true, label = '默认强度', describedBy }) {
   const list = normalizeThinkingLevels(levels);
-  const current = indexOf(list, value);
-  const pick = index => { if (index >= 0 && index < list.length) onChange(list[index]); };
-  // 键盘连续按键时 props 还没回流，直接读 current 会落后一拍（Home 之后立刻 ArrowRight 会停在原地）。
-  // 所以这里基于「刚刚提交的值」推算，而不是等重渲染。
-  const pending = useRef(value);
-  pending.current = value;
-  // 焦点走 roving tabindex：Tab 进组只落在当前档（没选就落第一档），← → 在段间移动并立即生效。
-  // 每段是真按钮，读屏读到的是「思考强度 中，单选按钮，已选中」，而不是一个说不出值的容器。
-  const stepsRef = useRef(null);
-  const wantFocus = useRef(-1);
-  useEffect(() => {
-    const at = wantFocus.current;
-    if (at < 0) return;
-    wantFocus.current = -1;
-    stepsRef.current?.querySelectorAll('.thinking-step')[at]?.focus();
-  }, [value]);
-  const keydown = event => {
-    const last = list.length - 1;
-    // 连续按键时 props 还没回流：按「刚刚提交的值」算起点，否则 Home 之后紧跟 ArrowRight 会停在原地。
-    const seen = indexOf(list, pending.current);
-    const at = seen >= 0 ? seen : 0;
-    const delta = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
-    let next;
-    if (event.key === 'Home') next = 0;
-    else if (event.key === 'End') next = last;
-    else if (delta !== undefined) next = Math.max(0, Math.min(last, at + delta));
-    else return;
-    event.preventDefault();
-    const target = list[next];
-    if (target === undefined) return;
-    wantFocus.current = next;
-    if (target !== pending.current) { pending.current = target; onChange(target); }
-    else stepsRef.current?.querySelectorAll('.thinking-step')[next]?.focus();
+  const [draft, setDraft] = useState(null);
+  const revision = useRef(0);
+  const signature = list.join('|');
+  useEffect(() => { revision.current++; setDraft(null); }, [value, signature]);
+  useEffect(() => () => { revision.current++; }, []);
+  const selected = draft && draft.signature === signature ? draft.id : value;
+  const current = Math.max(0, indexOf(list, selected));
+  const change = ([index]) => {
+    const id = list[index];
+    if (!id) return;
+    revision.current++;
+    setDraft({ signature, id }); onPreview?.(id);
   };
-  const tabIndex = index => ((current >= 0 ? index === current : index === 0) ? 0 : -1);
-  return <div ref={stepsRef} className="thinking-steps" role="radiogroup" aria-label={label} aria-describedby={describedBy} onKeyDown={keydown}>
-    {list.map((id, index) => <button type="button" role="radio" key={id} tabIndex={tabIndex(index)}
-      className={'thinking-step' + (index === current ? ' on' : '') + (current >= 0 && index < current ? ' done' : '')}
-      aria-checked={index === current} aria-label={'思考强度 ' + levelLabel(id)} title={levelLabel(id)}
-      onClick={() => pick(index)}>
-      <span className="thinking-step-bar" aria-hidden="true" />
-      <span className="thinking-step-name" aria-hidden="true">{levelLabel(id)}</span>
-    </button>)}
+  const commit = async ([index]) => {
+    const id = list[index], at = revision.current;
+    if (!id) return;
+    try { await onChange(id); }
+    finally { if (at === revision.current) { setDraft(null); onPreview?.(null); } }
+  };
+  if (!list.length) return null;
+  return <div className="thinking-control">
+    {showValue && <div className="thinking-control-label"><span>{label}</span><span>{levelLabel(list[current])}</span></div>}
+    <Slider.Root className="thinking-slider" min={0} max={Math.max(1, list.length - 1)} step={1} value={[current]}
+      disabled={list.length === 1} onValueChange={change} onValueCommit={commit}>
+      <Slider.Track className="thinking-track"><Slider.Range className="thinking-range" /></Slider.Track>
+      <span className="thinking-ticks" aria-hidden="true">{list.map((id, index) => <i key={id} className={index <= current ? 'passed' : undefined} />)}</span>
+      <Slider.Thumb className="thinking-thumb" aria-label={label} aria-valuetext={levelLabel(list[current])} aria-describedby={describedBy} />
+    </Slider.Root>
   </div>;
 }

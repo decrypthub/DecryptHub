@@ -4,6 +4,8 @@ import { useWorkbench } from './bus.jsx';
 import { ActionIcon, Icon } from './kit.jsx';
 import { ProjectTree } from './project-tree.jsx';
 import { readSidebarView, sidebarResults } from './sidebar-model.js';
+import { useCompositionGuard } from './use-composition-guard.js';
+import { isSubmitEnter } from './composition-guard.js';
 
 function MatchText({ text, query }) {
   // Plain React text; a query can never become markup or a regular expression.
@@ -13,6 +15,7 @@ function MatchText({ text, query }) {
 
 export function SidebarBrowser({ searchRequest, onSearchHandled, renderSession }) {
   const w = useWorkbench(), input = useRef(null), searchButton = useRef(null), resultsRef = useRef(null), jumped = useRef(null), ids = useId();
+  const composition = useCompositionGuard('sidebar-search', input);
   const { settings } = w;
   const [expanded, setExpanded] = useState(false), [query, setQuery] = useState(''), [active, setActive] = useState(0);
   const [view, setView] = useState(() => readSidebarView(localStorage)), [reveal, setReveal] = useState(null), [foldRequest, setFoldRequest] = useState(null);
@@ -53,14 +56,14 @@ export function SidebarBrowser({ searchRequest, onSearchHandled, renderSession }
     if (result.kind === 'session') w.focusSession(result.id);
   };
   const key = event => {
-    if (event.nativeEvent.isComposing) return;
+    if (composition.isComposing(event)) return;
     if (event.key === 'Escape') { event.preventDefault(); clear(); }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); if (results.length) { const next = (selected + (event.key === 'ArrowDown' ? 1 : -1) + results.length) % results.length; setActive(next); if (event.target !== input.current) resultsRef.current?.querySelectorAll('[role="option"]')[next]?.focus(); } }
-    if (event.key === 'Enter' && event.target === input.current) { event.preventDefault(); choose(results[selected]); }
+    if (isSubmitEnter(event) && event.target === input.current) { event.preventDefault(); choose(results[selected]); }
   };
   return <>
     <div className={'rail-sec sidebar-browser-head' + (expanded ? ' is-searching' : '')}>
-      {expanded ? <TextField.Root className="sidebar-search-field" color="gray" ref={input} value={query} maxLength={500} onChange={event => { setQuery(event.target.value.replaceAll('\0', '')); setActive(0); }} onKeyDown={key}
+      {expanded ? <TextField.Root className="sidebar-search-field" color="gray" ref={composition.ref} value={query} maxLength={500} onChange={event => { setQuery(event.target.value.replaceAll('\0', '')); setActive(0); }} onKeyDown={key}
         onBlur={event => { if (!query && !event.currentTarget.closest('.sidebar-browser-head')?.contains(event.relatedTarget)) setExpanded(false); }}
         role="combobox" aria-label="搜索项目与会话" aria-autocomplete="list" aria-expanded={!!normalizedQuery} aria-controls={normalizedQuery ? ids + '-results' : undefined} aria-activedescendant={results.length ? ids + '-result-' + selected : undefined} placeholder="搜索项目与会话…">
         <TextField.Slot><Icon n="search" size={14} /></TextField.Slot><TextField.Slot side="right"><ActionIcon icon="x" size="1" variant="ghost" color="gray" title="清除搜索" onMouseDown={event => event.preventDefault()} onClick={clear} /></TextField.Slot>

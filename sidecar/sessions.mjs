@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { BrowserManager } from './browser.mjs';
 import { McpBridge } from './mcp.mjs';
 import { Agent } from './agent.mjs';
+import { steerQueued } from './queued-steering.mjs';
 import { DEFAULT_TOOLS } from './catalog.mjs';
 import { browserPresentation, KERNEL } from './settings.mjs';
 import { DEFAULT_TODOS, normalizeSteps, applyTodos } from './todos.mjs';
@@ -20,6 +21,8 @@ import { ChangeStore, contentHash } from './changes.mjs';
 import { executor } from './executor.mjs';
 import { atomicJson, resolveIn, pathKey } from './paths.mjs';
 import { ResearchAgents } from './subagents.mjs';
+import { AgentTeam } from './agent-team.mjs';
+import { teamMemberIds } from './subagent-inspection.mjs';
 import { ComponentStore } from './components.mjs';
 import { promptTitle, cleanTitle, SessionTitleService } from './session-titles.mjs';
 import { chat } from './llm.mjs';
@@ -51,7 +54,13 @@ class Session {
     this.projectDir = path.join(mgr.userDataDir, 'projects', primary ? 'default' : id);
     fs.mkdirSync(this.projectDir, { recursive: true });
     this.eventRevision = 0;
-    const emit = (ch, p) => mgr.broadcast(ch, p, this.id, ++this.eventRevision);
+    const emit = (ch, p) => {
+      if (ch === 'agent-context' && p && this.workspace) {
+        this.contextState = { workspaceId: this.workspace.id, selection: JSON.stringify(this.modelSelection), stats: structuredClone(p) };
+        try { this.saveState(); } catch { /* A display sample cannot change task completion. */ }
+      }
+      mgr.broadcast(ch, p, this.id, ++this.eventRevision);
+    };
     this.browser = new BrowserManager({ components: mgr.components, getRoot: () => mgr.workspaces.verify(this.workspace), dataDir: this.projectDir, kernelDir: mgr.userDataDir });
     this.mcp = new McpBridge(m => emit('log', String(m)), this.browser);
     this.agent = null; this.launching = null; this.lastGoal = null;
@@ -72,6 +81,7 @@ class Session {
     this.inheritedEventCount = Number.isSafeInteger(st.inheritedEventCount) ? st.inheritedEventCount : 0;
     this.createdAt = Number(st.createdAt) || null;
     this.modelSelection = st.modelSelection || captureSelection(mgr.getSettings());
+    this.contextState = st.contextState || null;
     // 完全权限随会话保存（对齐 DSH：预设是会话的持久事实，重启后仍生效）。
     // 历史原因：旧版本会把磁盘上的 full-access 主动降级成 standard，「仅本次运行有效」。
     // 那条边界已由用户决定取消，所以这里直接恢复原值；只有脏值才回落到 standard。
@@ -108,6 +118,7 @@ class Session {
         this.saveState(); this.emit('goal', this.goal);
       }
     }, emit: jobs => this.emit('subagents', jobs.filter(j => j.workspaceId === this.workspace.id)) });
+    this.team = new AgentTeam({ directory: this.projectDir, context: () => ({ sessionId: this.id, workspaceId: this.workspace.id, workRoot: this.workspace.root }), members: () => teamMemberIds(this), emit: team => this.emit('agent-team', team) });
   }
   stateFile() { return path.join(this.projectDir, '.agent-state.json'); }
   loadState() { try { return JSON.parse(fs.readFileSync(this.stateFile(), 'utf8')); } catch { return {}; } }
@@ -118,7 +129,7 @@ class Session {
   saveState() {
     if (this.mgr.closed) return;
     // 权限随会话持久化：mode 与 review 都是持久事实，写入磁盘的就是当前生效值。
-    atomicJson(this.stateFile(), { mode: this.mode, review: this.review, modelSelection: this.modelSelection, todos: this.todos, workspace: this.workspace, projectId: this.projectId, queue: this.queue, ratings: this.ratings, goal: this.goal, plan: this.planMode?.snapshot(), notices: this.subagentNotices, parentSessionId: this.parentSessionId, inheritedEventCount: this.inheritedEventCount, createdAt: this.createdAt });
+    atomicJson(this.stateFile(), { mode: this.mode, review: this.review, modelSelection: this.modelSelection, todos: this.todos, workspace: this.workspace, projectId: this.projectId, queue: this.queue, contextState: this.contextState, ratings: this.ratings, goal: this.goal, plan: this.planMode?.snapshot(), notices: this.subagentNotices, parentSessionId: this.parentSessionId, inheritedEventCount: this.inheritedEventCount, createdAt: this.createdAt });
   }
   requestSettings() { return selectionSettings(this.mgr.getSettings(), this.modelSelection); }
   setModel(input) {
@@ -153,7 +164,7 @@ class Session {
     this.mgr.emitList();
     return this.info();
   }
-  publicState() { return { mode: this.mode, review: this.review, modelSelection: this.modelSelection, plan: this.planMode.snapshot(), todos: this.todos, workspace: this.workspace, run: this.runs.latest(), queue: this.queue.length, ratings: this.ratings, modelRetry: this.agent?.retry || null, debuggerPaused: !!this.debuggerPaused, goal: this.goal, subagents: this.subagents?.list(this.workspace.id) || [], approvals: [...this.pending.values()].map(p => p.request), questions: [...this.askPending.values()].map(p => p.request) }; }
+  publicState() { return { mode: this.mode, review: this.review, modelSelection: this.modelSelection, plan: this.planMode.snapshot(), todos: this.todos, workspace: this.workspace, run: this.runs.latest(), queue: this.queue.length, ratings: this.ratings, modelRetry: this.agent?.retry || null, debuggerPaused: !!this.debuggerPaused, goal: this.goal, team: this.team?.snapshot(), subagents: this.subagents?.list(this.workspace.id) || [], approvals: [...this.pending.values()].map(p => p.request), questions: [...this.askPending.values()].map(p => p.request) }; }
   setPlan(active) { this.ensureAgent(); return this.planMode.select(active, { running: !!this.agent?.running }); }
   rename(title) {
     const next = Array.from(String(title || '').trim()).slice(0, 40).join('');
@@ -365,7 +376,7 @@ class Session {
     const live = this.browser.activePage ? safe(() => this.browser.activePage.url()) : '';
     if (/^https?:/.test(live)) this.lastUrl = live;
     const url = live || this.lastUrl;
-    return { id: this.id, title: this.title, primary: this.primary, pinned: !!this.pinned, running: this.browser.running, embed: this.browser.embedActive, chromePid: this.browser.embedActive ? this.browser.chromePid : null, agentRunning: !!this.agent?.running, url, projectDir: this.projectDir, mode: this.mode, review: this.review, modelSelection: this.modelSelection, workspace: { ...this.workspace, ...this.mgr.workspaces.availability(this.workspace) }, projectId: this.projectId, run: this.runs.latest(), queued: this.queue.length, queuedItems: this.queue.map(q => ({ id: q.id, text: String(q.text || '').slice(0, 160), attachments: (q.attachments || []).length })), updatedAt: this.updatedAt };
+    return { id: this.id, title: this.title, primary: this.primary, pinned: !!this.pinned, running: this.browser.running, embed: this.browser.embedActive, chromePid: this.browser.embedActive ? this.browser.chromePid : null, agentRunning: !!this.agent?.running, url, projectDir: this.projectDir, mode: this.mode, review: this.review, modelSelection: this.modelSelection, workspace: { ...this.workspace, ...this.mgr.workspaces.availability(this.workspace) }, projectId: this.projectId, run: this.runs.latest(), queued: this.queue.length, queuedItems: this.queue.map(q => ({ id: q.id, text: String(q.text || ''), delivery: q.delivery || 'queue', attachments: (q.attachments || []).length })), updatedAt: this.updatedAt };
   }
   subagentSettled(record) {
     const label = record.status === 'completed' ? '已完成' : record.status === 'limited' ? '达到上限' : record.status === 'cancelled' ? '已取消' : '已结束';
@@ -393,10 +404,12 @@ class Session {
     if (this.mgr.projectsBusy) throw new Error('正在更新项目目录，请稍候');
     this.mgr.workspaces.verify(this.workspace);
     return {
+      pendingSteering: () => this.queue.filter(item => item.delivery === 'steer'),
+      ackSteering: id => { this.queue = this.queue.filter(item => item.id !== id); this.saveState(); this.mgr.emitList(); },
       components: this.mgr.components, plugins:this.mgr.plugins, extensions: this.mgr.extensions, sessionId: this.id, projectId: this.projectId, projectRoots: this.workspace.roots || [], projectDir: this.projectDir, browser: this.browser, mcp: this.mcp, relaunch: o => this.relaunch(o),
       openBrowser: opts => this.browser.running ? this.browser.navigate(opts.url).then(() => ({ ok: true })) : this.launch(opts),
       ensureDebugger: () => this.ensureDebugger(),
-      subagents: this.subagents, getGoal: () => this.goal, updateGoal: (value, options) => this.updateGoal(value, options), parentContext: () => this.contextForSubagent(), forkSeed: () => this.forkSeedForSubagent(),
+      subagents: this.subagents, team: this.team, getGoal: () => this.goal, updateGoal: (value, options) => this.updateGoal(value, options), parentContext: () => this.contextForSubagent(), forkSeed: () => this.forkSeedForSubagent(),
       goalOperation: input => {
         if (!this.activeRun || !this.agent?.running) throw Error('目标工具需要当前正在运行的顶级 Agent');
         if (input.action === 'complete' && this.subagents.jobs.size) throw Error('请先等待或取消子代理并核验其结果，再完成目标');
@@ -495,7 +508,7 @@ class Session {
     if (url && /^https?:/.test(url)) { await this.browser.navigate(url); await new Promise(r => setTimeout(r, 6000)); }
     return { profileDir: this.browser.profileDir, requests: this.browser.requests.length, toolCount: r.toolCount };
   }
-  send({ text = '', auto, maxSteps, tokenBudget, attachments, source = 'user', enqueue = false }, continuationKey) {
+  send({ text = '', auto, maxSteps, tokenBudget, attachments, source = 'user', enqueue = false, delivery = 'queue', id: messageId }, continuationKey) {
     if (this.closing) return { ok: false, error: '会话正在关闭或删除' };
     const continuation = continuationKey === GOAL_CONTINUATION && this.goal?.status === 'active';
     if (continuationKey === GOAL_CONTINUATION && !continuation) return { ok: false, error: '目标已暂停或结束' };
@@ -520,7 +533,10 @@ class Session {
     if (agent.running) {
       if (!enqueue) return { ok: false, code: 'busy', error: '该会话正在运行，可以将消息加入待发送队列' };
       if (this.queue.length >= 10) return { ok: false, error: '队列最多保留 10 条消息' };
-      this.queue.push({ id: crypto.randomUUID(), text, auto, maxSteps, tokenBudget, attachments, source }); this.saveState(); this.mgr.emitList(); return { ok: true, queued: true };
+      const item = { id: crypto.randomUUID(), text, auto, maxSteps, tokenBudget, attachments, source };
+      this.queue.push(item);
+      const steered = delivery === 'steer' && steerQueued(this, item.id).ok;
+      this.saveState(); this.mgr.emitList(); return { ok: true, queued: true, steered };
     }
     // 前端保存时会把当前渠道镜像进 openai/anthropic；这里再兜一层，避免渠道密钥还没同步时误报
     const active = (s.providers || []).find(p => p.id === s.activeProviderId);
@@ -542,7 +558,7 @@ class Session {
     this.updatedAt = Date.now(); this.mgr.emitList();
     const goalTimer = goalId && this.goal.deadline ? setTimeout(() => agent.finishSoon(), Math.max(1, this.goal.deadline - Date.now())) : null;
     if (this.subagentNotices.length) { for (const notice of this.subagentNotices.splice(0)) agent.queueNotice(notice); this.saveState(); }
-    this.completion = agent.send(text, { auto, maxSteps, tokenBudget, attachments, runId: run.id, directHuman: run.directHuman, continuation, ...(continuation ? { continuationSource: { kind: 'goal' }, continuationNotice: { objective: this.goal.objective, turns: this.goal.turns || 0, summary: this.goal.summary || '', nextAction: this.goal.nextAction || '', status: this.goal.status } } : {}) }).then(result => {
+    this.completion = agent.send(text, { auto, maxSteps, tokenBudget, attachments, messageId, runId: run.id, directHuman: run.directHuman, continuation, ...(continuation ? { continuationSource: { kind: 'goal' }, continuationNotice: { objective: this.goal.objective, turns: this.goal.turns || 0, summary: this.goal.summary || '', nextAction: this.goal.nextAction || '', status: this.goal.status } } : {}) }).then(result => {
       if (!goalId && run.source === 'goal') goalId = this.goal?.id;
       if (goalId && this.goal?.id === goalId) {
         const hasWork = (this.goal.revision || 0) !== goalRevision || agent.hist.events.some(e => e.t === 'tool' && e.turnId === run.id && !e.isError && !['goal_update', 'goal_get', 'todo_write', 'agent_list'].includes(e.name));
@@ -554,9 +570,10 @@ class Session {
       .finally(() => {
         clearTimeout(goalTimer); this.activeRun = null; this.subagents.cancelRun(run.id);
         if (!this.closing) {
-          if (this.queue.length) this.queueTimer = setTimeout(() => { if (!this.closing && !this.agent?.running) this.resumeQueue(); }, 0);
+          if (this.queue.length && this.stoppedRun !== run) this.queueTimer = setTimeout(() => { if (!this.closing && !this.agent?.running) this.resumeQueue(); }, 0);
           else if (goalId && this.goal?.id === goalId) this.goalDriver.schedule();
         }
+        if (this.stoppedRun === run) this.stoppedRun = null;
         this.saveState(); this.emit('goal', this.goal); this.mgr.emitList();
       });
     return { ok: true, runId: run.id };
@@ -601,8 +618,16 @@ class Session {
     if (this.goal.status !== 'active') this.goalDriver.cancel();
     this.saveState(); this.emit('goal', this.goal); return this.goal;
   }
-  interrupt() { this.goalDriver.cancel(); clearTimeout(this.queueTimer); this.queue = []; this.compactController?.abort(); this.compactController = null; if (this.goal?.status === 'active') { this.goal.status = 'paused'; this.goal.revision = (Number(this.goal.revision) || 0) + 1; this.emit('goal', this.goal); } this.subagents.cancelAll(); this.saveState(); this.agent?.interrupt(); killAllJobs(this.projectDir); this.mgr.emitList(); }
-  resumeQueue() { if (this.agent?.running) throw new Error('任务正在运行'); const next = this.queue.shift(); const result = next ? this.send(next) : { ok: false, error: '队列为空' }; if (next && !result.ok) this.queue.unshift(next); this.saveState(); this.mgr.emitList(); return result; }
+  cancelTurn(runId) {
+    // A delayed click/shortcut addresses the observed turn, never its successor.
+    if (!runId || this.activeRun?.id !== runId || !this.agent?.running) return false;
+    this.stoppedRun = this.activeRun;
+    this.interrupt({ preserveQueue: true });
+    return true;
+  }
+  interrupt({ preserveQueue = false } = {}) { this.goalDriver.cancel(); clearTimeout(this.queueTimer); if (!preserveQueue) this.queue = []; this.compactController?.abort(); this.compactController = null; if (this.goal?.status === 'active') { this.goal.status = 'paused'; this.goal.revision = (Number(this.goal.revision) || 0) + 1; this.emit('goal', this.goal); } this.subagents.cancelAll(); this.saveState(); this.agent?.interrupt(); killAllJobs(this.projectDir); this.mgr.emitList(); }
+  steerQueued(id, runId) { return steerQueued(this, id, runId); }
+  resumeQueue() { if (this.agent?.running) throw new Error('任务正在运行'); const history = this.ensureAgent().hist.events; this.queue = this.queue.filter(item => !history.some(event => event.t === 'user' && event.id === item.id)); const next = this.queue.shift(); const result = next ? this.send(next) : { ok: false, error: '队列为空' }; if (next && !result.ok) this.queue.unshift(next); this.saveState(); this.mgr.emitList(); return result; }
   removeQueued(id) {
     const index = this.queue.findIndex(q => q.id === String(id || ''));
     if (index < 0) return { ok: false, error: '这条消息已不在队列中' };

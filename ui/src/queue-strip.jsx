@@ -1,52 +1,54 @@
-import React, { useState } from 'react';
-import { Text } from '@radix-ui/themes';
+import React, { useEffect, useId, useState } from 'react';
+import { TextArea } from '@radix-ui/themes';
 import { useWorkbench } from './bus.jsx';
-import { ActionIcon, Icon } from './kit.jsx';
+import { Button, Icon } from './kit.jsx';
+import { useCompositionGuard } from './use-composition-guard.js';
+import { isSubmitEnter } from './composition-guard.js';
 
-// 参照 DeepSeek Harness 的 QueueDock：只有一条时直接显示那一条（不套摘要头）；
-// 多条时默认折叠成「N 条排队消息」，展开后每行才有编辑、删除、立即发送。
 export function QueuedMessages() {
-  const w = useWorkbench();
-  const items = w.cur.queuedItems || [], running = !!w.cur.agentRunning;
-  const [open, setOpen] = useState(false), [editing, setEditing] = useState(null);
+  const w = useWorkbench(), items = w.cur.queuedItems || [], running = !!w.cur.agentRunning;
+  const [expanded, setExpanded] = useState(false), [editing, setEditing] = useState(null), [busy, setBusy] = useState(null);
+  const composition = useCompositionGuard(w.sid + ':' + (editing?.id || ''));
+  const listId = useId();
+  useEffect(() => { if (!items.length) setExpanded(false); if (editing && !items.some(item => item.id === editing.id)) setEditing(null); }, [items, editing?.id]);
   if (!items.length) return null;
-  const single = items.length === 1, listVisible = single || open;
-  const run = (channel, args) => w.inv(channel, args).then(r => { if (r?.ok === false) w.toast(r.error || '操作失败', 'err'); return r; }).catch(e => { w.toast(e.message, 'err'); return { ok: false }; });
-  const saveEdit = async () => {
-    if (!editing || !editing.text.trim()) return;
-    const r = await run('agent-queue-edit', { id: editing.id, text: editing.text });
-    if (r?.ok !== false) setEditing(null);
+  const visible = items.length === 1 || expanded || !!editing || !!busy;
+  const act = async (item, channel, extra = {}) => {
+    setBusy(item?.id || 'resume');
+    try {
+      const result = await w.api.invoke(channel, { sessionId: w.sid, id: item?.id, runId: w.cur.run?.id, ...extra });
+      if (result?.ok === false) {
+        if (!['queue-item-not-found', 'steer-unavailable'].includes(result.code)) w.toast(result.error || '操作失败', 'err');
+        return false;
+      }
+      return true;
+    } catch (error) { w.toast(error.message, 'err'); return false; }
+    finally { setBusy(null); }
   };
-  return <section className={'queue-strip' + (single ? ' is-single' : '')} aria-label="待发送队列">
-    {!single && <div className="queue-bar">
-      <button type="button" className="queue-open" aria-expanded={open} onClick={() => setOpen(v => !v)}>
-        <span className="queue-glyph"><Icon n="layers" size={13} /></span>
-        <span className="queue-count">{items.length} 条排队消息</span>
-        <span className="spacer" />
-        <Icon n={open ? 'chevup' : 'chevdown'} size={12} className="queue-chev" />
-      </button>
-    </div>}
-    {listVisible && <ol className="queue-list">
-      {items.map((item, i) => <li className={'queue-item' + (single ? ' is-single' : '')} key={item.id}>
-        {single && <span className="queue-glyph"><Icon n="layers" size={13} /></span>}
-        {editing?.id === item.id ? <>
-          <input className="queue-edit" value={editing.text} autoFocus aria-label="编辑排队消息"
-            onChange={e => setEditing({ id: item.id, text: e.target.value })}
-            onKeyDown={e => {
-              if (e.key === 'Enter') { e.preventDefault(); saveEdit(); }
-              if (e.key === 'Escape') { e.preventDefault(); setEditing(null); }
-            }} />
-          <ActionIcon icon="check" size="1" variant="ghost" color="gray" title="保存排队消息" aria-label="保存排队消息" onClick={saveEdit} />
-          <ActionIcon icon="x" size="1" variant="ghost" color="gray" title="取消编辑" aria-label="取消编辑" onClick={() => setEditing(null)} />
+  const save = async () => { if (editing?.text.trim() && await act(editing, 'agent-queue-edit', { text: editing.text })) setEditing(null); };
+  const action = (icon, title, onClick, disabled = false) => <button type="button" className="queue-action" aria-label={title} title={title} disabled={!!busy || disabled} onClick={onClick}><Icon n={icon} size={16} /></button>;
+  return <section className="queue-dock" aria-label="待发送队列"><div className="queue-panel">
+    {items.length > 1 && <button type="button" className="queue-header" aria-controls={listId} aria-expanded={visible} disabled={!!editing || !!busy} onClick={() => setExpanded(value => !value)}><Icon n="layers" size={16} /><span>{items.length} 条排队消息</span><Icon n={visible ? 'chevdown' : 'chevup'} size={14} /></button>}
+    <ul className="queue-list" id={listId} hidden={!visible}>{visible && items.map(item => {
+      const pending = item.delivery === 'steer';
+      return <li className="queue-item" key={item.id}>
+        {items.length === 1 && <Icon n="chat" size={16} className="queue-glyph" />}
+        {editing?.id === item.id ? <TextArea ref={composition.ref} className="queue-edit" rows={1} value={editing.text} autoFocus aria-label="编辑排队消息" onChange={event => setEditing({ id: item.id, text: event.target.value })} onKeyDown={event => {
+          if (composition.isComposing(event)) return;
+          if (event.key === 'Escape') { event.preventDefault(); setEditing(null); }
+          if (isSubmitEnter(event)) { event.preventDefault(); save(); }
+        }} /> : <span className="queue-text" title={item.text}>{(item.text || '仅附件').replace(/\s+/g, ' ').trim()}</span>}
+        {!!item.attachments && <span className="queue-attachments">{item.attachments} 个附件</span>}
+        {pending && <span className="queue-status" role="status">等待插话</span>}
+        <div className="queue-actions">{editing?.id === item.id ? <>
+          {action('check', '保存排队消息', save, !editing.text.trim())}{action('x', '取消编辑', () => setEditing(null))}
         </> : <>
-          {!single && <span className="queue-index">{i + 1}</span>}
-          <span className="queue-text" title={item.text || '附件'}>{item.text || '仅附件'}</span>
-          {item.attachments > 0 && <Text size="1" color="gray" className="queue-attachments">{item.attachments} 个附件</Text>}
-          <ActionIcon icon="edit" size="1" variant="ghost" color="gray" className="queue-action" title="编辑排队消息" aria-label="编辑排队消息" onClick={() => setEditing({ id: item.id, text: item.text || '' })} />
-          <ActionIcon icon="trash" size="1" variant="ghost" color="gray" className="queue-action" title="删除排队消息" aria-label="删除排队消息" onClick={() => run('agent-queue-remove', { id: item.id })} />
-          {!running && <ActionIcon icon="send" size="1" variant="ghost" color="gray" className="queue-action" title="立即发送" aria-label="立即发送" onClick={() => run('agent-queue-resume')} />}
-        </>}
-      </li>)}
-    </ol>}
-  </section>;
+          {action('edit', '编辑排队消息', () => setEditing({ id: item.id, text: item.text || '' }), pending || !item.text)}
+          {action('trash', '删除排队消息', () => act(item, 'agent-queue-remove'), pending)}
+          {action('send', running ? '插话发送' : '仅运行中可插话发送', async () => { if (await act(item, 'agent-queue-steer')) w.followSubmission(w.sid); }, pending || !running)}
+        </>}</div>
+      </li>;
+    })}</ul>
+    {!running && <div className="queue-resume"><Button size="1" color="gray" variant="ghost" disabled={!!busy} onClick={() => act(null, 'agent-queue-resume')}>继续待发送消息<Icon n="send" size={14} /></Button></div>}
+  </div></section>;
 }

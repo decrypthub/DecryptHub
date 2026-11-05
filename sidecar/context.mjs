@@ -70,6 +70,14 @@ export function breakdown(messages, tools = []) {
   return b;
 }
 
+// Shared by live pressure and passive history inspection. Inspecting never prepares a model request.
+export function contextMetrics(settings, messages, tools, { calibration = 1, compressions = 0, compressing = false } = {}) {
+  const { limit, inferred } = limitInfo(settings);
+  const parts = Object.fromEntries(Object.entries(breakdown(messages, tools)).map(([name, value]) => [name, Math.round(value * calibration)]));
+  const used = Object.values(parts).reduce((a, b) => a + b, 0);
+  return { used, limit, inferred, pct: Math.min(1, used / limit), trigger: compactTrigger(limit, settings.compactAt), compactAt: settings.compactAt || 0.85, parts, messages: Math.max(0, messages.length - 1), compressions, compressing };
+}
+
 // 第一阶段（microcompact）：旧工具结果换成引用，最近 keep 条原样（参考 Claude Code 清理旧工具输出 / Gemini 函数响应预算）
 export function microcompact(messages, { dir, keep = 3, minChars = 1200 } = {}) {
   const idx = messages.map((m, i) => (m.role === 'tool' ? i : -1)).filter(i => i >= 0);

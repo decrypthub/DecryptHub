@@ -69,7 +69,7 @@ test('atomic Windows edit and undo preserve every target DACL entry', {skip:proc
 });
 test('passive browsing keeps cold sessions cold and pages at stable raw sequence positions', t => {
   const f=fixture(t), events=[]; for(let i=0;i<210;i++)events.push({t:'user',content:'task '+i,turnId:'t'+i},{t:'assistant',content:'answer '+i,turnId:'t'+i},{t:'turn-end',turnId:'t'+i,stop:'completed'});
-  fs.writeFileSync(f.file,JSON.stringify({v:3,events})); const session={projectDir:f.data,agent:null,eventRevision:3,publicState:()=>({mode:'read-only'})};
+  fs.writeFileSync(f.file,JSON.stringify({v:3,events})); const session={id:'cold',projectDir:f.data,agent:null,eventRevision:3,workspace:{id:'w',root:f.workspace},modelSelection:null,mgr:{},requestSettings:()=>({}),planMode:{snapshot:()=>({active:false})},publicState:()=>({mode:'read-only'})};
   const latest=sessionSnapshot(session); assert.equal(session.agent,null); assert.equal(latest.startSeq,480); assert.equal(latest.events[0].content,'task 160'); assert.equal(fs.readdirSync(f.data).length,1);
   const older=historyWindow(events,{beforeSeq:latest.startSeq}); assert.equal(older.endSeq,480); assert.equal(older.startSeq,330); assert.equal(historyEvents(older.events,'',null,'',older.startSeq)[0].seq,330);
 });

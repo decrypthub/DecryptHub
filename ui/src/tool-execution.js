@@ -47,3 +47,10 @@ export function toolState(event) {
   if (event.result === undefined) return 'run';
   return toolFailed(event) ? 'err' : 'ok';
 }
+
+// Ordinary errors expose their first result line; command exits keep the
+// command summary beside the explicit exit badge. Never rewrite the receipt.
+export function toolErrorSummary(event) {
+  if (toolState(event) !== 'err' || terminalResult(event)?.label) return null;
+  return typeof event.result === 'string' ? event.result.split(/\r?\n/, 1)[0] || null : null;
+}

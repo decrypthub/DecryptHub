@@ -1,6 +1,5 @@
 import { marked } from 'marked';
 import hljs from 'highlight.js';
-import 'highlight.js/styles/github-dark.css';
 import { neutralizeHtml } from './sanitize.js';
 
 marked.setOptions({ breaks: true, gfm: true });
@@ -27,6 +26,15 @@ marked.use({ renderer: {
 export function renderMd(text) {
   try { return marked.parse(neutralizeHtml(text), { async: false }); }
   catch { return (text || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+}
+export function markdownTokens(text) { return marked.lexer(neutralizeHtml(text)); }
+export function renderMarkdownToken(token, links) {
+  const tokens = [token]; tokens.links = links || {};
+  return marked.parser(tokens, { ...marked.defaults, async: false });
+}
+export function highlightLine(text, language) {
+  try { if (language && hljs.getLanguage(language)) return hljs.highlight(text, { language, ignoreIllegals: true }).value; } catch {}
+  return text.replace(/[&<>]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[character]));
 }
 export function highlightHtml(root) {
   if (!root) return;

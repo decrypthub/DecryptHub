@@ -5,7 +5,7 @@ export function historyEvents(history, partial = '', partialItem = null, partial
   const events = [];
   for (let i = 0; i < (history || []).length; i++) {
     const e = history[i], meta = { id: e.id || 'history-' + (baseSeq + i), seq: baseSeq + i, turnId: e.turnId, at: e.at };
-    if (e.t === 'continuation' && ['runtime-context', 'agent-instructions', 'skill-invocation', 'goal-context', 'session-reference'].includes(e.source?.kind)) continue;
+    if (e.t === 'continuation' && ['runtime-context', 'agent-instructions', 'skill-invocation', 'goal-context', 'team-context', 'session-reference'].includes(e.source?.kind)) continue;
     if (e.t === 'user') {
       if (e.displayContent === undefined && /^【(?:系统|工作区已切换)】/.test(e.content || '')) { events.push({ ...meta, type: 'note', content: e.content }); continue; }
       events.push({ ...meta, type: 'user', rawContent: e.displayContent, content: e.renderedContent ?? e.displayContent ?? String(e.content || '').split('\n\n【当前状态')[0].split('\n\n【附件·')[0], attachments: e.attachments || [] });
@@ -48,22 +48,22 @@ export function conversationTurns(events, run = null, running = false, subagents
       const trigger = turnTriggerFor(e);
       if (trigger && !turn.trigger) { turn.trigger = trigger; continue; }
     }
-    if (e.type === 'user') turn.user = e;
+    if (e.type === 'user') { if (turn.user) turn.items.push({ ...e, steering: true }); else turn.user = e; }
     else if (e.type === 'turn-end') { turn.end = e; turn.endedAt = e.endedAt; turn.usage = e.usage || null; }
     else turn.items.push(e);
   }
   for (const turn of turns) {
     const lastAssistant = turn.items.findLastIndex(e => e.type === 'assistant');
-    turn.process = []; turn.answers = []; turn.alerts = [];
+    turn.process = []; turn.answers = []; turn.alerts = []; turn.markers = [];
     turn.items.forEach((e, i) => {
       if (e.type === 'assistant') {
         if (e.reasoning) turn.process.push({ type: 'reasoning', id: 'reasoning-' + e.id, content: e.reasoning, finished: e.finished, at: e.at, turnId: e.turnId });
         const phase = e.phase || (i === lastAssistant && !turn.items.slice(i + 1).some(t => t.type === 'tool') ? 'final_answer' : 'commentary');
-        // 正文区只承载本轮定稿的答复；执行过程里的正文（进度说明、思考后的开场句）留在 Agent Loop，
-        // 和思考、工具按真实顺序交错。流式期间还不知道这一步会不会继续调用工具，所以先按过程处理，
-        // 等 assistant-end 给出 phase 再决定去留——否则过渡句会先出现在正文区、拿到 commentary 后再消失。
+        // Streaming phase remains work until the provider settles it. The view
+        // keeps work and answers in one keyed flow, so settling does not remount.
         if (e.content) (phase === 'commentary' || phase === 'streaming' ? turn.process : turn.answers).push({ ...e, phase });
-      } else if (e.type === 'error') turn.alerts.push(e);
+      } else if (e.type === 'compact') turn.markers.push(e);
+      else if (e.type === 'error') turn.alerts.push(e);
       else turn.process.push(e);
     });
     turn.active = running && (run?.id ? run.id === turn.id : turn === turns.at(-1));
@@ -84,10 +84,11 @@ Object.assign(TITLES, { agent_spawn: '创建研究子代理', agent_wait: '汇�
 
 Object.assign(TITLES, { skill: '加载技能', skill_manage: '管理技能', memory_manage: '管理记忆', skill_resource_read: '读取技能资源', workspace_glob: '查找文件', apply_patch: '批量修改文件', exit_plan_mode: '提交计划确认', get_goal: '读取目标', create_goal: '建立目标', update_goal: '更新目标', agent_spawn: '创建子代理', agent_message: '追加子代理任务' });
 Object.assign(TITLES, { pwsh: '运行 PowerShell', terminal_open: '打开终端', terminal_send: '发送终端输入', terminal_read: '读取终端输出', terminal_list: '查看终端', terminal_signal: '发送终端信号', terminal_close: '关闭终端' });
+Object.assign(TITLES, { team_task_list: '查看共享任务', team_task_get: '读取共享任务', team_task_create: '创建共享任务', team_task_update: '更新共享任务' });
 
 export function toolPresentation(event) {
   const a = event.args || {}, title = TITLES[event.name] || event.name?.replace('__', ' / ') || '工具调用';
-  let detail = a.path || a.file || a.filePath || a.task || a.summary || a.description || a.command || a.text || a.cmd || a.url || a.pattern || a.query || a.name || a.sessionId || a.id || a.selector || a.group || '';
+  let detail = a.path || a.file || a.filePath || a.task || a.subject || a.task_id || a.summary || a.description || a.command || a.text || a.cmd || a.url || a.pattern || a.query || a.name || a.sessionId || a.id || a.selector || a.group || '';
   if (event.name === 'workspace_npm') detail = (a.packages || [a.package || a.command || 'install']).join(' ');
   return { title, detail: String(detail).replace(/\s+/g, ' ').slice(0, 160) };
 }

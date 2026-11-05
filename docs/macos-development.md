@@ -1,5 +1,23 @@
 # macOS 源码开发
 
+## 2026-11-04 最新 UI 反馈入口
+
+思考强度滑杆的最新入口为 `.tmp/thinking-slider-20261104/DecryptHub 思考滑杆测试.app`，见 [滑杆修改记录](thinking-slider-20261104.md)。同样是编译期嵌入 UI 的 release，原有交互修正包保留。先退出旧窗口，再启动新入口。
+
+当前最新入口为 `.tmp/ui-runtime-followup-20261104/DecryptHub 交互修正测试.app`，见 [运行交互修正与复验](ui-runtime-followup-20261104.md)。已用独立 bundle ID 和数据目录实际操作相同 release 的 Mac WebView，验证长代码阅读、运行中插话、文件改动查看和冷重启上下文恢复；没有动用户当前运行包。关闭旧窗口后再启动最新入口，避免两个 sidecar 共写测试数据。以下七项反馈入口及其“尚未完整操作”描述仅属于上一版。
+
+七项截图反馈后的最新入口为 `.tmp/ui-seven-points-20261104/DecryptHub 界面对齐测试.app`，实现与验证见 [七项界面对齐记录](ui-seven-points-20261104.md)。该包没有覆盖旧入口；沿用同一测试数据目录，先关闭旧窗口再打开。前端在浏览器中实际操作、包内 sidecar 与 PTY 已验证，本轮尚未完整操作这个新包的 Mac 原生窗口。
+
+此前已核对远端：`handoff/ui-alignment-20261104` 为 `4c8f003`，包含当时 `main` 的 `da01a38`；前一测试构建额外包含 [上一轮 UI 修正](ui-source-alignment-20261104.md)。旧用户反馈入口为 `.tmp/macos-latest-20261104/DecryptHub 最新测试.app`，版本 1.5.0；以下保留其构建说明，不表示本轮重新核对了远端。
+
+这是本机 release 测试包：Rust 使用 `cargo build --release --locked`，界面为编译期嵌入的 `ui-dist`；核心 sidecar 和独立历史校验器由 Bun 1.4.4 打成包内 Node ESM，运行时不读取正在编辑的 `sidecar/*.mjs` 或 Vite。Node 使用本机 24.16.0，WDH 沿用现有本地运行时。构建清单与文件哈希在包内 `Contents/Resources/build-info.json`。
+
+测试入口沿用 `.tmp/macos-dev/WebDecryptHub` 数据目录；不与同目录的旧窗口同时运行。源码修改不会热更新测试窗口；下一轮替换包前先关闭当前窗口。旧 `.tmp/macos-dev/DecryptHub.app` 仍是旧入口，不代表本次最新代码。
+
+已验证 release 编译、包签名完整性、打包 sidecar 启动、独立历史校验器读取、真实 PTY 输入及关闭；原生窗口已打开并显示项目入口。打包的 Mac PTY `spawn-helper` 已补执行位。它仍是本机测试制品，不能据此宣称 Mac 安装分发、公证、更新和全部原生交互已验收。
+
+以下保留历史开发方式；本轮用户边操作边反馈时使用上面的固定测试包。
+
 2026-10-29 补充：项目先建立、会话后创建；没有项目时为零会话，已移除无项目记录的兼容导入，详见 [项目导航](project-navigation.md)。Mac 浏览器使用不弹外部窗口的画面串流；Windows/X11 保留原生嵌入策略。当前核心回归为 242 项：239 通过、3 项 Windows 专用跳过；Rust 9 项通过。UI 回归需显式设置 `DECRYPTHUB_WDH_DIR=/Users/r/Developer/DecryptHub/agent/WebDecryptHub-Runtime`，使用本地已安装组件，避免把 GitHub 下载限流当成产品回归故障。
 
 2026-10-28。接续 `handoff-macos-2026-10-28.md` 中的检查点 `cfa3417`；保留该文档中的 Windows 待验收事项，不将 Mac 结果当作 Windows 原生窗口恢复证据。

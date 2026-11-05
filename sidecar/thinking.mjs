@@ -17,13 +17,13 @@
 // 不自造词表：DSH 的 pi-ai 目录把 xhigh / max 作为「能力基础档之上」的可选档，只在模型显式声明时出现。
 // 这里同样只做声明载体——模型没声明 xhigh，界面就不会出现「极高」，也就不会把端点不认的值发出去。
 export const THINKING_LEVELS = [
-  { id: 'off', label: '关闭', effort: null, budget: null },
-  { id: 'minimal', label: '最少', effort: 'minimal', budget: 1024 },
-  { id: 'low', label: '低', effort: 'low', budget: 2048 },
-  { id: 'medium', label: '中', effort: 'medium', budget: 8192 },
-  { id: 'high', label: '高', effort: 'high', budget: 16000 },
-  { id: 'xhigh', label: '极高', effort: 'xhigh', budget: 32000 },
-  { id: 'max', label: '最高', effort: 'max', budget: 64000 },
+  { id: 'off', label: 'Off', effort: null, budget: null },
+  { id: 'minimal', label: 'Minimal', effort: 'minimal', budget: 1024 },
+  { id: 'low', label: 'Low', effort: 'low', budget: 2048 },
+  { id: 'medium', label: 'Medium', effort: 'medium', budget: 8192 },
+  { id: 'high', label: 'High', effort: 'high', budget: 16000 },
+  { id: 'xhigh', label: 'XHigh', effort: 'xhigh', budget: 32000 },
+  { id: 'max', label: 'Max', effort: 'max', budget: 64000 },
 ];
 
 export const THINKING_TRANSPORTS = [

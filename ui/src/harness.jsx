@@ -3,7 +3,21 @@ import { createPortal } from 'react-dom';
 import { Flex, Text, Dialog, TextArea, Spinner } from '@radix-ui/themes';
 import { Button, ActionIcon, Icon, Markdown } from './kit.jsx';
 import { useWorkbench } from './bus.jsx';
-export function CommandMenu({ items, selected, choose, anchor, id, ariaLabel = '输入框命令' }) {
+const COMMAND_CHROME = {
+  goal: ['添加', '目标', 'target'], plan: ['添加', '计划', 'report'], agent: ['添加', '子代理', 'team'],
+  compact: ['指令', '压缩', 'layers'], permission: ['指令', '权限', 'shield-check'],
+  agents: ['指令', '子代理列表', 'team'], status: ['指令', '状态', 'info'], stop: ['指令', '停止', 'stop'],
+  new: ['指令', '新建对话', 'plus'], help: ['指令', '帮助', 'info'],
+  skill: ['技能与记忆', '创建技能', 'sparkles'], skills: ['技能与记忆', '技能', 'sparkles'],
+  memory: ['技能与记忆', '创建记忆', 'report'], memories: ['技能与记忆', '记忆', 'report'],
+  automation: ['更多', '自动化', 'clock'], mcp: ['更多', '插件', 'tool'], init: ['更多', '项目说明', 'file'],
+};
+export function commandMenuItems(items) {
+  const groups = ['添加', '指令', '技能', '技能与记忆', '更多'];
+  const group = item => item.kind === 'skill' ? '技能' : COMMAND_CHROME[item.name]?.[0] || '指令';
+  return items.slice().sort((a, b) => groups.indexOf(group(a)) - groups.indexOf(group(b)));
+}
+export function CommandMenu({ items, selected, choose, anchor, id, onHighlight, onDismiss, ariaLabel = '输入框命令' }) {
   const [rect, setRect] = useState(null);
   useEffect(() => {
     const update = () => { const el = anchor.current?.closest('.composer'); if (el) setRect(el.getBoundingClientRect()); };
@@ -11,28 +25,42 @@ export function CommandMenu({ items, selected, choose, anchor, id, ariaLabel = '
     return () => { obs.disconnect(); window.removeEventListener('resize', update); };
   }, [anchor]);
   useEffect(() => { document.getElementById(id + '-' + selected)?.scrollIntoView({ block: 'nearest' }); }, [selected, id]);
+  useEffect(() => {
+    if (!onDismiss) return;
+    const dismiss = event => { if (!event.target.closest?.('.command-menu') && !anchor.current?.closest('.composer')?.contains(event.target)) onDismiss(); };
+    document.addEventListener('pointerdown', dismiss);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, [onDismiss, anchor]);
   if (!rect || !items.length) return null;
-  return createPortal(<div className="command-menu" data-overlay style={{ left: rect.left, bottom: innerHeight - rect.top + 8, width: Math.min(rect.width, 640), maxHeight: Math.max(100, Math.min(300, rect.top - 24)) }}>
-    <div className="command-menu-label">{ariaLabel === '输入框命令' ? '命令' : ariaLabel} <span>↑ ↓ 选择 · Tab 补全 · Enter {items[0]?.token ? '引用' : '执行'} · Esc 关闭</span></div>
-    <div role="listbox" aria-label={ariaLabel} id={id} className="command-options">{items.map((c, i) => <button type="button" role="option" aria-selected={selected === i} id={id + '-' + i} className={'command-option' + (selected === i ? ' selected' : '')} key={c.name} onMouseDown={e => e.preventDefault()} onClick={() => choose(c)}>
-      <code>{c.token ?? '/' + c.name}</code><span title={c.description}>{c.label} · {c.description}</span>
-    </button>)}</div>
+  const sections = [...new Set(items.map(c => c.token ? ariaLabel : c.kind === 'skill' ? '技能' : COMMAND_CHROME[c.name]?.[0] || '指令'))];
+  return createPortal(<div className="command-menu" data-overlay style={{ left: rect.left, bottom: innerHeight - rect.top + 8, width: rect.width, maxHeight: Math.max(96, Math.min(440, rect.top - 24)) }}>
+    <div role="listbox" aria-label={ariaLabel} id={id} className="command-options">{sections.map(section => <div className="command-group" role="group" aria-label={section} key={section}>
+      <div className="command-group-label">{section}</div>
+      {items.map((c, i) => {
+        const [group, label, icon] = c.token ? [ariaLabel, c.label, 'chat'] : c.kind === 'skill' ? ['技能', c.label, 'sparkles'] : COMMAND_CHROME[c.name] || ['指令', c.label, 'code'];
+        if (group !== section) return null;
+        return <button type="button" role="option" aria-selected={selected === i} id={id + '-' + i} className={'command-option' + (selected === i ? ' selected' : '')} key={c.name} onPointerMove={() => onHighlight?.(i)} onMouseDown={e => e.preventDefault()} onClick={() => choose(c)}>
+          <Icon n={icon} size={18} /><span className="command-option-label">{label}</span>{c.kind !== 'skill' && <span className="command-option-name">{c.token ?? c.name}</span>}<span className="command-option-description" title={c.description}>{c.description}</span>
+        </button>;
+      })}
+    </div>)}</div>
   </div>, document.querySelector('.radix-themes') || document.body);
 }
-// 命令反馈条。运行中的两条语义必须分开：
+// 对话流中的命令状态行。运行中的两条语义必须分开：
 //   · 一般命令 → ✕ 只是「收起这条提示」，命令还在跑；
 //   · 压缩 → ✕ 是「取消这次压缩」，真的打断摘要请求（sidecar 的 agent-compress-cancel）。
 // 之前两者共用一个「收起提示」，界面上看起来能取消，其实只会把提示藏起来。
 export function CommandFeedback() {
   const w = useWorkbench(), value = w.commandFeedback;
   if (!value) return null;
+  if (value.name === 'compact' && ['success', 'done'].includes(value.state) && w.cur.events.some(e => e.type === 'compact' && e.at >= value.at)) return null;
   const busy = value.state === 'running';
   // 压缩在跑时以 agent 真实状态为准：命令已经返回但压缩还没收尾，不能显示成「已完成」。
   const compressing = busy && value.name === 'compact';
   const cancel = compressing ? () => w.cancelCompact() : undefined;
-  return <div className={'command-feedback ' + value.state} role={value.state === 'error' ? 'alert' : 'status'}>
-    {busy ? <Spinner size="1" /> : <Icon n={value.state === 'error' ? 'info' : 'check'} size={15} />}
-    <span>{value.text}</span>
+  return <div className={'command-row ' + value.state} role={value.state === 'error' ? 'alert' : 'status'}>
+    <span className="command-row-icon">{busy ? <Spinner size="1" /> : <Icon n={value.state === 'error' ? 'info' : 'check'} size={14} />}</span>
+    <span className="command-row-name">/{value.name}</span><span className="command-separator">·</span><span className="command-row-summary">{value.text}</span>
     <ActionIcon icon="x" size="1" variant="soft" color="gray"
       title={compressing ? '取消这次压缩' : busy ? '收起提示（命令仍在执行）' : '收起命令提示'}
       aria-label={compressing ? '取消这次压缩' : '收起命令提示'}
