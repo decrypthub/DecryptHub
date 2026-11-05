@@ -49,6 +49,11 @@ const NO_MODEL_EXPERIENCE_SECTION: Readonly<Record<string, string>> = {
  * blocks. A package moves on or off this list with its context behavior.
  */
 const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
+  'packages/client/ui-brand-decrypthub': { kind: 'none', reason: 'Product brand presentation adds no model input.' },
+  'packages/client/ui-settings-decrypthub-account': { kind: 'none', reason: 'Native community identity stays outside model requests.' },
+  'packages/client/ui-mcp': { kind: 'indirect', reason: 'Management changes connected MCP tools.' },
+  'packages/mcp/decrypthub-components': { kind: 'indirect', reason: 'Verified component choices change connected MCP tools.' },
+  'packages/mcp/decrypthub-integrations': { kind: 'indirect', reason: 'The shared MCP client owns connected tool schemas, results, and instructions.' },
   'packages/client/ui-context-menu': { kind: 'none', reason: 'Client menu presentation and contributed callbacks add no model input.' },
   'packages/client/ui-file-actions': { kind: 'none', reason: 'Explicit user file saves and clipboard operations add no model input.' },
   'packages/client/ui-entry-customization': { kind: 'none', reason: 'Controls browser launchers and prepares a reviewable Creator draft without submitting model input.' },

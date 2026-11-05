@@ -417,6 +417,12 @@ describe('package payload constraints', () => {
     },
   )
 
+  it.each(['packages/client/ui-brand-decrypthub', 'packages/mcp/decrypthub-integrations'])('keeps %s private only in its declared product directory', (dir) => {
+    const manifest = JSON.parse(readFileSync(new URL(`../${dir}/package.json`, import.meta.url), 'utf8')) as WorkspaceManifest['manifest']
+    expect(checkWorkspaceManifest({ dir, manifest })).toEqual([])
+    expect(checkWorkspaceManifest({ dir: 'packages/mcp/other-product', manifest })).not.toEqual([])
+  })
+
   it('exempts the private plugin market generator from release rules in its own directory only', () => {
     const dir = 'apps/plugin-market-generator'
     const manifest = JSON.parse(readFileSync(new URL(`../${dir}/package.json`, import.meta.url), 'utf8')) as WorkspaceManifest['manifest']

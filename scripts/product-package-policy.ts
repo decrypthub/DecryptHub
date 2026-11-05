@@ -16,6 +16,10 @@ export interface ProductPackagePolicy {
  * Optional integrations may be reached by an optional bundle without becoming default capabilities.
  */
 export const PRODUCT_PACKAGE_POLICY: Readonly<Record<string, ProductPackagePolicy>> = {
+  'packages/client/ui-settings-session-log': { category: 'optional', reason: 'Official session-log upload UI is disabled in the downstream product.' },
+  'packages/client/ui-settings-account': { category: 'optional', reason: 'Upstream account UI retained for compatibility; DecryptHub configures API models directly.' },
+  'packages/host/product-telemetry-otel': { category: 'optional', reason: 'Upstream telemetry exporter retained for compatibility and disabled in DecryptHub.' },
+  'packages/client/ui-brand-official': { category: 'optional', reason: 'Upstream brand package retained for compatibility; DecryptHub mounts its own identity.' },
   'packages/core/agent-tool-presentation': { category: 'optional', reason: 'Deprecated selector retained for existing executor configurations.' },
   'packages/browser-use/browser-use': { category: 'optional', reason: 'Service definition used by explicitly selected browser providers.' },
   'packages/computer-use/computer-use': { category: 'optional', reason: 'Service definition used by explicitly selected computer providers.' },

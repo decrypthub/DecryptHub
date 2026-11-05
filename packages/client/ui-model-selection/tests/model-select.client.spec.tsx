@@ -206,6 +206,74 @@ describe('ModelSelect catalog badges', () => {
   })
 })
 
+describe('ModelSelect reasoning slider', () => {
+  function mount(selection = vi.fn(async (_selection: ModelSelection) => ({ ok: true as const, value: undefined })), snapshot = state()) {
+    const directory = createSnapshotStore(snapshot)
+    const renderedSlots: string[] = []
+    const renderSlot: ComponentProps<typeof ModelSelect>['renderSlot'] = (name, _owner, options) => {
+      renderedSlots.push(name)
+      return options?.fallback ?? null
+    }
+    const props = { locked: false, available: true, directory, load: vi.fn(), select: selection,
+      resolveText, t, renderSlot, effortControl: 'slider' as const }
+    const view = render(<ModelSelect {...props} />)
+    const trigger = screen.getByRole('button', { name: /选择模型，当前/ })
+    fireEvent.click(trigger)
+    return { directory, trigger, renderedSlots, view, props }
+  }
+
+  it('uses declared levels and saves their identity with Radix keyboard control, keeping the popup open', async () => {
+    const select = vi.fn(async (_selection: ModelSelection) => ({ ok: true as const, value: undefined }))
+    const { trigger, renderedSlots } = mount(select)
+    const thumb = screen.getByRole('slider', { name: '推理等级' })
+    expect(thumb.getAttribute('aria-valuemax')).toBe('2')
+    expect(thumb.getAttribute('aria-valuetext')).toBe('High')
+    thumb.focus()
+    fireEvent.keyDown(thumb, { key: 'End' })
+    await waitFor(() => { expect(select).toHaveBeenCalledWith({
+      provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: 'max',
+    }) })
+    expect(screen.getByRole('slider')).toBeTruthy()
+    expect(renderedSlots).toContain('conversation.input.model.options')
+    fireEvent.keyDown(thumb, { key: 'Escape' })
+    await waitFor(() => { expect(document.activeElement).toBe(trigger) })
+  })
+
+  it('restores the controlled effort after a rejected save and announces the failure', async () => {
+    const failure = { ok: false as const, error: { code: 'unavailable', message: 'Save refused' } }
+    const select = vi.fn().mockResolvedValue(failure)
+    mount(select)
+    const thumb = screen.getByRole('slider')
+    thumb.focus()
+    fireEvent.keyDown(thumb, { key: 'Home' })
+    await waitFor(() => { expect(thumb.getAttribute('aria-valuetext')).toBe('High') })
+    expect(select).toHaveBeenCalledWith(expect.objectContaining({ reasoningEffort: 'off' }))
+    await waitFor(() => { expect(screen.getByText(/Save refused/)).toBeTruthy() })
+  })
+
+  it('retains model-list navigation and normal Tab traversal between its two controls', async () => {
+    const { trigger } = mount()
+    fireEvent.keyDown(trigger, { key: 'Tab' })
+    const model = screen.getByRole('menuitem', { name: '模型' })
+    expect(document.activeElement).toBe(model)
+    fireEvent.keyDown(model, { key: 'Tab' })
+    expect(document.activeElement).toBe(screen.getByRole('slider'))
+    fireEvent.keyDown(screen.getByRole('slider'), { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(model)
+    fireEvent.click(model)
+    expect(screen.getByRole('menuitemradio', { name: 'DeepSeek-V4-Flash' })).toBeTruthy()
+    fireEvent.keyDown(screen.getByRole('menuitemradio'), { key: 'Escape' })
+    await waitFor(() => { expect(screen.getByRole('slider')).toBeTruthy() })
+  })
+
+  it('keeps unknown saved efforts recoverable through the existing list', () => {
+    mount(undefined, state({ current: { provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: 'retired' } }))
+    expect(screen.queryByRole('slider')).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: /推理等级/ }))
+    expect(screen.getByRole('menuitemradio', { name: /High/ })).toBeTruthy()
+  })
+})
+
 describe('ModelSelect reasoning effort', () => {
   it('renders effort names without descriptions and submits the effort as part of the session selection', async () => {
     const directory = createSnapshotStore<ModelDirectoryState>(state())

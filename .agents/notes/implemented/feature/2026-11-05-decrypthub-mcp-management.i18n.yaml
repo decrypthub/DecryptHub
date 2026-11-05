@@ -1,0 +1,22 @@
+# Bilingual-pair consistency record for 2026-11-05-decrypthub-mcp-management.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-11-05-decrypthub-mcp-management.md
+/agent-note-decrypthub-mcp-and-official-component-management:
+  en: b3ab620f1208cb14
+  zh: 14cc0148c685600f
+/agent-note-decrypthub-mcp-and-official-component-management/problem:
+  en: 89316decaf22dbd4
+  zh: 7359d2ba273d6fb2
+/agent-note-decrypthub-mcp-and-official-component-management/decision:
+  en: 2e931ac7180ed5d8
+  zh: d665612fa5487b5a
+/agent-note-decrypthub-mcp-and-official-component-management/verification:
+  en: 7af32477ac49be7c
+  zh: 77d27dba6c4ed67b
+/agent-note-decrypthub-mcp-and-official-component-management/alternatives-considered:
+  en: 7d2683f499054047
+  zh: 5b314af0611dca1d
+/agent-note-decrypthub-mcp-and-official-component-management/consequences:
+  en: 875760ae9dc8e3b9
+  zh: 1a7725d9ea031159

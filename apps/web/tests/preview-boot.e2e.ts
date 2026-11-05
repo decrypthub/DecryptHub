@@ -344,17 +344,10 @@ async function bootPreview(site: Site, manifest: ImageManifest, browser: Browser
     // report the older one.
     expect(bootLine).toContain(`image lowering=${WRAPPER_CONTRACT}`)
     expect(bootLine).toContain('data overlays=1')
-    // The versioned notice is the seeded preview's first stable interactive
-    // surface after the startup chain completes over the tunnel.
-    const continueButton = page.getByRole('button', { name: 'Continue' })
-    await continueButton.waitFor({ timeout: HERO_TIMEOUT_MS })
-    await continueButton.click()
-    await page.getByRole('button', { name: 'Add API Key', exact: true }).click()
-    const configureLater = page.getByRole('button', { name: 'Configure later' })
-    await configureLater.waitFor({ timeout: 30_000 })
-    await configureLater.click()
+    // DecryptHub opens the composer directly; welcome and official-key guidance are not part of this product.
     await page.locator('[data-composer-input][data-placeholder="Describe what you want to build, / commands, @ files or sessions"]')
-      .waitFor({ timeout: 30_000 })
+      .waitFor({ timeout: HERO_TIMEOUT_MS })
+    expect(await page.getByRole('button', { name: 'Continue', exact: true }).count()).toBe(0)
 
     const exercised = await page.evaluate(async ({ seededSessionId, seededSessionTitle }) => {
       type Result<T> = { result: { ok: true; value: T } | { ok: false; error: { code: string; message: string } } }

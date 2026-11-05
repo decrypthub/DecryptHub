@@ -30,7 +30,10 @@ const clientVersion = clientEnvironment.DSH_CLIENT_VERSION
 if (clientVersion === undefined) throw new Error('desktop build: the client environment carries no DSH_CLIENT_VERSION')
 
 /** Inline the one public build value the Node entry reads; every other variable stays a runtime lookup. */
-const clientVersionDefine = { 'process.env.DSH_CLIENT_VERSION': JSON.stringify(clientVersion) }
+const clientVersionDefine = {
+  'process.env.DSH_CLIENT_VERSION': JSON.stringify(clientVersion),
+  'process.env.DSH_CLIENT_TITLE': JSON.stringify(clientEnvironment.DSH_CLIENT_TITLE ?? 'DecryptHub'),
+}
 
 export default defineConfig([
   {
@@ -53,7 +56,7 @@ export default defineConfig([
     deps: { alwaysBundle: ['@deepseek-ai/dsh-atomic-write'] },
   },
   {
-    entry: ['lib/types/main.js'],
+    entry: ['lib/types/main.js', 'lib/types/decrypthub-main.js'],
     plugins: [packagedImportsPlugin(mainProcessImports)],
     define: clientVersionDefine,
     onSuccess: async () => {

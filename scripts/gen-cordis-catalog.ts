@@ -70,6 +70,7 @@ export const SERVICE_PAGE: Record<string, string> = {
   mcpResources: 'mcp.md',
   agentLoop: 'core.md',
   mcpManager: 'mcp.md',
+  decrypthubComponents: 'mcp.md',
   agentDefaultModel: 'core.md',
   agentPresets: 'core.md',
   agents: 'core.md',
@@ -256,6 +257,7 @@ export const EVENT_SCOPE_PAGE: Record<string, string> = {
   'llm': 'llm-streaming.md',
   'llm-pi-ai': 'llm-streaming.md',
   'mcp-manager': 'mcp.md',
+  'decrypthub-components': 'mcp.md',
   'permission-presets': 'permission-presets.md',
   'session': 'session.md',
   'settings': 'settings.md',
@@ -302,6 +304,11 @@ export const EVENT_WALK_EXEMPTIONS: Record<string, string> = {
  * appear on more than one page.
  */
 export const LINK_MAP: Readonly<Record<string, string>> = {
+  ComponentId: 'mcp.md',
+  ComponentsSnapshot: 'mcp.md',
+  ComponentRuntime: 'mcp.md',
+  BrowserKernelView: 'mcp.md',
+  McpConnectionStatus: 'mcp.md',
   Principal: 'typert.md',
   PrincipalMap: 'typert.md',
   RemoteAccessResource: 'typert.md',

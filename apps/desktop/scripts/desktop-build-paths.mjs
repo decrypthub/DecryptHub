@@ -38,16 +38,20 @@ function assertSupportedTarget(target) {
 /**
  * Return the mutable preparation and artifact directories owned by one release target.
  * @param {'mac-arm64' | 'mac-x64' | 'win-x64'} target - Supported Desktop target name.
- * @param {NodeJS.ProcessEnv} environment - Packaging environment with an optional absolute cache directory.
+ * @param {NodeJS.ProcessEnv} environment - Packaging environment with optional absolute build and cache directories.
  * @returns {{ root: string, artifacts: string, unsignedArtifacts: string, unnotarizedArtifacts: string, runtime: string, packageSet: string, dsh: string, dshPnpm: string, electron: string, packedDsh: string, packedVendor: string, packedLandlock: string, downloads: string, pnpmStore: string }} Target paths plus shared download and package caches.
  */
 export function desktopTargetBuildPaths(target, environment = process.env) {
   assertSupportedTarget(target)
+  const buildRoot = environment.DSH_DESKTOP_BUILD_ROOT ?? BUILD_ROOT
+  if (!buildRoot.trim() || !isAbsolute(buildRoot) || buildRoot.includes('\0')) {
+    throw new Error('desktop package: DSH_DESKTOP_BUILD_ROOT must be a nonempty absolute directory')
+  }
   const cacheRoot = environment.DSH_DESKTOP_PACKAGE_CACHE_DIR ?? BUILD_ROOT
   if (!cacheRoot.trim() || !isAbsolute(cacheRoot) || cacheRoot.includes('\0')) {
     throw new Error('desktop package: DSH_DESKTOP_PACKAGE_CACHE_DIR must be a nonempty absolute directory')
   }
-  const root = join(BUILD_ROOT, 'targets', target)
+  const root = join(buildRoot, 'targets', target)
   const packed = join(root, 'packed')
   return {
     root,

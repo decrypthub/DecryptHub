@@ -122,6 +122,113 @@ MCP prompt templates, human-input elicitation, task-based execution, and resourc
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
 
+<a id="ctxdecrypthubcomponents--decrypthubcomponents"></a>
+
+### `ctx.decrypthubComponents` — `DecryptHubComponents`
+
+One owner of official installations; the MCP client remains the transport owner.
+
+```ts cordis-catalog
+/** Read actual local installations without performing network requests.
+ * @returns component versions, local CLI availability and observed WDH transports.
+ */
+@Remote async snapshot(): Promise<ComponentsSnapshot>
+
+/** Observe version, installation and WDH state changes with a complete initial snapshot.
+ * @param signal - subscription lifetime.
+ * @returns credential-free component observations.
+ */
+@Remote({ mode: 'stream' }) async *watch(signal: AbortSignal): AsyncIterable<ComponentsSnapshot>
+
+/** Explicitly query code-owned official repositories; installed components remain usable on failure.
+ * @returns updated catalog observations, including per-component lookup failures.
+ */
+@Remote checkUpdates(): Promise<ComponentsSnapshot>
+
+/** Start one reviewed official installation; no post-install program executes.
+ * @param id - fixed product component.
+ * @param expectedVersion - version the user reviewed.
+ * @returns once its cancellable transaction is registered.
+ */
+@Remote installComponent(id: ComponentId, expectedVersion: string): void
+
+/** Cancel only the named installation; activation already committed is not undone.
+ * @param id - component operation.
+ * @returns after its cleanup settles.
+ */
+@Remote async cancelInstall(id: ComponentId): Promise<void>
+
+/** Restore the prior verified version; current MCP clients switch at their next safe rebind.
+ * @param id - component identity.
+ * @returns updated local state.
+ */
+@Remote async rollback(id: ComponentId): Promise<ComponentsSnapshot>
+
+/** Resolve the verified WDH entry or the deployment fallback.
+ * @param fallback - explicitly configured local WDH entry.
+ * @returns installed entry for the next Agent step.
+ */
+async wdhEntry(fallback: string): Promise<string>
+
+/** Resolve a managed Python gateway or an explicitly configured local CLI.
+ * @param id - device integration.
+ * @param command - configured local fallback.
+ * @param args - reviewed MCP arguments.
+ * @param endpoint - optional device-daemon address.
+ * @returns actual invocation without shell expansion.
+ */
+async runtime(id: 'adh' | 'idh', command: string, args: readonly string[], endpoint: string = ''): Promise<ComponentRuntime>
+
+/** Publish one real Agent-owned connection; disposing it removes the observation.
+ * @param agentId - owning Agent identity.
+ * @param workspace - current working directory.
+ * @param read - live connection state.
+ * @param subscribe - underlying MCP observation.
+ * @returns connection-observation disposer.
+ */
+observeWdh(agentId: SessionId, workspace: string, read: () => McpConnectionStatus, subscribe: (listener: () => void) => () => void): () => void
+
+/** Bind the integration's actual connection replacement operation.
+ * @param id - component identity.
+ * @param reconnect - integration-owned replacement.
+ * @returns disposer that cannot remove a newer binding.
+ */
+registerReconnect(id: ComponentId, reconnect: () => Promise<void>): () => void
+
+/** Reconnect an enabled integration using the currently verified component version.
+ * @param id - component identity.
+ * @returns after replacement is requested.
+ */
+@Remote async reconnect(id: ComponentId): Promise<void>
+
+/** Persist reviewed official connection choices without replacing unrelated settings.
+ * @param id - component identity.
+ * @param enabled - persisted enablement choice.
+ * @param command - local fallback CLI, unused for WDH.
+ * @param args - local MCP arguments, unused for WDH.
+ * @param endpoint - device daemon address, or empty.
+ * @param browser - WDH browser choice.
+ * @param expectedRevision - configuration revision captured by the editor.
+ * @returns after a revision-checked Settings commit.
+ */
+@Remote async configure(id: ComponentId, enabled: boolean, command: string, args: string[], endpoint: string, browser: 'system' | 'cloak', expectedRevision: number): Promise<void>
+
+/** Inspect installed browser files without starting a browser or connecting a device.
+ * @returns the selected kernel's file-discovery state.
+ */
+@Remote async inspectBrowser(): Promise<BrowserKernelView>
+
+/** Download the browser through WDH's maintained official kernel installer.
+ * @param acceptedLicense - explicit acknowledgement from the download confirmation.
+ * @returns once the cancellable operation is registered.
+ */
+@Remote installBrowser(acceptedLicense: boolean): void
+```
+
+Types: [SessionId](core.md)
+
+Source: [`packages/mcp/decrypthub-components/src/index.ts`](../../packages/mcp/decrypthub-components/src/index.ts)
+
 <a id="ctxmcpmanager--mcpservermanager"></a>
 
 ### `ctx.mcpManager` — `McpServerManager`
@@ -204,6 +311,26 @@ register(server: string, provider: McpResourceProvider): () => void
 ```
 
 Source: [`packages/mcp/mcp-resources/src/index.ts`](../../packages/mcp/mcp-resources/src/index.ts)
+
+<a id="decrypthub-components-events"></a>
+
+### `decrypthub-components/*` events
+
+<a id="decrypthub-componentsactivated--emit"></a>
+
+#### `decrypthub-components/activated` — emit
+
+A verified active component changed; providers refresh their next connection.
+
+```ts cordis-catalog
+/** A verified active component changed; providers refresh their next connection.
+ * @param id - activated component.
+ * @mode emit
+ */
+'decrypthub-components/activated'(id: ComponentId): void
+```
+
+Source: [`packages/mcp/decrypthub-components/src/types.ts`](../../packages/mcp/decrypthub-components/src/types.ts)
 
 <a id="mcp-manager-events"></a>
 

@@ -1,0 +1,34 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/client/ui-settings-decrypthub-account/README.md
+/:
+  en: 980da3627a34ca03
+  zh: 62c2e331b0a5ec00
+/deepseek-ai-dsh-client-ui-settings-decrypthub-account:
+  en: f7813c10a9068f1c
+  zh: fb19e3857690ac5a
+/deepseek-ai-dsh-client-ui-settings-decrypthub-account/summary:
+  en: 4fa832106b115f91
+  zh: 6493b756fe556eeb
+/deepseek-ai-dsh-client-ui-settings-decrypthub-account/table-of-contents:
+  en: 122f0d41696980b1
+  zh: f366d2759fbb78b1
+/deepseek-ai-dsh-client-ui-settings-decrypthub-account/use-this-package:
+  en: 7205a39708cc3d55
+  zh: 9496180b505f89e1
+/deepseek-ai-dsh-client-ui-settings-decrypthub-account/understand-the-implementation:
+  en: 2d1fd6151eca9097
+  zh: c6401549abc49e93
+/deepseek-ai-dsh-client-ui-settings-decrypthub-account/model-experience:
+  en: 8fe7ca0383d7acda
+  zh: 97e27cacd5a0d37b
+/deepseek-ai-dsh-client-ui-settings-decrypthub-account/model-experience/kv-cache-effect:
+  en: 8ee2a58c9af5b587
+  zh: abd8763dc17d9358
+/deepseek-ai-dsh-client-ui-settings-decrypthub-account/known-limitations-and-deferred-work:
+  en: d4ed0dc8092d2713
+  zh: e3f5ebaf38969f15
+/deepseek-ai-dsh-client-ui-settings-decrypthub-account/known-limitations-and-deferred-work/dev-note:
+  en: 0a1253c6f7b5e8b9
+  zh: 9f56528562c7c914

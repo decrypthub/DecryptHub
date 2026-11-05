@@ -706,6 +706,13 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'The one concrete loop plugin; extension packages depend on dsh-agent events and services, not on this package.',
   },
   {
+    key: 'decrypthubComponents',
+    pkg: 'decrypthub-components',
+    title: 'Official component management',
+    mode: 'core',
+    note: 'Owns verified versions, activation, cancellation and owner-only connection management.',
+  },
+  {
     key: 'mcpManager',
     pkg: 'mcp-manager',
     title: 'Settings-driven MCP server fleet',

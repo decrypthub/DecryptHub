@@ -975,6 +975,21 @@ describe('hand-declared providers', () => {
     return { ...scripted, onClose }
   }
 
+  it('creates an API channel with a private identity and a required user-facing name', async () => {
+    const { mutate, onClose } = mountCard({ automaticId: true })
+    expect(screen.queryByLabelText(en.customRoute)).toBeNull()
+    fireEvent.change(screen.getByLabelText(en.baseUrl), { target: { value: 'https://gateway.example/v1' } })
+    fireEvent.click(screen.getByRole('button', { name: en.addModel }))
+    fireEvent.change(screen.getByLabelText(`${en.modelId} 1`), { target: { value: 'model' } })
+    expect(screen.getByRole('button', { name: en.createChannel }).hasAttribute('disabled')).toBe(true)
+    fireEvent.change(screen.getByRole('textbox', { name: en.channelName }), { target: { value: 'My channel' } })
+    fireEvent.click(screen.getByRole('button', { name: en.createChannel }))
+    await waitFor(() => { expect(onClose).toHaveBeenCalledWith(true) })
+    const mutation = firstMutate(mutate)
+    expect(mutation.ops[0]?.path[1]).toMatch(/^channel-[a-f0-9-]+$/)
+    expect(mutation.ops[0]?.value).toMatchObject({ displayName: 'My channel', api: 'openai-completions' })
+  })
+
   it('creates a custom provider without changing the default model', async () => {
     const { face, mutate, set, onClose } = mountCard()
     const initialize = vi.spyOn(ctxWith(face).remote.session, 'initializeDefaultModel')

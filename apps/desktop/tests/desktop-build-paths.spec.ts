@@ -9,6 +9,24 @@ import {
 } from '../scripts/desktop-build-paths.mjs'
 
 describe('desktop build paths', () => {
+  it('isolates preview preparation and artifacts while retaining the shared download cache', () => {
+    const buildRoot = resolve('isolated-preview')
+    const normal = desktopTargetBuildPaths('mac-arm64', {})
+    const preview = desktopTargetBuildPaths('mac-arm64', { DSH_DESKTOP_BUILD_ROOT: buildRoot })
+    expect(preview.root).toBe(join(buildRoot, 'targets', 'mac-arm64'))
+    for (const key of ['root', 'artifacts', 'unsignedArtifacts', 'unnotarizedArtifacts', 'runtime', 'packageSet',
+      'dsh', 'dshPnpm', 'electron', 'packedDsh', 'packedVendor', 'packedLandlock'] as const) {
+      expect(preview[key].startsWith(buildRoot + sep)).toBe(true)
+    }
+    expect(preview.downloads).toBe(normal.downloads)
+    expect(preview.pnpmStore).toBe(normal.pnpmStore)
+    expect(desktopTargetBuildPaths('mac-arm64', {}).root).toBe(normal.root)
+  })
+
+  it.each(['', ' ', 'relative/build', './build', 'build\0invalid'])('rejects invalid build directory %j', (directory) => {
+    expect(() => desktopTargetBuildPaths('mac-arm64', { DSH_DESKTOP_BUILD_ROOT: directory })).toThrow('DSH_DESKTOP_BUILD_ROOT')
+  })
+
   it('isolates every mutable build directory by complete target', () => {
     const arm64 = desktopTargetBuildPaths('mac-arm64')
     const x64 = desktopTargetBuildPaths('mac-x64')

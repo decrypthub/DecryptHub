@@ -1372,7 +1372,8 @@ describe('desktop main startup', () => {
     harness.hosts[0]!.url = `${protocol}//127.0.0.1:3080/?token=test`
     harness.hosts[0]!.ready.resolve()
     await Promise.resolve(invoke(DESKTOP_IPC.boot))
-    expect(harness.connectWelcome).toHaveBeenCalledWith(`${protocol}//127.0.0.1:3080/?token=test`, 'test-cookie')
+    expect(harness.connectWelcome).toHaveBeenCalledWith(`${protocol}//127.0.0.1:3080/?token=test`,
+      'test-cookie', expect.any(Function), { accountEnabled: true })
     expect(harness.removeLegacyHostCookies).toHaveBeenCalledWith(harness.hostCookies, `${protocol}//127.0.0.1:3080/?token=test`)
     const handler = harness.socketHeaders.mock.calls[0]![1] as (
       details: { url: string; webContentsId: number; requestHeaders: Record<string, string> },
@@ -1406,6 +1407,19 @@ describe('desktop main startup', () => {
     await Promise.resolve(invoke(DESKTOP_IPC.boot))
     await vi.waitFor(() => { expect(console.error).toHaveBeenCalledWith('desktop: legacy Host cookie cleanup failed', failure) })
     expect(harness.connectWelcome).toHaveBeenCalled()
+  })
+
+  it('opens the product workspace without an official account or API key when model setup owns onboarding', async () => {
+    vi.stubEnv('DSH_DESKTOP_ONBOARDING', 'models')
+    await import('../src/main.ts')
+    await harness.preparing.promise
+    harness.prepared.resolve()
+    await harness.hostStarted.promise
+    harness.hosts[0]!.fetch.mockResolvedValue(Response.json({ hasApiKey: false, writable: true, localePreference: null }))
+    harness.hosts[0]!.ready.resolve()
+    await harness.windows[0]!.shown.promise
+    expect(harness.windows).toHaveLength(1)
+    expect(harness.windows[0]!.show).toHaveBeenCalledOnce()
   })
 
   it('shares login key discovery with onboarding and rejects foreign renderers', async () => {

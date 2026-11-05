@@ -20,6 +20,7 @@ import {
 import { hasTypertRemoteNavigation, isForbiddenPublicationFile } from './publication-payload.ts'
 import type { DshBundleManifest } from '../packages/util/package-manifest/src/types.ts'
 import { detailPath } from '../packages/util/plugin-detail/src/document.ts'
+import { PRIVATE_PRODUCT_PACKAGE_DIRECTORIES } from './decrypthub-product.ts'
 import { bundlePatchFiles } from '../packages/boot/app-boot/src/profile.ts'
 import { OPTIONAL_BUNDLES } from '../packages/util/official-bundles/src/bundles.ts'
 import {
@@ -456,6 +457,7 @@ export function checkExperimentalNameExceptions(manifests: readonly WorkspaceMan
 }
 
 function isReleaseMemberDirectory(dir: string): boolean {
+  if (PRIVATE_PRODUCT_PACKAGE_DIRECTORIES.includes(dir)) return false
   // The SSH carrier is distributed as executable archives, never as an npm application.
   if (dir === 'packages/ssh/ssh-helper-runtime') return false
   return standardReleaseMemberDirectory.test(dir) || isPublicExperimentalPackageDirectory(dir)

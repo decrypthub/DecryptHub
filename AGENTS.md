@@ -1,6 +1,6 @@
 # AGENTS.md
 
-DeepSeek Harness is an all-plugin Cordis agent harness. Read [docs/architecture.md](docs/architecture.md) before changing `packages/`; follow [docs/AGENTS.md](docs/AGENTS.md) for documentation.
+This checkout is DecryptHub, an independent product fork of the all-plugin Cordis DeepSeek Harness. Follow [PRODUCT-DESIGN.md](PRODUCT-DESIGN.md) for product requirements and DSH plugin/configuration compatibility. Read [docs/architecture.md](docs/architecture.md) before changing `packages/`; follow [docs/AGENTS.md](docs/AGENTS.md) for documentation. Cross-device status and setup: [HANDOFF.md](HANDOFF.md) ([中文](HANDOFF.zh.md)).
 
 ## Pre-stable APIs and released Session data
 

@@ -977,6 +977,97 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'decrypthubComponents',
+    summary: 'One owner of official installations; the MCP client remains the transport owner.',
+    description: 'One owner of official installations; the MCP client remains the transport owner.',
+    methods: [
+      {
+        signature: '@Remote async snapshot(): Promise<ComponentsSnapshot>',
+        description: 'Read actual local installations without performing network requests.',
+        parameters: [],
+        returns: 'component versions, local CLI availability and observed WDH transports.',
+      },
+      {
+        signature: '@Remote({ mode: \'stream\' }) async *watch(signal: AbortSignal): AsyncIterable<ComponentsSnapshot>',
+        description: 'Observe version, installation and WDH state changes with a complete initial snapshot.',
+        parameters: [{ name: 'signal', description: 'subscription lifetime.' }],
+        returns: 'credential-free component observations.',
+      },
+      {
+        signature: '@Remote checkUpdates(): Promise<ComponentsSnapshot>',
+        description: 'Explicitly query code-owned official repositories; installed components remain usable on failure.',
+        parameters: [],
+        returns: 'updated catalog observations, including per-component lookup failures.',
+      },
+      {
+        signature: '@Remote installComponent(id: ComponentId, expectedVersion: string): void',
+        description: 'Start one reviewed official installation; no post-install program executes.',
+        parameters: [{ name: 'id', description: 'fixed product component.' }, { name: 'expectedVersion', description: 'version the user reviewed.' }],
+        returns: 'once its cancellable transaction is registered.',
+      },
+      {
+        signature: '@Remote async cancelInstall(id: ComponentId): Promise<void>',
+        description: 'Cancel only the named installation; activation already committed is not undone.',
+        parameters: [{ name: 'id', description: 'component operation.' }],
+        returns: 'after its cleanup settles.',
+      },
+      {
+        signature: '@Remote async rollback(id: ComponentId): Promise<ComponentsSnapshot>',
+        description: 'Restore the prior verified version; current MCP clients switch at their next safe rebind.',
+        parameters: [{ name: 'id', description: 'component identity.' }],
+        returns: 'updated local state.',
+      },
+      {
+        signature: 'async wdhEntry(fallback: string): Promise<string>',
+        description: 'Resolve the verified WDH entry or the deployment fallback.',
+        parameters: [{ name: 'fallback', description: 'explicitly configured local WDH entry.' }],
+        returns: 'installed entry for the next Agent step.',
+      },
+      {
+        signature: 'async runtime(id: \'adh\' | \'idh\', command: string, args: readonly string[], endpoint: string = \'\'): Promise<ComponentRuntime>',
+        description: 'Resolve a managed Python gateway or an explicitly configured local CLI.',
+        parameters: [{ name: 'id', description: 'device integration.' }, { name: 'command', description: 'configured local fallback.' }, { name: 'args', description: 'reviewed MCP arguments.' }, { name: 'endpoint', description: 'optional device-daemon address.' }],
+        returns: 'actual invocation without shell expansion.',
+      },
+      {
+        signature: 'observeWdh(agentId: SessionId, workspace: string, read: () => McpConnectionStatus, subscribe: (listener: () => void) => () => void): () => void',
+        description: 'Publish one real Agent-owned connection; disposing it removes the observation.',
+        parameters: [{ name: 'agentId', description: 'owning Agent identity.' }, { name: 'workspace', description: 'current working directory.' }, { name: 'read', description: 'live connection state.' }, { name: 'subscribe', description: 'underlying MCP observation.' }],
+        returns: 'connection-observation disposer.',
+      },
+      {
+        signature: 'registerReconnect(id: ComponentId, reconnect: () => Promise<void>): () => void',
+        description: 'Bind the integration\'s actual connection replacement operation.',
+        parameters: [{ name: 'id', description: 'component identity.' }, { name: 'reconnect', description: 'integration-owned replacement.' }],
+        returns: 'disposer that cannot remove a newer binding.',
+      },
+      {
+        signature: '@Remote async reconnect(id: ComponentId): Promise<void>',
+        description: 'Reconnect an enabled integration using the currently verified component version.',
+        parameters: [{ name: 'id', description: 'component identity.' }],
+        returns: 'after replacement is requested.',
+      },
+      {
+        signature: '@Remote async configure(id: ComponentId, enabled: boolean, command: string, args: string[], endpoint: string, browser: \'system\' | \'cloak\', expectedRevision: number): Promise<void>',
+        description: 'Persist reviewed official connection choices without replacing unrelated settings.',
+        parameters: [{ name: 'id', description: 'component identity.' }, { name: 'enabled', description: 'persisted enablement choice.' }, { name: 'command', description: 'local fallback CLI, unused for WDH.' }, { name: 'args', description: 'local MCP arguments, unused for WDH.' }, { name: 'endpoint', description: 'device daemon address, or empty.' }, { name: 'browser', description: 'WDH browser choice.' }, { name: 'expectedRevision', description: 'configuration revision captured by the editor.' }],
+        returns: 'after a revision-checked Settings commit.',
+      },
+      {
+        signature: '@Remote async inspectBrowser(): Promise<BrowserKernelView>',
+        description: 'Inspect installed browser files without starting a browser or connecting a device.',
+        parameters: [],
+        returns: 'the selected kernel\'s file-discovery state.',
+      },
+      {
+        signature: '@Remote installBrowser(acceptedLicense: boolean): void',
+        description: 'Download the browser through WDH\'s maintained official kernel installer.',
+        parameters: [{ name: 'acceptedLicense', description: 'explicit acknowledgement from the download confirmation.' }],
+        returns: 'once the cancellable operation is registered.',
+      },
+    ],
+  },
+  {
     key: 'deepseekAccount',
     summary: 'Account operations; only Host consumers can obtain a request credential.',
     description: 'Account operations; only Host consumers can obtain a request credential.',
@@ -4947,6 +5038,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'ref', description: 'the reference whose stored value changed.' }],
   },
   {
+    name: 'decrypthub-components/activated',
+    mode: 'emit',
+    signature: '\'decrypthub-components/activated\'(id: ComponentId): void',
+    summary: 'A verified active component changed; providers refresh their next connection.',
+    description: 'A verified active component changed; providers refresh their next connection.',
+    parameters: [{ name: 'id', description: 'activated component.' }],
+  },
+  {
     name: 'deepseek-account/model-sign-in-required',
     mode: 'emit',
     signature: '\'deepseek-account/model-sign-in-required\'(): void',
@@ -5771,6 +5870,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type BrandedNumber<B extends string> = number & {\n    readonly [BRAND]: B;\n};',
   },
   {
+    name: 'BrowserKernelView',
+    declaration: 'export interface BrowserKernelView {\n    state: \'unchecked\' | \'found\' | \'missing\' | \'failed\';\n    version: string | null;\n}',
+  },
+  {
     name: 'BrowserUseProviderName',
     declaration: 'export type BrowserUseProviderName = Branded<\'BrowserUseProviderName\'>;',
   },
@@ -5913,6 +6016,26 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CompactionTrigger',
     declaration: 'export type CompactionTrigger = \'pressure\' | \'context-overflow\';',
+  },
+  {
+    name: 'ComponentId',
+    declaration: 'export type ComponentId = \'wdh\' | \'adh\' | \'idh\';',
+  },
+  {
+    name: 'ComponentOperation',
+    declaration: 'export interface ComponentOperation {\n    kind?: \'component\' | \'browser\';\n    phase: \'checking\' | \'downloading\' | \'verifying\' | \'installing\' | \'installed\' | \'cancelled\' | \'failed\';\n    received: number;\n    total: number;\n    version?: string;\n    error?: string;\n}',
+  },
+  {
+    name: 'ComponentRuntime',
+    declaration: 'export interface ComponentRuntime {\n    command: string;\n    args: string[];\n    env: Record<string, string>;\n    cwd?: string;\n}',
+  },
+  {
+    name: 'ComponentsSnapshot',
+    declaration: 'export interface ComponentsSnapshot {\n    components: ComponentView[];\n    wdh: WdhConnectionView[];\n    configuration: OfficialConfiguration | null;\n    browser: BrowserKernelView;\n}',
+  },
+  {
+    name: 'ComponentView',
+    declaration: 'export interface ComponentView {\n    id: ComponentId;\n    installed: InstalledComponent | null;\n    localCommand: string | null;\n    previousVersion: string | null;\n    latestVersion: string | null;\n    catalogError: string | null;\n    localError: string | null;\n    operation: ComponentOperation | null;\n}',
   },
   {
     name: 'CompositionRowEnablement',
@@ -6739,6 +6862,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface InstallBundleOptions {\n    enabled?: boolean;\n    saveExact?: boolean;\n    requestId?: PluginInstallRequestId;\n    approvedBuilds?: string[];\n    registry?: Registry;\n}',
   },
   {
+    name: 'InstalledComponent',
+    declaration: 'export interface InstalledComponent {\n    id: ComponentId;\n    version: string;\n    entry: string;\n    runtime: \'node\' | \'python\';\n    source: \'bundled\' | \'managed\';\n}',
+  },
+  {
     name: 'InstallSpecKind',
     declaration: 'export type InstallSpecKind = \'registry\' | \'path\' | \'git\' | \'tarball\';',
   },
@@ -7397,6 +7524,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'OfficeToPdfResult',
     declaration: 'export interface OfficeToPdfResult {\n    readonly pdf: Uint8Array;\n    readonly missingFonts: string[];\n    readonly cacheKey: OfficeToPdfKey;\n    readonly generation: OfficeToPdfGeneration;\n}',
+  },
+  {
+    name: 'OfficialConfiguration',
+    declaration: 'export interface OfficialConfiguration {\n    revision: number;\n    writable: boolean;\n    wdh: {\n        enabled: boolean;\n        browser: \'system\' | \'cloak\';\n    };\n    adh: OfficialDeviceConfiguration;\n    idh: OfficialDeviceConfiguration;\n}',
+  },
+  {
+    name: 'OfficialDeviceConfiguration',
+    declaration: 'export interface OfficialDeviceConfiguration {\n    enabled: boolean;\n    command: string;\n    args: string[];\n    endpoint: string;\n}',
   },
   {
     name: 'OnboardingPage',
@@ -9933,6 +10068,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ViewerPluginPolicy',
     declaration: 'export interface ViewerPluginPolicy {\n    readonly plugin: string;\n    readonly mode: \'all\' | \'none\' | \'selected\';\n    readonly endpoints?: readonly string[];\n}',
+  },
+  {
+    name: 'WdhConnectionView',
+    declaration: 'export interface WdhConnectionView {\n    agentId: SessionId;\n    workspace: string;\n    status: McpConnectionStatus;\n}',
   },
   {
     name: 'WebBootBatch',

@@ -6,11 +6,17 @@ import z from '@deepseek-ai/schemastery'
 export interface Config {
   /** Offer the browser API-key step when no native shell owns credential onboarding. */
   credentialOnboarding: boolean
+  /** Offer the installed provider directory; false keeps only configured channels and the custom API form. */
+  providerCatalog: boolean
+  /** Show the upstream preview notice on first browser launch. */
+  welcomeNotice: boolean
 }
 
 /** Validate Host configuration and its public page-bootstrap payload. */
 export const Config: z<Partial<Config>, Config> = z.object({
   credentialOnboarding: z.boolean().default(true),
+  providerCatalog: z.boolean().default(true),
+  welcomeNotice: z.boolean().default(true),
 })
 
 /** Page-global key carrying only the public onboarding options. */
