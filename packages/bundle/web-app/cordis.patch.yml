@@ -670,3 +670,8 @@
       name: '@deepseek-ai/dsh-agent-preset-registry'
       config:
         default: standard
+
+# Product tool: report the running product runtime to the model.
+- insert:
+    - id: tool-product-runtime
+      name: '@deepseek-ai/dsh-tool-product-runtime'
