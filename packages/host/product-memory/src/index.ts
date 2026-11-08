@@ -39,13 +39,13 @@ export interface Config {
 
 /** Validated plugin configuration; the settings page renders this schema. */
 export const Config = z.object({
-  maxSectionChars: z.number().default(2000),
+  maxSectionChars: z.number().default(2000).volatile(),
   entries: z.dict(z.object({
     text: z.string().role('textarea'),
     scope: z.union([z.const('user'), z.const('project')]).default('user'),
     createdAt: z.string(),
     updatedAt: z.string(),
-  })).default({}),
+  })).default({}).volatile(),
 })
 
 /** Section order: after workspace guidance and before the skill catalog. */

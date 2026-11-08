@@ -1,6 +1,6 @@
-import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 /** Product memory settings section: list, add, and remove stored entries. */
 import { useEffect, useState } from 'react'
+import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type { MemorySnapshot, MemorySource } from './source.ts'
 
 /** The section's observation and explicit management actions. */
@@ -29,17 +29,21 @@ export function MemoryPage({ useMemory, source, t }: MemoryPageProps) {
   const [text, setText] = useState('')
   const [scope, setScope] = useState('user')
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
   useEffect(() => { void source.load() }, [source])
   const entries = Object.entries(snapshot.entries)
 
   /**
-   * Run one mutation and restore the form when it succeeds.
+   * Run one mutation, reporting a failure instead of swallowing it.
    * @param operation - mutation to run.
    * @returns after the mutation settles.
    */
   const run = async (operation: () => Promise<void>): Promise<void> => {
     setBusy(true)
-    try { await operation() } finally { setBusy(false) }
+    setError('')
+    try { await operation() }
+    catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)) }
+    finally { setBusy(false) }
   }
 
   return <section>
@@ -48,6 +52,7 @@ export function MemoryPage({ useMemory, source, t }: MemoryPageProps) {
       <p>{t('intro')}</p>
     </header>
     {snapshot.failed && <p>{t('failed')}</p>}
+    {error === '' ? null : <p role="alert">{error}</p>}
     {!snapshot.loaded && <p>{t('pending')}</p>}
     {snapshot.loaded && entries.length === 0 && <p>{t('empty')}</p>}
     <ul>

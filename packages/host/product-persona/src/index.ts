@@ -23,7 +23,7 @@ export interface Config {
 
 /** Validated plugin configuration; the settings page renders this schema. */
 export const Config = z.object({
-  persona: z.string().role('textarea').default(''),
+  persona: z.string().role('textarea').default('').volatile(),
 })
 
 /** Section order: after the harness identity, before workspace guidance. */
