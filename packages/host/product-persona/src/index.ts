@@ -8,6 +8,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
+import { isVolatile } from '@deepseek-ai/cosmokit'
 import z from '@deepseek-ai/schemastery'
 
 /** Cordis plugin name; also the settings namespace the product page edits. */
@@ -25,6 +26,12 @@ export interface Config {
 export const Config = z.object({
   persona: z.string().role('textarea').default('').volatile(),
 })
+
+/** Read one configuration value that volatile wrapping may hold. */
+function plainString(value: unknown): string {
+  const raw = isVolatile(value) ? value.get() : value
+  return typeof raw === 'string' ? raw : ''
+}
 
 /** Section order: after the harness identity, before workspace guidance. */
 const SECTION_ORDER = 20
@@ -51,7 +58,7 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => ctx.systemPrompt.section({
     name: 'product-persona',
     order: SECTION_ORDER,
-    text: () => live.persona.trim(),
+    text: () => plainString(live.persona).trim(),
     interpolate: false,
   }), 'product-persona.section')
 }

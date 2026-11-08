@@ -12866,6 +12866,10 @@ importers:
         version: link:../../typert/protocol
 
   packages/host/product-memory:
+    dependencies:
+      '@deepseek-ai/cosmokit':
+        specifier: link:../../../vendor/cosmokit
+        version: link:../../../vendor/cosmokit
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:~
@@ -12894,6 +12898,9 @@ importers:
 
   packages/host/product-persona:
     dependencies:
+      '@deepseek-ai/cosmokit':
+        specifier: link:../../../vendor/cosmokit
+        version: link:../../../vendor/cosmokit
       '@deepseek-ai/schemastery':
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery

@@ -9,6 +9,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
+import { isVolatile } from '@deepseek-ai/cosmokit'
 import z from '@deepseek-ai/schemastery'
 import { randomUUID } from 'node:crypto'
 
@@ -47,6 +48,11 @@ export const Config = z.object({
     updatedAt: z.string(),
   })).default({}).volatile(),
 })
+
+/** Read one configuration value that volatile wrapping may hold. */
+function plainValue<T>(value: unknown): T {
+  return (isVolatile(value) ? value.get() : value) as T
+}
 
 /** Section order: after workspace guidance and before the skill catalog. */
 const SECTION_ORDER = 150
@@ -91,7 +97,7 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => ctx.systemPrompt.section({
     name: 'product-memory',
     order: SECTION_ORDER,
-    text: () => renderSection(live.entries, live.maxSectionChars),
+    text: () => renderSection(plainValue(live.entries), plainValue(live.maxSectionChars)),
   }), 'product-memory.section')
 
   /**
