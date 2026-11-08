@@ -186,6 +186,9 @@
     - id: ui-mcp
       name: '@deepseek-ai/dsh-client-ui-mcp'
 
+    - id: ui-decrypthub-memory
+      name: '@deepseek-ai/dsh-client-ui-decrypthub-memory'
+
     - id: ui-settings-decrypthub-account
       name: '@deepseek-ai/dsh-client-ui-settings-decrypthub-account'
 
