@@ -14,6 +14,22 @@ export interface AccountInjected {
   open(page: Parameters<CommunityAccountBridge['open']>[0]): Promise<void>
 }
 /** Native account section in the ordinary settings panel. */
+/** Launcher used when the desktop account bridge is absent: it only opens settings. */
+export type SettingsLauncherFallbackProps =
+  Pick<PropsRuntime<'settings.launcher'>, 'wide' | 'openSettings'> & PropsLocale<'settings.decrypthub-account'>
+
+/**
+ * Render the settings trigger without account controls.
+ * @param props - localized label and the shell's open action.
+ * @returns the sidebar-foot trigger content.
+ */
+export function SettingsLauncherFallback({ wide, openSettings, t }: SettingsLauncherFallbackProps) {
+  return <button type="button" className={css.trigger} data-collapsed={!wide} aria-label={t('settings')}
+    onClick={() => { openSettings() }}>
+    <IconSettingsOutlineMedium size={20} />{wide && <span className={css.name}>{t('settings')}</span>}
+  </button>
+}
+
 export type AccountSectionProps = PropsRuntime<'settings.section'> & PropsLocale<'settings.decrypthub-account'> & InjectFace<AccountInjected>
 
 /** @param props - localized account observation and commands. @returns community settings. */
