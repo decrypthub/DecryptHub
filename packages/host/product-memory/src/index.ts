@@ -85,6 +85,9 @@ export function apply(ctx: Context, config: Config): void {
   }
   ctx.on('loader/volatile-update', refresh)
 
+  // Let the settings surface render this namespace from its schema.
+  ctx.effect(() => ctx.settings.configure({ auto: true }), 'product-memory.settings')
+
   ctx.effect(() => ctx.systemPrompt.section({
     name: 'product-memory',
     order: SECTION_ORDER,

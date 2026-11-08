@@ -30,6 +30,7 @@ async function fixture(): Promise<{ ctx: Context; state: StubState }> {
   onTestFinished(() => ctx.fiber.dispose())
   const state: StubState = { maxSectionChars: 2000, entries: {} }
   ctx.provide('settings', {
+    configure: () => () => undefined,
     describe: () => [{ ns: 'product-memory', value: state, revision: 1, applies: 'live', autoGenerate: true, schema: {} }],
     mutate: async (_ns: string, ops: readonly PathOp[]) => {
       for (const op of ops) {
