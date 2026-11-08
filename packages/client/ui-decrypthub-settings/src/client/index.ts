@@ -12,18 +12,24 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type-only: the ctx.remote Context merge.
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import { MemoryPage } from './MemoryPage.tsx'
+import { PersonaPage } from './PersonaPage.tsx'
+import { PersonaSource } from './persona-source.ts'
 import { MemorySource } from './source.ts'
-import { en, zh, type MemoryKey } from './locales.ts'
+import { en, zh, personaEn, personaZh, type MemoryKey, type PersonaKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     /** Product memory section copy. */
     'settings.memory': MemoryKey
+    /** Product role section copy. */
+    'settings.persona': PersonaKey
   }
 }
 
 /** Dictionary namespace owned by this plugin. */
 export const NS = 'settings.memory'
+/** Role dictionary namespace owned by this plugin. */
+export const PERSONA_LOCALE = 'settings.persona'
 /** Required services (cordis fiber inject). */
 export const inject = ['slots', 'locale', 'remote', 'remote.settings']
 
@@ -46,6 +52,25 @@ export function apply(ctx: Context): void {
   })
   ctx.effect(() => () => { source.dispose() }, 'memory: source lifetime')
   ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'memory: dictionaries')
+  ctx.effect(() => ctx.locale.register(PERSONA_LOCALE, { en: personaEn, zh: personaZh }), 'persona: dictionaries')
+  const personaSource = new PersonaSource({
+    describe: async () => {
+      const result = await ctx.remote.settings.describe()
+      if (!result.ok) throw new Error(result.error.message)
+      return result.value
+    },
+    write: async (ops, revision) => {
+      const result = await ctx.remote.settings.mutate('product-persona', ops, revision)
+      if (!result.ok) throw new Error(result.error.message)
+      return result.value
+    },
+  })
+  ctx.effect(() => () => { personaSource.dispose() }, 'persona: source lifetime')
+  const pt = ctx.locale.bind(PERSONA_LOCALE)
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section', id: 'persona', order: 27, label: () => pt('nav'), locale: PERSONA_LOCALE,
+    inject: () => ({ hooks: { persona: personaSource.store }, source: personaSource }),
+  }, PersonaPage))
   const t = ctx.locale.bind(NS)
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section', id: 'memory', order: 26, label: () => t('nav'), locale: NS,

@@ -3044,9 +3044,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-cordis':
         specifier: workspace:*
         version: link:../../extensions/ui-cordis
-      '@deepseek-ai/dsh-client-ui-decrypthub-memory':
+      '@deepseek-ai/dsh-client-ui-decrypthub-settings':
         specifier: workspace:*
-        version: link:../../client/ui-decrypthub-memory
+        version: link:../../client/ui-decrypthub-settings
       '@deepseek-ai/dsh-client-ui-deliverables':
         specifier: workspace:*
         version: link:../../client/ui-deliverables
@@ -4395,7 +4395,7 @@ importers:
         specifier: 4.4.3
         version: 4.4.3
 
-  packages/client/ui-decrypthub-memory:
+  packages/client/ui-decrypthub-settings:
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:~

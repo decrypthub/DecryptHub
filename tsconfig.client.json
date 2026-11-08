@@ -116,7 +116,7 @@
     { "path": "./packages/client/ui-brand-official" },
     { "path": "./packages/client/ui-brand-decrypthub" },
     { "path": "./packages/client/ui-mcp" },
-    { "path": "./packages/client/ui-decrypthub-memory" },
+    { "path": "./packages/client/ui-decrypthub-settings" },
     { "path": "./packages/client/ui-settings-decrypthub-account" },
     { "path": "./packages/client/ui-approval" },
     { "path": "./packages/client/ui-chat/tsconfig.client.json" },

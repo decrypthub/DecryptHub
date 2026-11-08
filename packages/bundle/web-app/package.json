@@ -204,7 +204,7 @@
     "@deepseek-ai/dsh-decrypthub-integrations": "workspace:*",
     "@deepseek-ai/dsh-client-ui-settings-decrypthub-account": "workspace:*",
     "@deepseek-ai/dsh-client-ui-mcp": "workspace:*",
-    "@deepseek-ai/dsh-client-ui-decrypthub-memory": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-decrypthub-settings": "workspace:*",
     "@deepseek-ai/dsh-decrypthub-components": "workspace:*"
   },
   "peerDependencies": {

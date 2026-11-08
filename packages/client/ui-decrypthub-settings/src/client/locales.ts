@@ -30,5 +30,32 @@ export const zh: typeof en = {
   pending: '正在加载记忆…',
 }
 
+/** English dictionary for the role section. */
+export const personaEn = {
+  nav: 'Role',
+  title: 'Role definition',
+  intro: 'Text injected at the top of every request as the product persona. An empty value removes it.',
+  placeholder: 'Describe the role the agent should take.',
+  save: 'Save role',
+  revert: 'Revert',
+  failed: 'Could not read the role settings.',
+  pending: 'Loading role…',
+}
+
+/** Chinese dictionary for the role section. */
+export const personaZh: typeof personaEn = {
+  nav: '角色',
+  title: '角色定义',
+  intro: '作为产品人设注入每次请求开头的文本。留空则移除。',
+  placeholder: '描述智能体应扮演的角色。',
+  save: '保存角色',
+  revert: '撤销',
+  failed: '无法读取角色设置。',
+  pending: '正在加载角色…',
+}
+
+/** Role dictionary key union. */
+export type PersonaKey = keyof typeof personaEn
+
 /** Dictionary key union. */
 export type MemoryKey = keyof typeof en
