@@ -698,3 +698,8 @@
 - insert:
     - id: product-persona
       name: '@deepseek-ai/dsh-product-persona'
+
+# Product row: tool-product-sessions.
+- insert:
+    - id: tool-product-sessions
+      name: '@deepseek-ai/dsh-tool-product-sessions'
