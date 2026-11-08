@@ -675,3 +675,8 @@
 - insert:
     - id: tool-product-runtime
       name: '@deepseek-ai/dsh-product-runtime'
+
+# Product row: product-memory.
+- insert:
+    - id: product-memory
+      name: '@deepseek-ai/dsh-product-memory'
