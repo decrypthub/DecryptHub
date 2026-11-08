@@ -22,6 +22,10 @@ async function fixture(): Promise<Context> {
   onTestFinished(() => ctx.fiber.dispose())
   ctx.provide('sessionQuery', {
     readTitleSnapshots: async (ids: readonly string[]) => ids.map(id => ({ sessionId: id, status: 'fulfilled', value: { title: id === 's-new' ? '新会话' : '旧会话' } })),
+    readSurface: async () => ({ events: [
+      { type: 'user/message', content: [{ type: 'text', text: '上次结论是 A' }] },
+      { type: 'assistant/message', content: [{ type: 'text', text: '收到' }] },
+    ] }),
     listSessions: async () => [
       record('s-old', '旧会话', '2026-11-01T10:00:00Z'),
       record('s-new', '新会话', '2026-11-05T10:00:00Z'),
@@ -58,4 +62,14 @@ it('honours the requested limit', async () => {
   const ctx = await fixture()
   const value = await call(ctx, { limit: 1 }) as { sessions: unknown[] }
   expect(value.sessions).toHaveLength(1)
+})
+
+it('reads trailing messages of one session', async () => {
+  const ctx = await fixture()
+  const result = await executeModelToolFixture(ctx, {
+    callId: ToolCallId('call-session-read'), name: 'session_read',
+    arguments: { id: 's-new' }, signal: new AbortController().signal,
+  })
+  const value = result.value as { messages: { role: string; text: string }[] }
+  expect(value.messages.map(message => `${message.role}:${message.text}`)).toEqual(['user:上次结论是 A', 'assistant:收到'])
 })

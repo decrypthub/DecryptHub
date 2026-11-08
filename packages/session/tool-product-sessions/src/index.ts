@@ -25,6 +25,9 @@ export const Config = z.object({
   maxSessions: z.number().step(1).min(1).default(20),
 })
 
+/** Longest rendered message text per read. */
+const MAX_MESSAGE_CHARS = 500
+
 /** One listed session as the tool renders it. */
 interface SessionSummary {
   id: string
@@ -91,6 +94,59 @@ export function apply(ctx: Context, config: Config): void {
         .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
         .slice(0, limit)
       return { sessions }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'session_read',
+    description: 'Read the last few messages of one session by id, as role and text pairs. Use it after session_list when the user asks what an earlier conversation concluded.',
+    parameters: {
+      id: { type: 'string', required: true, description: 'Session id returned by session_list.' },
+      limit: { type: 'number', description: 'How many trailing messages to return; defaults to 10.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          messages: {
+            type: 'array',
+            required: true,
+            description: 'Trailing messages in model-history order.',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                role: { type: 'string', required: true },
+                text: { type: 'string', required: true },
+              },
+            },
+          },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.messages.length === 0
+          ? '(no messages)'
+          : value.messages.map(message => `${message.role}: ${message.text}`).join('\n'),
+      }],
+    },
+    async execute(args) {
+      const surface = await ctx.sessionQuery.readSurface(args.id as Parameters<typeof ctx.sessionQuery.readSurface>[0])
+      const limit = args.limit === undefined ? 10 : Math.max(1, Math.min(50, args.limit))
+      const tail = surface.events.slice(-limit)
+      return {
+        messages: tail.map((event) => {
+          const blocks = (event as { content?: readonly { text?: unknown }[] }).content ?? []
+          const text = blocks
+            .map(block => typeof block.text === 'string' ? block.text : '')
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, MAX_MESSAGE_CHARS)
+          return { role: (event as { type: string }).type.split('/')[0] ?? 'event', text }
+        }).filter(message => message.text.length > 0),
+      }
     },
   }))
 }
