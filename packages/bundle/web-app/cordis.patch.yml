@@ -693,3 +693,8 @@
       name: '@deepseek-ai/dsh-tool-skill-manage'
       config:
         directory: !!js dshHomePath('skills')
+
+# Product row: product-persona.
+- insert:
+    - id: product-persona
+      name: '@deepseek-ai/dsh-product-persona'

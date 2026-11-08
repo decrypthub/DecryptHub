@@ -55,6 +55,7 @@
     }
   },
   "dependencies": {
+    "@deepseek-ai/dsh-product-persona": "workspace:*",
     "@deepseek-ai/dsh-tool-skill-manage": "workspace:*",
     "@deepseek-ai/dsh-product-memory": "workspace:*",
     "@deepseek-ai/dsh-agent-instructions": "workspace:*",

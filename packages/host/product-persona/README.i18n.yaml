@@ -1,0 +1,40 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/host/product-persona/README.md
+/:
+  en: f32e5d96c8b05439
+  zh: 41ddf26de3005747
+/deepseek-ai-dsh-product-persona:
+  en: b17bb382343dfefe
+  zh: f6e4f95753ecbbb1
+/deepseek-ai-dsh-product-persona/summary:
+  en: 9875c816c54d987e
+  zh: 5b92e2e9e628f677
+/deepseek-ai-dsh-product-persona/table-of-contents:
+  en: af856ba79fe31b8e
+  zh: a20364de34ced7eb
+/deepseek-ai-dsh-product-persona/use-this-package:
+  en: f7db462afc9ab878
+  zh: 4cf6b1576b149f92
+/deepseek-ai-dsh-product-persona/model-experience:
+  en: 215e7ba838619b7b
+  zh: 215e7ba838619b7b
+/deepseek-ai-dsh-product-persona/model-experience/role-section:
+  en: 8aee30ecba402e10
+  zh: 8aee30ecba402e10
+/deepseek-ai-dsh-product-persona/model-experience/role-section/what-the-model-sees:
+  en: 9c50d6754ac49b6c
+  zh: f5843e53acdda823
+/deepseek-ai-dsh-product-persona/model-experience/role-section/token-effect:
+  en: 300be8b3b02a7be3
+  zh: 975c1c43af7bf590
+/deepseek-ai-dsh-product-persona/model-experience/role-section/kv-cache-effect:
+  en: 3060502391076eef
+  zh: 0d2b0d84ccedb3d7
+/deepseek-ai-dsh-product-persona/known-limitations-and-deferred-work:
+  en: ecd91f7f57580038
+  zh: d280f9b0c5ac65da
+/deepseek-ai-dsh-product-persona/known-limitations-and-deferred-work/dev-note:
+  en: 7242c84a788c28c9
+  zh: b515017dd07e210b

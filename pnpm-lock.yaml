@@ -3287,6 +3287,9 @@ importers:
       '@deepseek-ai/dsh-product-memory':
         specifier: workspace:*
         version: link:../../host/product-memory
+      '@deepseek-ai/dsh-product-persona':
+        specifier: workspace:*
+        version: link:../../host/product-persona
       '@deepseek-ai/dsh-schedule':
         specifier: workspace:*
         version: link:../../schedule/schedule
@@ -12879,6 +12882,22 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
+
+  packages/host/product-persona:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-settings':
+        specifier: workspace:*
+        version: link:../../settings/settings
+      '@deepseek-ai/dsh-system-prompt':
+        specifier: workspace:*
+        version: link:../../core/system-prompt
 
   packages/host/product-runtime:
     devDependencies:
