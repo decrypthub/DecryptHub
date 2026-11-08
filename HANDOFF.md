@@ -1,9 +1,9 @@
 # Cross-device handoff
 
-Product branch: `decrypthub/dsh-product-20261104` in `https://github.com/decrypthub/DecryptHub.git`. This is the Electron / DSH product; the previous Tauri implementation remains on `handoff/ui-alignment-20261104` in the same remote. See [the detailed Chinese handoff](HANDOFF.zh.md).
+Product branch: `feat/dsh-rc1` in `https://github.com/decrypthub/DecryptHub.git`. It is upstream DeepSeek Harness `0.2.2-rc.1` (upstream `master` = `fcc0ad4621`) plus one product commit. `main` holds the previous Tauri implementation and `handoff/ui-alignment-20261104` its UI handoff snapshot; treat both as read-only and do not merge them into this branch. See [the detailed Chinese handoff](HANDOFF.zh.md).
 
 ```sh
-git clone --branch decrypthub/dsh-product-20261104 https://github.com/decrypthub/DecryptHub.git DecryptHub-DSH
+git clone --branch feat/dsh-rc1 https://github.com/decrypthub/DecryptHub.git DecryptHub-DSH
 cd DecryptHub-DSH
 pnpm install --frozen-lockfile
 ```

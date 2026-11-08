@@ -1,11 +1,11 @@
 # 跨设备交接
 
-当前产品分支：`decrypthub/dsh-product-20261104`，远端：`https://github.com/decrypthub/DecryptHub.git`。这是 Electron / DSH 主干；旧 Tauri 代码留在同一远端的 `handoff/ui-alignment-20261104` 分支。
+当前产品分支：`feat/dsh-rc1`，远端：`https://github.com/decrypthub/DecryptHub.git`。它等于上游 DeepSeek Harness `0.2.2-rc.1`（上游 `master` = `fcc0ad4621`）加一个产品提交。`main` 是更早的 Tauri 实现，`handoff/ui-alignment-20261104` 是它的 UI 交接快照；两者都只读，不要合并进本分支。
 
 ## 在另一台电脑接续
 
 ```sh
-git clone --branch decrypthub/dsh-product-20261104 https://github.com/decrypthub/DecryptHub.git DecryptHub-DSH
+git clone --branch feat/dsh-rc1 https://github.com/decrypthub/DecryptHub.git DecryptHub-DSH
 cd DecryptHub-DSH
 pnpm install --frozen-lockfile
 ```
