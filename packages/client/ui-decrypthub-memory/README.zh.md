@@ -54,6 +54,6 @@ kind: "package-reference"
 <details>
 <summary>维护者工作上下文 — 点击展开</summary>
 
-写入始终携带最近一次 `describe()` 读到的 revision，使并发的智能体写入让页面保存失败，而不是静默覆盖。每次写入成功后重新加载，以保持 revision 最新。
+宿主半边必须导出 `apply()`；node 入口什么都不导出的包会被静默移出客户端清单，其设置分区也就不会注册。写入始终携带最近一次 `describe()` 读到的 revision，使并发的智能体写入让页面保存失败，而不是静默覆盖。每次写入成功后重新加载，以保持 revision 最新。
 
 </details>

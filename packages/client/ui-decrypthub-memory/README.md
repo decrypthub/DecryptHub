@@ -54,6 +54,6 @@ A saved edit changes the injected section text, which invalidates cache from tha
 <details>
 <summary>Working context for maintainers — click to expand</summary>
 
-Writes always send the revision read with the last `describe()` so a concurrent agent write fails the page save instead of silently overwriting it. The page reloads after every successful write to keep that revision current.
+The Host half must export `apply()`; a package whose node entry exports nothing is dropped from the client roster without an error, so its settings section never registers. Writes always send the revision read with the last `describe()` so a concurrent agent write fails the page save instead of silently overwriting it. The page reloads after every successful write to keep that revision current.
 
 </details>
