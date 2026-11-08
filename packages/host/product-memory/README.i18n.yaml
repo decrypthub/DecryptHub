@@ -9,14 +9,32 @@
   en: 24b58103484b70d5
   zh: d0a1e3506cbb51bf
 /deepseek-ai-dsh-product-memory/summary:
-  en: 5fd7c75612cfb6d8
-  zh: 75940eee2f4bc195
+  en: c32ac9e484a1403e
+  zh: a9acd0459f0c1f44
 /deepseek-ai-dsh-product-memory/table-of-contents:
-  en: 06759ea6cf15280c
-  zh: 41f7c91dc7eeb743
+  en: af856ba79fe31b8e
+  zh: a20364de34ced7eb
 /deepseek-ai-dsh-product-memory/use-this-package:
-  en: 41350aca733d57d2
-  zh: 1721a644e62b2526
+  en: 12f4432f08fe7d53
+  zh: 3ae853d9d18e6125
 /deepseek-ai-dsh-product-memory/model-experience:
-  en: ec2abf8a94976b6b
-  zh: b33835f560b2531b
+  en: 215e7ba838619b7b
+  zh: 215e7ba838619b7b
+/deepseek-ai-dsh-product-memory/model-experience/memory-tools:
+  en: 77b1d81520f64a95
+  zh: 77b1d81520f64a95
+/deepseek-ai-dsh-product-memory/model-experience/memory-tools/what-the-model-sees:
+  en: b8cc1e6235366c3f
+  zh: 3dc2890c7bef785f
+/deepseek-ai-dsh-product-memory/model-experience/memory-tools/token-effect:
+  en: 7570fc0a71fcaa37
+  zh: c5842f4a2df439bc
+/deepseek-ai-dsh-product-memory/model-experience/memory-tools/kv-cache-effect:
+  en: fc8e0b2d8db21fe5
+  zh: 16a163810b4ace6a
+/deepseek-ai-dsh-product-memory/known-limitations-and-deferred-work:
+  en: a06d810d3d967626
+  zh: 5c5d8188e7418dae
+/deepseek-ai-dsh-product-memory/known-limitations-and-deferred-work/dev-note:
+  en: 3d5e80cb92a2455a
+  zh: 2df8814e2f73be3f

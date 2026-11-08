@@ -14,7 +14,8 @@ kind: "package-reference"
 ## 目录
 
 - [使用本包](#use-this-package)
-- [模型体验](#model-experience)
+- [Model Experience](#model-experience)
+- [已知限制与待办](#known-limitations-and-deferred-work)
 
 <a id="use-this-package"></a>
 
@@ -24,6 +25,34 @@ kind: "package-reference"
 
 <a id="model-experience"></a>
 
-## 模型体验
+## Model Experience
 
-工具返回 `product`、`home`、`platform`、`node` 四个字段，描述指示模型在用户询问版本或运行环境时调用。渲染结果是一行事实加 Harness 主目录，保持对话记录可读。
+### product_runtime
+
+#### What the model sees
+
+一个名为 `product_runtime`、无参数的工具，结果含 `product`、`home`、`platform`、`node` 四个字段。描述指示模型在用户询问版本或运行环境时调用。渲染结果是一行事实加 Harness 主目录。
+
+#### Token effect
+
+schema 不带参数，每次请求只占少量固定 token。结果是单行短文本，通常几十个 token。
+
+#### KV Cache effect
+
+工具在列表中的位置稳定，schema 前缀可跨步骤命中缓存。schema 与描述不随会话变化。
+
+## 已知限制与待办
+
+<a id="known-limitations-and-deferred-work"></a>
+
+- **仅进程级事实** — 尚未暴露构建版本等元数据，因为 Host 没有把这类信息传入插件环境。
+
+<a id="dev-note"></a>
+### 开发注记
+
+<details>
+<summary>维护者工作上下文 — 点击展开</summary>
+
+结果字段只应增加：模型按名读取字段，删除字段会静默降低运行时回答的准确性。
+
+</details>

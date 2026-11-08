@@ -15,6 +15,7 @@ Registers one built-in tool that answers which product, harness home, platform, 
 
 - [Use this package](#use-this-package)
 - [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
 
 <a id="use-this-package"></a>
 
@@ -26,4 +27,32 @@ Mount the plugin in a profile composition. It injects `tools` and registers `pro
 
 ## Model Experience
 
-The tool exposes four result fields: `product`, `home`, `platform`, and `node`. Its description tells the model to call it when the user asks which build or environment the agent runs in. The rendered text is one line of facts plus the harness home, so the transcript stays readable.
+### product_runtime
+
+#### What the model sees
+
+One tool named `product_runtime` with no parameters and four result fields: `product`, `home`, `platform`, `node`. The description tells the model to call it when the user asks which build or environment the agent runs in. The rendered result is one line of facts plus the harness home.
+
+#### Token effect
+
+The schema carries no parameters, so it costs a constant handful of tokens per request. A result is one short line, usually a few dozen tokens.
+
+#### KV Cache effect
+
+The tool list position is stable, so the schema prefix stays cacheable across steps. Nothing in the schema or description varies per session.
+
+## Known Limitations and Deferred Work
+
+<a id="known-limitations-and-deferred-work"></a>
+
+- **Process facts only** — build metadata such as the installed version is not exposed, because the Host does not pass it into the plugin environment.
+
+<a id="dev-note"></a>
+### Dev Note
+
+<details>
+<summary>Working context for maintainers — click to expand</summary>
+
+Keep the result fields additive: the model reads them by name, and a removed field silently degrades runtime answers.
+
+</details>
