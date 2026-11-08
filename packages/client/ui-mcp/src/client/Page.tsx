@@ -12,6 +12,14 @@ export interface McpPageInjected {
   hooks: { mcp: HostObservable<McpSnapshot> }
   source: McpSource
 }
+/** Sidebar icon for the custom MCP panel. */
+export function McpIcon() {
+  return <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+    <circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    <path d="M8 2.5v11M2.5 8h11" stroke="currentColor" strokeWidth="1.5" />
+  </svg>
+}
+
 /** MCP entry in the existing settings navigation. */
 export type McpPageProps = PropsRuntime<'settings.section'> & PropsLocale<'settings.mcp'> & InjectFace<McpPageInjected>
 type Editor = { name: string; original?: string; config: McpEntry; revision: number }

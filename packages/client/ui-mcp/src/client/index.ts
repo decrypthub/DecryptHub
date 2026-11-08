@@ -10,7 +10,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { McpSource } from './source.ts'
 import { ComponentsSource } from './components-source.ts'
 import { ComponentsPage, ComponentsIcon } from './ComponentsPage.tsx'
-import { McpPage } from './Page.tsx'
+import { McpIcon, McpPage } from './Page.tsx'
 import { en, zh, type McpKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -71,6 +71,14 @@ function mount(ctx: Context): void {
     name: 'settings.section', id: 'mcp', order: 25, label: () => t('nav'), locale: 'settings.mcp',
     inject: () => ({ hooks: { mcp: source.store }, source }),
   }, McpPage))
+  const mcpPanel = 'decrypthub-mcp' as MainPanelId
+  ctx.slots.inject('main', () => ctx.slots.register({
+    name: 'main', key: mcpPanel, locale: 'settings.mcp',
+    inject: () => ({ hooks: { mcp: source.store }, source }),
+  }, McpPage as never))
+  ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
+    name: 'sidebar.panellist', id: mcpPanel, order: 14, locale: 'settings.mcp', label: () => t('nav'),
+  }, McpIcon))
   const official = ctx.remote.decrypthubComponents
   const components = new ComponentsSource({
     async *watch(signal) { yield* official.watch(signal) },
