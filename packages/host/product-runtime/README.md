@@ -3,7 +3,7 @@ description: "Report the running DecryptHub product runtime to the model."
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-tool-product-runtime
+# @deepseek-ai/dsh-product-runtime
 
 English | [中文](README.zh.md)
 

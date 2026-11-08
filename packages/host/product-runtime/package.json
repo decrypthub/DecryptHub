@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-tool-product-runtime",
+  "name": "@deepseek-ai/dsh-product-runtime",
   "description": "Model-facing tool reporting the DecryptHub product runtime environment",
   "version": "0.2.2-rc.1",
   "private": true,

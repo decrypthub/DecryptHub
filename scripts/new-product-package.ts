@@ -50,7 +50,7 @@ function readOptions(): Options {
     options: {
       name: { type: 'string' },
       kind: { type: 'string', default: 'tool' },
-      group: { type: 'string', default: 'experimental' },
+      group: { type: 'string' },
       description: { type: 'string', default: 'Product package.' },
       'dry-run': { type: 'boolean', default: false },
     },
@@ -61,7 +61,9 @@ function readOptions(): Options {
   const kind = values.kind
   if (kind !== 'tool' && kind !== 'plugin') throw new Error('new-product-package: --kind must be tool or plugin')
   const group = values.group
-  if (!/^[a-z][a-z0-9-]*$/.test(group)) throw new Error('new-product-package: --group must be a package group directory')
+  if (group === undefined || !/^[a-z][a-z0-9-]*$/.test(group)) {
+    throw new Error('new-product-package: --group is required; a product package cannot live in packages/experimental because release packages must not depend on experimental ones')
+  }
   return { name, kind, group, description: values.description, dryRun: values['dry-run'] }
 }
 

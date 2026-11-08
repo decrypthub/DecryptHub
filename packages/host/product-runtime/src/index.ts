@@ -1,6 +1,6 @@
 /**
  * Report the DecryptHub product runtime environment to the model.
- * @module @deepseek-ai/dsh-tool-product-runtime
+ * @module @deepseek-ai/dsh-product-runtime
  */
 
 import type { Context } from '@deepseek-ai/cordis'

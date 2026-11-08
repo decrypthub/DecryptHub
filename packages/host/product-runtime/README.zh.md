@@ -3,7 +3,7 @@ description: "向模型报告当前运行的 DecryptHub 产品运行时。"
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-tool-product-runtime
+# @deepseek-ai/dsh-product-runtime
 
 [English](README.md) | 中文
 

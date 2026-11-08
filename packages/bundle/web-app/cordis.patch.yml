@@ -674,4 +674,4 @@
 # Product tool: report the running product runtime to the model.
 - insert:
     - id: tool-product-runtime
-      name: '@deepseek-ai/dsh-tool-product-runtime'
+      name: '@deepseek-ai/dsh-product-runtime'
