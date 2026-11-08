@@ -3359,6 +3359,9 @@ importers:
       '@deepseek-ai/dsh-tool-skill':
         specifier: workspace:*
         version: link:../../skill/tool-skill
+      '@deepseek-ai/dsh-tool-skill-manage':
+        specifier: workspace:*
+        version: link:../../skill/tool-skill-manage
       '@deepseek-ai/dsh-tool-subagent':
         specifier: workspace:*
         version: link:../../subagent/tool-subagent
@@ -16113,6 +16116,31 @@ importers:
       '@deepseek-ai/dsh-working-directory':
         specifier: workspace:*
         version: link:../../session/working-directory
+
+  packages/skill/tool-skill-manage:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:*
+        version: link:../../llm/llm
+      '@deepseek-ai/dsh-system-prompt':
+        specifier: workspace:*
+        version: link:../../core/system-prompt
+      '@deepseek-ai/dsh-tool-executor-native':
+        specifier: workspace:*
+        version: link:../../core/tool-executor-native
+      '@deepseek-ai/dsh-tool-testkit':
+        specifier: workspace:*
+        version: link:../../test-support/tool-testkit
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:*
+        version: link:../../core/tools
 
   packages/skill/tool-workspace-dependencies:
     dependencies:

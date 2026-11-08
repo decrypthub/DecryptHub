@@ -604,7 +604,10 @@
 # catalog and loader at all.
 
 - id: skill-filesystem
-  disabled: true
+  config:
+    includeDefaultRoots: false
+    roots:
+      - !!js dshHomePath('skills')
 
 - id: tool-skill
   disabled: true
@@ -683,3 +686,10 @@
 - insert:
     - id: product-memory
       name: '@deepseek-ai/dsh-product-memory'
+
+# Product row: tool-skill-manage.
+- insert:
+    - id: tool-skill-manage
+      name: '@deepseek-ai/dsh-tool-skill-manage'
+      config:
+        directory: !!js dshHomePath('skills')

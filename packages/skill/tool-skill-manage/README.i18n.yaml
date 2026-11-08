@@ -1,0 +1,40 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/skill/tool-skill-manage/README.md
+/:
+  en: 42b45d3bb37c8952
+  zh: a978c1839c1a615f
+/deepseek-ai-dsh-tool-skill-manage:
+  en: 337c255ee2799df4
+  zh: d8701fd8741cf4ed
+/deepseek-ai-dsh-tool-skill-manage/summary:
+  en: 857f138f0a9b9952
+  zh: 5339afce7967df27
+/deepseek-ai-dsh-tool-skill-manage/table-of-contents:
+  en: af856ba79fe31b8e
+  zh: a20364de34ced7eb
+/deepseek-ai-dsh-tool-skill-manage/use-this-package:
+  en: 61805381a67aef40
+  zh: ce1a80fa3cb76806
+/deepseek-ai-dsh-tool-skill-manage/model-experience:
+  en: 215e7ba838619b7b
+  zh: 215e7ba838619b7b
+/deepseek-ai-dsh-tool-skill-manage/model-experience/skill-tools:
+  en: 3cfa0790bcc279e8
+  zh: 3cfa0790bcc279e8
+/deepseek-ai-dsh-tool-skill-manage/model-experience/skill-tools/what-the-model-sees:
+  en: a66d5776950bd5b3
+  zh: 0988a5116afae858
+/deepseek-ai-dsh-tool-skill-manage/model-experience/skill-tools/token-effect:
+  en: c08e7eb8f6fccb7c
+  zh: e900450cf5a35760
+/deepseek-ai-dsh-tool-skill-manage/model-experience/skill-tools/kv-cache-effect:
+  en: 65e833ecfa759682
+  zh: 7534b2107a4c671f
+/deepseek-ai-dsh-tool-skill-manage/known-limitations-and-deferred-work:
+  en: 780843eda6ce15e5
+  zh: 0419d995b2e5355d
+/deepseek-ai-dsh-tool-skill-manage/known-limitations-and-deferred-work/dev-note:
+  en: e533e4532c509b01
+  zh: 1583ec38b7bcfab4
