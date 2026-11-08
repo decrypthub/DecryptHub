@@ -21,7 +21,7 @@
       "path": "../../core/system-prompt"
     },
     {
-      "path": "../../storage/storage-domain"
+      "path": "../../settings/settings"
     }
   ]
 }

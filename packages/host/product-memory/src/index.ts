@@ -1,30 +1,51 @@
 /**
- * Product memory: durable, scoped facts that the model maintains through tools
- * and that every assembly re-injects as one system-prompt section.
+ * Product memory: durable, scoped facts stored in this plugin's settings
+ * namespace, injected as one system-prompt section and editable by the model
+ * and by the schema-driven settings page.
  * @module @deepseek-ai/dsh-product-memory
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
+import type {} from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/cordis-plugin-loader'
 import z from '@deepseek-ai/schemastery'
 import { randomUUID } from 'node:crypto'
-import { memoryDomainSpec, type MemoryId, type MemoryRecord } from './spec.ts'
 
-/** Cordis plugin name. */
+/** Cordis plugin name; also the settings namespace the product page edits. */
 export const name = 'product-memory'
 /** Services this plugin contributes to. */
-export const inject = ['storageDomain', 'systemPrompt', 'tools']
+export const inject = ['systemPrompt', 'tools', 'settings']
 
-/** Deployment-varying limits for the injected section. */
-export interface Config {
-  /** Character budget of the injected memory section; entries beyond it are omitted. */
-  maxSectionChars: number
+/** One stored memory entry. */
+export interface MemoryEntry {
+  /** The remembered fact, one sentence. */
+  text: string
+  /** `user` applies across projects; `project` applies to the current workspace. */
+  scope: string
+  /** ISO-8601 creation stamp. */
+  createdAt: string
+  /** ISO-8601 last-write stamp. */
+  updatedAt: string
 }
 
-/** Validated plugin configuration. */
+/** Deployment-varying limits and stored entries. */
+export interface Config {
+  /** Character budget of the injected section; entries beyond it are omitted. */
+  maxSectionChars: number
+  /** Stored entries keyed by id, so one path-addressed edit touches one entry. */
+  entries: Record<string, MemoryEntry>
+}
+
+/** Validated plugin configuration; the settings page renders this schema. */
 export const Config = z.object({
   maxSectionChars: z.number().default(2000),
+  entries: z.dict(z.object({
+    text: z.string().role('textarea'),
+    scope: z.union([z.const('user'), z.const('project')]).default('user'),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })).default({}),
 })
 
 /** Section order: after workspace guidance and before the skill catalog. */
@@ -32,54 +53,53 @@ const SECTION_ORDER = 150
 
 /**
  * Render the injected section from the current entries.
- * @param table - open entries table.
+ * @param entries - stored entries.
  * @param budget - injected character budget.
  * @returns the section text, or an empty string when nothing fits.
  */
-function renderSection(table: KvTable<MemoryId, MemoryRecord>, budget: number): string {
+function renderSection(entries: Record<string, MemoryEntry>, budget: number): string {
   const lines: string[] = []
   let used = 0
-  for (const [id, record] of table.entries()) {
-    const line = `- (${record.scope}) ${record.text} [id: ${id}]`
+  for (const [id, entry] of Object.entries(entries)) {
+    const line = `- (${entry.scope}) ${entry.text} [id: ${id}]`
     if (used + line.length > budget) break
     lines.push(line)
     used += line.length
   }
-  return lines.length === 0 ? '' : `【产品记忆·可由模型维护】\n${lines.join('\n')}`
+  return lines.length === 0 ? '' : `【产品记忆·可由模型与用户维护】\n${lines.join('\n')}`
 }
 
 /**
  * Register the memory section and the model-facing memory tools.
- * @param ctx - context providing storage, prompt assembly, and the tool registry.
+ * @param ctx - context providing prompt assembly, the tool registry, and settings.
  * @param config - validated plugin configuration.
  */
 export function apply(ctx: Context, config: Config): void {
-  let table: KvTable<MemoryId, MemoryRecord> | undefined
-  const opening = ctx.storageDomain.open(memoryDomainSpec)
-  const ready = opening.then((domain) => {
-    table = domain.table('entries')
-  })
-  ctx.effect(() => () => {
-    void ready.then(async () => {
-      const domain = await opening
-      domain.close()
-    })
-  }, 'product-memory.domain')
+  let live = config
+
+  /** Re-read this namespace after the settings page or another writer changed it. */
+  const refresh = (): void => {
+    const row = ctx.settings.describe({ redactSecrets: true }).find(candidate => candidate.ns === name)
+    if (row === undefined || typeof row.value !== 'object' || row.value === null) return
+    live = row.value as Config
+  }
+  ctx.on('loader/volatile-update', refresh)
 
   ctx.effect(() => ctx.systemPrompt.section({
     name: 'product-memory',
     order: SECTION_ORDER,
-    text: () => table === undefined ? '' : renderSection(table, config.maxSectionChars),
+    text: () => renderSection(live.entries, live.maxSectionChars),
   }), 'product-memory.section')
 
   /**
-   * Read the open entries table or fail with a startup-race explanation.
-   * @returns the entries table.
+   * Write one entry through the settings namespace so the page and the model
+   * share one durable source and one revision check.
+   * @param id - entry id.
+   * @param entry - entry value.
    */
-  async function entries(): Promise<KvTable<MemoryId, MemoryRecord>> {
-    await ready
-    if (table === undefined) throw new Error('product memory is not available yet')
-    return table
+  async function put(id: string, entry: MemoryEntry): Promise<void> {
+    await ctx.settings.mutate(name, [{ op: 'set', path: ['entries', id], value: entry }])
+    refresh()
   }
 
   ctx.tools.register(defineTool({
@@ -102,17 +122,11 @@ export function apply(ctx: Context, config: Config): void {
       render: (_args, value) => [{ type: 'text', text: `memory ${value.id} saved (${value.scope})` }],
     },
     async execute(args) {
-      const store = await entries()
       const scope = args.scope === 'project' ? 'project' : 'user'
       const now = new Date().toISOString()
-      const id = (args.id ?? randomUUID()) as MemoryId
-      const existing = store.get(id)
-      await store.put(id, {
-        text: args.text,
-        scope,
-        createdAt: existing?.createdAt ?? now,
-        updatedAt: now,
-      })
+      const id = args.id ?? randomUUID()
+      const existing = live.entries[id]
+      await put(id, { text: args.text, scope, createdAt: existing?.createdAt ?? now, updatedAt: now })
       return { id, scope }
     },
   }))
@@ -149,11 +163,10 @@ export function apply(ctx: Context, config: Config): void {
           : value.entries.map(entry => `${entry.id} (${entry.scope}) ${entry.text}`).join('\n'),
       }],
     },
-    async execute() {
-      const store = await entries()
-      return {
-        entries: Array.from(store.entries(), ([id, record]) => ({ id, scope: record.scope, text: record.text })),
-      }
+    execute() {
+      return Promise.resolve({
+        entries: Object.entries(live.entries).map(([id, entry]) => ({ id, scope: entry.scope, text: entry.text })),
+      })
     },
   }))
 
@@ -172,10 +185,11 @@ export function apply(ctx: Context, config: Config): void {
       render: (_args, value) => [{ type: 'text', text: value.removed ? 'memory removed' : 'no such memory' }],
     },
     async execute(args) {
-      const store = await entries()
-      const id = args.id as MemoryId
-      const existed = store.get(id) !== undefined
-      if (existed) await store.delete(id)
+      const existed = live.entries[args.id] !== undefined
+      if (existed) {
+        await ctx.settings.mutate(name, [{ op: 'unset', path: ['entries', args.id] }])
+        refresh()
+      }
       return { removed: existed }
     },
   }))
