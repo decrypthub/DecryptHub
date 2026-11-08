@@ -1,6 +1,6 @@
+import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 /** Product memory settings section: list, add, and remove stored entries. */
 import { useEffect, useState } from 'react'
-import type { HostObservable, InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { MemorySnapshot, MemorySource } from './source.ts'
 
 /** The section's observation and explicit management actions. */
@@ -9,8 +9,15 @@ export interface MemoryPageInjected {
   source: MemorySource
 }
 
-/** Memory entry in the settings navigation. */
-export type MemoryPageProps = PropsRuntime<'settings.section'> & PropsLocale<'settings.memory'> & InjectFace<MemoryPageInjected>
+/** Memory entry surface; used by both the settings section and the main panel. */
+export interface MemoryPageProps {
+  /** Framework-bound snapshot hook for the memory store. */
+  useMemory: <T>(selector: (value: MemorySnapshot) => T) => T
+  /** Page operations. */
+  source: MemorySource
+  /** Localized copy. */
+  t: (key: keyof typeof import('./locales.ts').en) => string
+}
 
 /**
  * Render the memory section.

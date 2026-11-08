@@ -1,6 +1,6 @@
+import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 /** Role definition settings section: edit the text injected as the product persona. */
 import { useEffect, useState } from 'react'
-import type { HostObservable, InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { PersonaSnapshot, PersonaSource } from './persona-source.ts'
 
 /** The section's observation and explicit save action. */
@@ -9,8 +9,15 @@ export interface PersonaPageInjected {
   source: PersonaSource
 }
 
-/** Role entry in the settings navigation. */
-export type PersonaPageProps = PropsRuntime<'settings.section'> & PropsLocale<'settings.persona'> & InjectFace<PersonaPageInjected>
+/** Role surface; used by both the settings section and the main panel. */
+export interface PersonaPageProps {
+  /** Framework-bound snapshot hook for the role store. */
+  usePersona: <T>(selector: (value: PersonaSnapshot) => T) => T
+  /** Page operations. */
+  source: PersonaSource
+  /** Localized copy. */
+  t: (key: keyof typeof import('./locales.ts').personaEn) => string
+}
 
 /**
  * Render the role section.
