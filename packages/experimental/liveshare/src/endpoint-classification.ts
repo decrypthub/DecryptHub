@@ -211,9 +211,11 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'decrypthubComponents/configure': 'owner-only', // owner official component management
   'decrypthubComponents/importPreview': 'owner-only', // owner copies Harness home data into this product
   'decrypthubComponents/importRun': 'owner-only', // owner copies Harness home data into this product
+  'decrypthubComponents/inspectTargets': 'owner-only', // owner queries configured device services
   'decrypthubComponents/inspectBrowser': 'owner-only', // owner official component management
   'decrypthubComponents/installComponent': 'owner-only', // owner official component management
   'decrypthubComponents/installBrowser': 'owner-only', // owner official component management
+  'decrypthubComponents/measureTools': 'owner-only', // owner probes configured component tools
   'decrypthubComponents/reconnect': 'owner-only', // owner official component management
   'decrypthubComponents/rollback': 'owner-only', // owner official component management
   'decrypthubComponents/snapshot': 'owner-only', // owner official component management
