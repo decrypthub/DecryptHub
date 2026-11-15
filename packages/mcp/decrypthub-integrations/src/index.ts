@@ -95,14 +95,18 @@ interface Binding { cwd: string; entry: string; handle: Fiber; unobserve?: () =>
 export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'decrypthub_status',
-    description: 'Read current WDH browser availability and Android/iOS service and app status before choosing an analysis target. Installation and an MCP connection alone do not mean a target is online. Use returned target IDs and the connected component tools; if several targets match, ask the user to choose. This read does not start, stop, attach to, or change any app. Inspect WDH pages with the current session browser tools.',
+    description: 'Read WDH browser availability and Android/iOS service and app status before choosing an analysis target. Installation and MCP connectivity do not prove a target is online. Device tools operate on configuredEndpoints; apps observed at other addresses require selecting that device in component settings before analysis. Use current target IDs, and ask the user if several targets match. This read does not start, stop, attach to, or change apps. Inspect WDH pages with the current session browser tools.',
     parameters: {},
     output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
     execute: async (_args, exec) => {
       const components = ctx.get('decrypthubComponents')
       if (components === undefined) throw new Error('Official component management is unavailable')
       const statuses = await Promise.all((['wdh', 'adh', 'idh'] as const).map(id => components.inspectTargets(id, exec.signal)))
-      return JSON.stringify({ components: statuses }, null, 2)
+      const selected = config.get()
+      const mcp = ctx.mcpManager.list().filter(server => server.name === 'adh' || server.name === 'idh')
+        .map(server => ({ component: server.name, status: server.status }))
+      return JSON.stringify({ components: statuses, mcp,
+        configuredEndpoints: { adh: selected.adh.endpoint, idh: selected.idh.endpoint } }, null, 2)
     },
   })), 'decrypthub: read-only integration status')
   const settings = ctx.get('settings')

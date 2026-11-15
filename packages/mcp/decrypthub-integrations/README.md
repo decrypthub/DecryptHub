@@ -44,6 +44,8 @@ The Agent owns its child Fiber. Disposing the Agent or this product plugin drain
 
 The stable `decrypthub_status` schema lets the model request current service and target observations without changing a device. Its output is logged through the normal tool pipeline. The shared MCP client owns connected analysis tools, results, and server instructions.
 
+The result names the configured device endpoints separately from MCP transport state and the observed app inventory. Analysis tools use the selected endpoint; observing an app at another saved address does not authorize or route an analysis call to it.
+
 #### KV Cache effect
 
 Tool inventories and server instructions change when their connections or server contributions change, following the upstream MCP client's request assembly.
