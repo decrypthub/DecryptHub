@@ -43,7 +43,7 @@ Each row is an inherited runtime or packaging implementation that still differs 
 | [apps/desktop/scripts/desktop-package-environment.mjs](apps/desktop/scripts/desktop-package-environment.mjs) | Explicit unsigned LAN test feed and product package identity; retire when the upstream publisher accepts equivalent configuration. |
 | [apps/desktop/scripts/desktop-upload-plan.ts](apps/desktop/scripts/desktop-upload-plan.ts) | Product packaging, isolated output or artifact names; replace with upstream configuration when available. |
 | [apps/desktop/scripts/development-app.ts](apps/desktop/scripts/development-app.ts) | Product packaging, isolated output or artifact names; replace with upstream configuration when available. |
-| [apps/desktop/scripts/electron-builder-config.mjs](apps/desktop/scripts/electron-builder-config.mjs) | Explicit unsigned LAN test feed and product package identity; retire when the upstream publisher accepts equivalent configuration. |
+| [apps/desktop/scripts/electron-builder-config.mjs](apps/desktop/scripts/electron-builder-config.mjs) | Explicit unsigned LAN test feed, product identity, and an NSIS include wrapper for isolated build resources; retire when upstream supports equivalent configuration and build paths. |
 | [apps/desktop/scripts/installed-update-distribution.ts](apps/desktop/scripts/installed-update-distribution.ts) | Product packaging, isolated output or artifact names; replace with upstream configuration when available. |
 | [apps/desktop/scripts/package-macos.ts](apps/desktop/scripts/package-macos.ts) | Product packaging, isolated output or artifact names; replace with upstream configuration when available. |
 | [apps/desktop/scripts/package-target.ts](apps/desktop/scripts/package-target.ts) | Product packaging, isolated output or artifact names; replace with upstream configuration when available. |
@@ -70,6 +70,8 @@ Each row is an inherited runtime or packaging implementation that still differs 
 `apps/cli/package.json`, `packages/bundle/web-app/package.json`, compiler references and aliases register the product packages and overlay. `scripts/product-package-policy.ts`, `scripts/check-workspace-constraints.ts` and `scripts/decrypthub-product.ts` classify package ownership. `gen-cordis-catalog`, `gen-doc-graphs`, `gen-tool-catalog` and README model-experience maps register product services, types and tools. These are explicit registration sites, not changes to execution semantics.
 
 ## Sync and verification
+
+The Windows prepared-runtime smoke passed native payload, offline plugin, and Office operation checks. Its temporary profile cleanup stalled on a dangling pnpm junction; removing only that isolated test junction allowed the unchanged upstream cleanup to finish. An NSIS resource-path failure under an isolated build root is addressed by the documented generated include wrapper, without changing installer source.
 
 Fetch upstream and pin the reviewed release merge. Start from product mainline in an isolated worktree; prefer upstream behavior at every patch site and remove newly redundant product code. Regenerate catalogs from the merged source. Run focused product and Desktop checks plus the ordinary build, then inspect a separately packaged client using isolated upgrade data before publishing its test feed. Preserve the user’s running installation and real data.
 

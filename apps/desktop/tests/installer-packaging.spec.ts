@@ -1,5 +1,6 @@
 import { readInstallerLocales } from '../scripts/installer-locales.mjs'
 import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { Arch, Platform } from 'electron-builder'
 import { AppInfo, Packager } from 'app-builder-lib'
@@ -30,6 +31,7 @@ describe('installer preparation preserves application dependencies', () => {
     write.mockClear()
     const env = {
       DSH_DESKTOP_APP_ID: 'com.example.installer',
+      DSH_DESKTOP_BUILD_ROOT: join(tmpdir(), '$isolated-installer-build'),
       DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN: 'https://policy.example.com',
       DSH_DESKTOP_MANDATORY_UPDATE_CONFIG: JSON.stringify({ allowedAuthOrigins: ['https://login.example.com'] }),
       DSH_DESKTOP_TARGET_PLATFORM: platform,
@@ -78,10 +80,15 @@ describe('installer preparation preserves application dependencies', () => {
       await packager.installAppDependencies(process.platform === 'win32' ? Platform.LINUX : Platform.WINDOWS, Arch.x64)
       expect(packager.areNodeModulesHandledExternally).toBe(false)
       expect(execute).toHaveBeenCalledTimes(platform === 'win32' ? 1 : 0)
-      expect(write).toHaveBeenCalledTimes(platform === 'win32' ? 1 : 0)
+      expect(write).toHaveBeenCalledTimes(platform === 'win32' ? 2 : 0)
       if (platform === 'win32') {
         expect(write).toHaveBeenCalledWith(expect.stringMatching(/installer-ui[\\/]strings\.nsh$/u),
           expect.stringContaining('LangString INSTALLER_INSTALL ${LANG_JAPANESE}'), 'utf8')
+        expect(write).toHaveBeenCalledWith(config.nsis.include,
+          expect.stringContaining('!define INSTALLER_BUILD_DIR "'), 'utf8')
+        expect(config.nsis.include).toContain('$isolated-installer-build')
+        expect(write).toHaveBeenCalledWith(config.nsis.include,
+          expect.stringContaining('$$isolated-installer-build'), 'utf8')
       }
     } finally {
       vi.unstubAllEnvs()

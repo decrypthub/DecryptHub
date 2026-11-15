@@ -43,7 +43,7 @@
 | [apps/desktop/scripts/desktop-package-environment.mjs](apps/desktop/scripts/desktop-package-environment.mjs) | 显式未签名局域网测试源与产品打包身份；上游发布器支持同等配置后退休。 |
 | [apps/desktop/scripts/desktop-upload-plan.ts](apps/desktop/scripts/desktop-upload-plan.ts) | 产品打包、隔离输出或产物名称；上游支持配置后替代源码修改。 |
 | [apps/desktop/scripts/development-app.ts](apps/desktop/scripts/development-app.ts) | 产品打包、隔离输出或产物名称；上游支持配置后替代源码修改。 |
-| [apps/desktop/scripts/electron-builder-config.mjs](apps/desktop/scripts/electron-builder-config.mjs) | 显式未签名局域网测试源与产品打包身份；上游发布器支持同等配置后退休。 |
+| [apps/desktop/scripts/electron-builder-config.mjs](apps/desktop/scripts/electron-builder-config.mjs) | 显式未签名局域网测试源、产品打包身份与隔离构建资源的 NSIS include 包装；上游支持同等配置和构建路径后退休。 |
 | [apps/desktop/scripts/installed-update-distribution.ts](apps/desktop/scripts/installed-update-distribution.ts) | 产品打包、隔离输出或产物名称；上游支持配置后替代源码修改。 |
 | [apps/desktop/scripts/package-macos.ts](apps/desktop/scripts/package-macos.ts) | 产品打包、隔离输出或产物名称；上游支持配置后替代源码修改。 |
 | [apps/desktop/scripts/package-target.ts](apps/desktop/scripts/package-target.ts) | 产品打包、隔离输出或产物名称；上游支持配置后替代源码修改。 |
@@ -70,6 +70,8 @@
 `apps/cli/package.json`、`packages/bundle/web-app/package.json`、编译引用与别名登记产品包和 overlay。`scripts/product-package-policy.ts`、`scripts/check-workspace-constraints.ts`、`scripts/decrypthub-product.ts`声明包归属。`gen-cordis-catalog`、`gen-doc-graphs`、`gen-tool-catalog` 与 README 模型体验映射登记产品服务、类型和工具。这些是显式登记点，不改变执行语义。
 
 ## 同步与验证
+
+Windows 预备运行时检查通过原生载荷、离线插件与 Office 操作验证。临时配置清理曾阻塞在失效的 pnpm junction；只移除该隔离测试链接后，未改动的上游清理完成。隔离构建目录下的 NSIS 资源路径失败，由已记录的生成 include 包装修复，不修改安装器源码。
 
 fetch 上游并固定审查过的版本合并点。从产品主线建立隔离 worktree；逐个修改点优先采用上游行为，并移除已重复的产品代码。从合并源码重生成目录。运行产品与 Desktop 定向检查和正常构建，再使用隔离升级数据检查单独打包的客户端，之后发布测试源。保留用户正在运行的安装和真实数据。
 

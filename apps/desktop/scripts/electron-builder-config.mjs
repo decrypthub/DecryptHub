@@ -71,6 +71,8 @@ export function createElectronBuilderConfig(
   const macOSSigning = packagesMacOS && !unsigned ? resolveMacOSSigningEnvironment(env) : undefined
   if (packagesMacOS && !unsigned && !skipNotarization) resolveMacOSNotarizationEnvironment(env)
   const buildPaths = desktopTargetBuildPaths(resolveDesktopBuildTarget(env, hostPlatform, hostArch), env)
+  const installerDirectory = join(buildPaths.root, 'installer-ui')
+  const installerInclude = join(installerDirectory, 'include.nsh')
   const output = desktopArtifactOutput(buildPaths, { unsigned, skipNotarization })
   let primaryRuntimeDestination
   let dshDestination
@@ -141,6 +143,8 @@ export function createElectronBuilderConfig(
         env: scrubWindowsSigningEnvironment(env), windowsHide: true,
       })
       await writeFile(join(buildPaths.root, 'installer-ui', 'strings.nsh'), renderInstallerStrings(readInstallerLocales()), 'utf8')
+      // NSIS resolves resources relative to its source unless the isolated build directory is explicit.
+      await writeFile(installerInclude, `!define INSTALLER_BUILD_DIR "${installerDirectory.replaceAll('$', () => '$$')}"\n!include "${fileURLToPath(new URL('./installer.nsh', import.meta.url)).replaceAll('$', () => '$$')}"\n`, 'utf8')
       if (windowsSigner !== undefined) {
         await windowsSigner({ path: join(buildPaths.root, 'installer-ui', 'window-frame.dll'), hash: 'sha256', isNest: false })
       }
@@ -272,7 +276,7 @@ export function createElectronBuilderConfig(
       uninstallDisplayName: '${productName}',
       installerSidebar: join(buildPaths.root, 'installer-ui', 'uninstaller-sidebar.bmp'),
       uninstallerSidebar: join(buildPaths.root, 'installer-ui', 'uninstaller-sidebar.bmp'),
-      include: fileURLToPath(new URL('./installer.nsh', import.meta.url)),
+      include: installerInclude,
       oneClick: false,
       perMachine: false,
       allowElevation: false,
