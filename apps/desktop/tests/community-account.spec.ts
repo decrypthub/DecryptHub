@@ -2,13 +2,19 @@ import { createHash } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CommunityAccount, type CommunityVault } from '../src/community-account.ts'
-import { communityCallback, communityOrigin, type CommunityCredential } from '../src/community-account-protocol.ts'
+import { communityCallback, communityOrigin, communityProfile, type CommunityCredential } from '../src/community-account-protocol.ts'
 import type { CommunityAccountSnapshot } from '@deepseek-ai/dsh-client-ui-settings-decrypthub-account/types'
 
 const token = `dhd_${'t'.repeat(43)}`
 const code = 'c'.repeat(43)
 const profile = { id: 'member-1', handle: 'member', nickname: '社区成员', points: 23, experience: 42 }
 const cleanup: (() => void | Promise<void>)[] = []
+
+it('preserves the issuer avatar while accepting stored identities from before avatar support', () => {
+  expect(communityProfile.parse({ ...profile, avatarUrl: 'https://decrypthub.cn/avatar.png' }).avatarUrl).toBe('https://decrypthub.cn/avatar.png')
+  expect(communityProfile.parse({ ...profile, avatarUrl: null }).avatarUrl).toBeNull()
+  expect(communityProfile.parse(profile)).toEqual(profile)
+})
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
 
 async function fixture() {

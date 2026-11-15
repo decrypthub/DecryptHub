@@ -5,6 +5,7 @@ export interface CommunityProfile {
   readonly id: string
   readonly handle: string
   readonly nickname: string
+  readonly avatarUrl?: string | null | undefined
   readonly points: number | null
   readonly experience: number | null
 }

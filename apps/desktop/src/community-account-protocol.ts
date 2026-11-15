@@ -6,6 +6,7 @@ const secret = z.string().regex(/^[A-Za-z0-9_-]{43}$/)
 /** Validated display identity; unknown counters retain their meaning across upgrades. */
 export const communityProfile = z.object({
   id: z.string().min(1).max(191), handle: z.string().max(191), nickname: z.string().max(1000),
+  avatarUrl: z.string().max(8192).nullable().optional(),
   points: z.number().int().nonnegative().nullable().default(null),
   experience: z.number().int().nonnegative().nullable().default(null),
 })

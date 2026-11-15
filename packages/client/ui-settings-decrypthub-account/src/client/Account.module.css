@@ -6,6 +6,8 @@
 .identityText { display: flex; flex-direction: column; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
 .identityText strong { font-weight: 500; }
 .avatar { display: flex; align-items: center; justify-content: center; flex: none; width: 48px; height: 48px; border-radius: 50%; background: var(--dsw-alias-bg-skeleton); font-size: 22px; }
+.smallAvatar { display: flex; align-items: center; justify-content: center; flex: none; width: 24px; height: 24px; border-radius: 50%; font-size: 14px; }
+.picture { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
 .counters { display: flex; flex-wrap: wrap; gap: 40px; margin: 0; }
 .counters dt { color: var(--dsw-alias-label-secondary); font-size: 14px; }
 .counters dd { margin: 6px 0 0; font-size: 24px; font-weight: 500; }

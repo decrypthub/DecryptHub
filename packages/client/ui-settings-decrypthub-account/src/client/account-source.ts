@@ -18,7 +18,11 @@ export class CommunityAccountSource {
   /** @param bridge - credential-free, main-frame-only native operations. */
   constructor(private readonly bridge: CommunityAccountBridge) {
     this.unsubscribe = bridge.subscribe((state) => { this.receive(state) })
-    void bridge.get().then((state) => { this.receive(state) }, () => {
+    void bridge.get().then((state) => {
+      this.receive(state)
+      const current = this.store.getSnapshot().state
+      if (this.live && current?.phase === 'signed-in' && current.profile?.avatarUrl === undefined) void this.run('refresh')
+    }, () => {
       if (this.store.getSnapshot().state === undefined) this.fail()
     })
   }

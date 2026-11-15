@@ -46,7 +46,7 @@ None. Account presentation does not enter model requests.
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- Production browser authorization requires the community desktop endpoints to be deployed. Local protocol tests do not establish production availability. Old Tauri credentials are not imported. The account image uses a local initial rather than fetching a remote avatar. Model credits, payments, and account-based inference are not provided by the community desktop-session protocol. The native flow still requires acceptance on Windows and Linux.
+- Production browser authorization requires the community desktop endpoints to be deployed. Local protocol tests do not establish production availability. Old Tauri credentials are not imported. The sidebar and account settings display the community avatar with a no-referrer image request; missing or failed images show the name initial. Restored identities from older builds refresh once to obtain the picture. Model credits, payments, and account-based inference are not provided by the community desktop-session protocol. The native flow still requires acceptance on Windows and Linux.
 
 <a id="dev-note"></a>
 ### Dev Note

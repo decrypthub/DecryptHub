@@ -7,6 +7,30 @@ import type { CommunityAccountBridge } from '../types.ts'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import css from './Account.module.css'
 
+/** The issuer may return an absolute image or a path on the community site. */
+function pictureUrl(value: string | null | undefined): string | undefined {
+  if (!value) return undefined
+  try {
+    const url = new URL(value, 'https://decrypthub.cn')
+    return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? url.href : undefined
+  } catch (_error) { return undefined }
+}
+
+function AccountPicture({ name, picture, small = false }: {
+  name: string | undefined
+  picture: string | null | undefined
+  small?: boolean
+}) {
+  const [failed, setFailed] = useState<string>()
+  const url = pictureUrl(picture)
+  const initial = name ? new Intl.Segmenter().segment(name)[Symbol.iterator]().next().value?.segment : undefined
+  return <span className={small ? css.smallAvatar : css.avatar} aria-hidden="true">
+    {url !== undefined && failed !== url
+      ? <img className={css.picture} src={url} alt="" referrerPolicy="no-referrer" onError={() => { setFailed(url) }} />
+      : initial ?? <IconUserOutlineMedium size={small ? 20 : 22} />}
+  </span>
+}
+
 /** Shared injected observation and narrow user actions. */
 export interface AccountInjected {
   hooks: { account: HostObservable<CommunityAccountView> }
@@ -22,11 +46,10 @@ export function AccountSection({ useAccount, run, open, t }: AccountSectionProps
   const profile = state?.profile
   const pending = state?.phase === 'waiting-browser' || state?.phase === 'exchanging'
   const name = profile?.nickname || profile?.handle
-  const initial = name ? new Intl.Segmenter().segment(name)[Symbol.iterator]().next().value?.segment : undefined
   return <section className={css.section}>
     <header><h2>{t('title')}</h2><p className={css.muted}>{t('description')}</p></header>
     <div className={css.identity}>
-      <span className={css.avatar} aria-hidden="true">{initial ?? <IconUserOutlineMedium size={22} />}</span>
+      <AccountPicture key={profile?.id ?? 'signed-out'} name={name} picture={profile?.avatarUrl} />
       <div className={css.identityText}><strong>{name || t(state === undefined ? 'loading' : 'signedOut')}</strong>
         {profile && <span className={css.muted}>@{profile.handle}</span>}
         {pending && <span className={css.muted} role="status">{t(state.phase === 'exchanging' ? 'exchanging' : 'waiting')}</span>}
@@ -61,7 +84,7 @@ export function AccountLauncher({ wide, settingsShortcut, openSettings, useAccou
   return <Menu open={expanded} side="top" portal autoFocus className={css.launcher}
     anchor={<button type="button" className={css.trigger} data-collapsed={!wide} aria-label={t('menu')}
       aria-haspopup="menu" aria-expanded={expanded} onClick={() => { setExpanded(value => !value) }}>
-      <IconUserOutlineMedium size={20} />{wide && <span className={css.name}>{name || t('settings')}</span>}
+      <AccountPicture key={state?.profile?.id ?? 'signed-out'} name={name} picture={state?.profile?.avatarUrl} small />{wide && <span className={css.name}>{name || t('settings')}</span>}
     </button>}
     items={[
       { id: 'settings', label: t('settings'), icon: <IconSettingsOutlineMedium size={16} />,
