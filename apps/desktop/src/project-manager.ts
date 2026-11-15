@@ -169,7 +169,31 @@ export function createDevelopmentProjectMetadata(projectDir: string, release: De
   writeFileSync(join(projectDir, 'pnpm-workspace.yaml'), workspaceFile(), { mode: 0o600 })
 }
 
-/** Create the first external plugin profile without running a package manager. */
+/** Prior Desktop/Web installation-owned tuple before product feature bundles were split out of web-app. */
+const PREVIOUS_WEB_BUNDLES: readonly string[] = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app']
+
+/** Create or upgrade the external plugin profile without running a package manager. */
 export function createPluginProfile(projectDir: string): void {
   initProfile(projectDir, WEB_PROFILE.bundles)
+  const manifestPath = join(projectDir, 'package.json')
+  if (!existsSync(manifestPath)) return
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+    dsh?: { profile?: { bundles?: readonly string[] } }
+  } & Record<string, unknown>
+  const bundles = manifest.dsh?.profile?.bundles
+  if (bundles === undefined
+    || bundles.length !== PREVIOUS_WEB_BUNDLES.length
+    || bundles.some((name, index) => name !== PREVIOUS_WEB_BUNDLES[index])) {
+    return
+  }
+  writeJson(manifestPath, {
+    ...manifest,
+    dsh: {
+      ...manifest.dsh,
+      profile: {
+        ...manifest.dsh?.profile,
+        bundles: [...WEB_PROFILE.bundles],
+      },
+    },
+  })
 }

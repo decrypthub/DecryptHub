@@ -20,7 +20,7 @@ import {
   resolveWindowsUpdatePublisher,
   scrubWindowsSigningEnvironment,
 } from './windows-sign.mjs'
-import { resolveDesktopAutoUpdateConfig } from './desktop-auto-update-environment.mjs'
+import { resolveDesktopAutoUpdateConfig, resolveDesktopUnsignedUpdateConfig } from './desktop-auto-update-environment.mjs'
 import { resolveDesktopBuildCommit } from './desktop-build-commit.mjs'
 import { resolveDesktopBuildVersion } from './desktop-build-version.mjs'
 import { resolveDesktopPolicyEnvironment } from './desktop-policy-environment.mjs'
@@ -99,7 +99,14 @@ export function createElectronBuilderConfig(
   if (windowsSigner !== undefined) {
     installWindowsNsisBootstrapSigner({ sign: windowsSigner })
   }
-  const update = unsigned ? undefined : resolveDesktopAutoUpdateConfig(env, resolvedPlatform, resolvedArch)
+  const update = unsigned
+    ? resolveDesktopUnsignedUpdateConfig(env, resolvedPlatform, resolvedArch)
+    : (() => {
+        if (env.DSH_DESKTOP_UPDATE_ORIGIN !== undefined && env.DSH_DESKTOP_UPDATE_ORIGIN.trim() !== '') {
+          throw new Error('desktop package: DSH_DESKTOP_UPDATE_ORIGIN applies only to unsigned packages')
+        }
+        return resolveDesktopAutoUpdateConfig(env, resolvedPlatform, resolvedArch)
+      })()
   if (preparedRuntime !== undefined) buildPaths.dsh = preparedRuntime
   // electron-builder merges extraMetadata into the packaged manifest, so a build version here reaches
   // the artifact names, the update feed, and the installed app.getVersion() the updater compares against.
@@ -160,8 +167,6 @@ export function createElectronBuilderConfig(
     asarUnpack: unpack,
     extraResources: [
       { from: buildPaths.runtime, to: 'runtime' },
-      { from: env.DSH_DESKTOP_WDH_COMPONENT_DIR ?? fileURLToPath(new URL('../.desktop-build/components/wdh', import.meta.url)), to: 'components/wdh' },
-      { from: join(env.DSH_DESKTOP_WDH_COMPONENT_DIR ?? fileURLToPath(new URL('../.desktop-build/components/wdh', import.meta.url)), 'node_modules'), to: 'components/wdh/node_modules', filter: ['**/*'] },
       { from: fileURLToPath(new URL('../../../LICENSE', import.meta.url)), to: 'legal/LICENSE.deepseek-harness' },
       { from: fileURLToPath(new URL('../../../THIRD_PARTY_NOTICES.md', import.meta.url)), to: 'legal/THIRD_PARTY_NOTICES.md' },
       { from: fileURLToPath(new URL('../resources/icon-windows.png', import.meta.url)), to: 'icon.png' },

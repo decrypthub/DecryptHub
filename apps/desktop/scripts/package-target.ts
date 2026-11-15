@@ -527,7 +527,7 @@ export async function packageTarget(
   }
   if (signPrimaryRuntime) await execute(['run', 'sign:primary-runtime'], electronBuilderEnv)
   await execute(['run', 'prepare:packages'], targetEnv)
-  await execute(['run', 'prepare:dsh', ...(signPrimaryRuntime ? ['--defer-runtime-smoke'] : [])], downloadEnv)
+  await execute(['run', 'prepare:dsh', ...(signPrimaryRuntime || process.env.DSH_DESKTOP_SKIP_SMOKES === '1' ? ['--defer-runtime-smoke'] : [])], downloadEnv)
   if (signPrimaryRuntime) await execute(['run', 'sign:primary-runtime', '--dsh'], electronBuilderEnv)
   if (invocation.prepareOnly) return
   const buildMacArtifact = (artifact: DesktopPrepackagedArtifact) => execute(
@@ -563,8 +563,10 @@ export async function packageTarget(
     } else {
       await signedStage('artifacts', () => execute(desktopElectronBuilderArguments(target, invocation.directory), electronBuilderEnv))
     }
-    await execute(['exec', 'tsx', 'scripts/smoke-packaged-runtime.ts',
-      ...(invocation.unsigned ? ['--unsigned'] : []), ...(invocation.skipNotarization ? ['--skip-notarization'] : [])], targetEnv)
+    if (process.env.DSH_DESKTOP_SKIP_SMOKES !== '1') {
+      await execute(['exec', 'tsx', 'scripts/smoke-packaged-runtime.ts',
+        ...(invocation.unsigned ? ['--unsigned'] : []), ...(invocation.skipNotarization ? ['--skip-notarization'] : [])], targetEnv)
+    }
   }
   if (!invocation.directory && !invocation.unsigned && !invocation.skipNotarization) {
     writeReleaseRecord(target, electronBuilderEnv, buildPaths.artifacts)

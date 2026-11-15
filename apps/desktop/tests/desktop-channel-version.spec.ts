@@ -53,3 +53,27 @@ it('accepts a stable prerelease in an unsigned Windows x64 configuration', () =>
   expect(config.extraMetadata).toMatchObject({ version })
   expect(config.publish).toBeNull()
 })
+
+it('rejects a qualification update origin on a signed package', () => {
+  expect(() => createElectronBuilderConfig({
+    DSH_DESKTOP_APP_ID: 'com.example.channel-test',
+    DSH_DESKTOP_AUTO_UPDATE_ENV: 'production',
+    DSH_DESKTOP_UPDATE_ORIGIN: 'https://desktop-updates.example.com',
+    DSH_DESKTOP_MANDATORY_UPDATE_PROD_ORIGIN: 'https://policy.example.com',
+    DSH_DESKTOP_MACOS_SIGNING_IDENTITY: 'Example Company (TEAMID1234)',
+    DSH_DESKTOP_MACOS_TEAM_ID: 'TEAMID1234',
+    APPLE_KEYCHAIN_PROFILE: 'channel-test',
+  }, 'darwin', 'x64')).toThrow(/unsigned packages/u)
+})
+
+it('embeds an explicit qualification feed in an unsigned Windows x64 package', () => {
+  const config = createElectronBuilderConfig({
+    DSH_DESKTOP_APP_ID: 'com.example.channel-test',
+    DSH_DESKTOP_AUTO_UPDATE_ENV: 'production',
+    DSH_DESKTOP_UPDATE_ORIGIN: 'https://desktop-updates.example.com',
+    DSH_DESKTOP_MANDATORY_UPDATE_PROD_ORIGIN: 'https://policy.example.com',
+    DSH_DESKTOP_UNSIGNED: '1',
+  }, 'win32', 'x64')
+  expect(config.publish).toEqual([{ provider: 'generic', url: 'https://desktop-updates.example.com/dsh-desk/feeds/win-x64/', channel: 'nightly' }])
+  expect(config.extraMetadata).toMatchObject({ dshDesktopUpdateChannel: 'nightly' })
+})

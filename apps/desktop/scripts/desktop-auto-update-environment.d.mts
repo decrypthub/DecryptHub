@@ -92,6 +92,31 @@ export function resolveDesktopAutoUpdateConfig(
   arch: string,
 ): DesktopAutoUpdateConfig
 
+/** Public update feed for one unsigned qualification package. */
+export interface DesktopUnsignedUpdateConfig {
+  readonly environment: 'qualification'
+  readonly channel: 'nightly' | 'stable'
+  readonly target: DesktopAutoUpdateTarget
+  readonly origin: string
+  readonly publicUrl: string
+  readonly keyPrefix: string
+  readonly binaryKeyPrefix: string
+}
+
+/**
+ * Resolve an explicit generic feed for one unsigned qualification package.
+ * @param env Packaging settings.
+ * @param platform Target Node.js platform.
+ * @param arch Target architecture.
+ * @returns Feed configuration, or undefined when unsigned packages keep no update source.
+ * @throws When DSH_DESKTOP_UPDATE_ORIGIN is not an HTTPS origin or the target is unsupported.
+ */
+export function resolveDesktopUnsignedUpdateConfig(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+  arch: string,
+): DesktopUnsignedUpdateConfig | undefined
+
 /**
  * Resolve the public updater URL and private COS destination for one upload target.
  * @param env - Upload environment.

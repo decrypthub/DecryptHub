@@ -1,6 +1,6 @@
 {
-  "name": "DeepSeek Harness",
-  "short_name": "DSH",
+  "name": "DecryptHub",
+  "short_name": "DecryptHub",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

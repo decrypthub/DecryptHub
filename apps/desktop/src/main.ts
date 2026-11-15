@@ -1138,7 +1138,7 @@ async function main(): Promise<void> {
   const applicationIconPath = development ? join(app.getAppPath(), 'resources', 'icon-windows.png')
     : join(process.resourcesPath, 'icon.png')
   app.setAboutPanelOptions({
-    applicationName: process.env.DSH_CLIENT_TITLE ?? 'DeepSeek Harness',
+    applicationName: process.env.DSH_CLIENT_TITLE ?? 'DecryptHub',
     applicationVersion: app.getVersion(),
     // The release has no separate build number; omit Electron's bundle version.
     version: '',

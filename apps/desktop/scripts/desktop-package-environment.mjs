@@ -5,7 +5,7 @@ import { dirname, isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readDesktopPackageSettings as readSettings } from './desktop-file-settings.mjs'
 import { resolveDesktopAppId, resolveMacOSNotarizationEnvironment, resolveMacOSSigningEnvironment, resolveNpmRegistry } from './desktop-release-environment.mjs'
-import { resolveDesktopAutoUpdateConfig } from './desktop-auto-update-environment.mjs'
+import { resolveDesktopAutoUpdateConfig, resolveDesktopUnsignedUpdateConfig } from './desktop-auto-update-environment.mjs'
 import { createWindowsTokenSigner } from './windows-sign.mjs'
 import { resolveDesktopPolicyEnvironment } from './desktop-policy-environment.mjs'
 import { validateMacOSSignatureCacheDirectory } from './macos-signature-cache-directory.mjs'
@@ -15,7 +15,7 @@ import { resolveWindowsPackageSettings } from './windows-package-settings.mjs'
 import { resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
 
 const APP_ROOT = fileURLToPath(new URL('..', import.meta.url))
-const SHARED_SETTING = /^(?:DSH_DESKTOP_(?:APP_ID|AUTO_UPDATE_ENV|NPM_REGISTRY|MANDATORY_UPDATE_(?:CONFIG|(?:TEST|PROD)_ORIGIN))|DOWNLOAD_TEST_RELEASE_ID|DOWNLOAD_PROD_EO_ZONE_ID|DOWNLOAD_(?:TEST|PROD)_(?:ORIGIN|COS_BUCKET|COS_SECRET_ID|COS_SECRET_KEY))$/u
+const SHARED_SETTING = /^(?:DSH_DESKTOP_(?:APP_ID|AUTO_UPDATE_ENV|NPM_REGISTRY|UPDATE_ORIGIN|MANDATORY_UPDATE_(?:CONFIG|(?:TEST|PROD)_ORIGIN))|DOWNLOAD_TEST_RELEASE_ID|DOWNLOAD_PROD_EO_ZONE_ID|DOWNLOAD_(?:TEST|PROD)_(?:ORIGIN|COS_BUCKET|COS_SECRET_ID|COS_SECRET_KEY))$/u
 const WINDOWS_SETTING = /^DSH_DESKTOP_WINDOWS_(?:CER_FILE|SIGNTOOL|KEY_CONTAINER|TOKEN_PIN|SIGNATURE_CACHE_DIR|SIGNATURE_CACHE_CONCURRENCY|PACK_CONCURRENCY|COMPRESSION_LEVEL)$/u
 const MACOS_SETTING = /^(?:DSH_DESKTOP_MACOS_(?:SIGNING_IDENTITY|TEAM_ID|SIGNATURE_CACHE_DIR|PACK_CONCURRENCY|ZIP_COMPRESSION_LEVEL|DOWNLOAD_PROXY|NOTARIZATION_PROXY)|APPLE_(?:API_KEY|API_KEY_ID|API_ISSUER|ID|APP_SPECIFIC_PASSWORD|TEAM_ID|KEYCHAIN|KEYCHAIN_PROFILE)|CSC_(?:LINK|KEY_PASSWORD))$/u
 const AMBIENT_RELEASE_SETTING = /^(?:DSH_DESKTOP_(?:APP_ID|AUTO_UPDATE_ENV|MANDATORY_UPDATE_.*|WINDOWS_.*|MACOS_.*)|APPLE_.*|(?:WIN_)?CSC_.*|DOWNLOAD_(?:TEST|PROD)_.*)$/iu
@@ -124,7 +124,14 @@ export function validateDesktopPackageEnvironment(environment, target, options =
   if (target.platform !== 'darwin' || !options.unsigned) resolveDesktopPolicyEnvironment(environment)
   if (target.platform === 'darwin') resolveMacOSPackageSettings(environment)
   else resolveWindowsPackageSettings(environment)
-  if (options.unsigned) return
+  if (options.unsigned) {
+    // Unsigned packages normally carry no update source; an explicit qualification origin is validated here.
+    resolveDesktopUnsignedUpdateConfig(environment, target.platform, target.arch)
+    return
+  }
+  if (environment.DSH_DESKTOP_UPDATE_ORIGIN !== undefined && environment.DSH_DESKTOP_UPDATE_ORIGIN.trim() !== '') {
+    throw new Error('desktop package: DSH_DESKTOP_UPDATE_ORIGIN applies only to unsigned packages')
+  }
   if (!options.prepareOnly) resolveDesktopAutoUpdateConfig(environment, target.platform, target.arch)
   if (target.platform === 'win32') {
     if (!options.prepareOnly) createWindowsTokenSigner({

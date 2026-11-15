@@ -6,6 +6,7 @@ import {
   resolveDesktopAutoUpdateConfig,
   resolveDesktopAutoUpdateEnvironment,
   resolveDesktopAutoUpdateTarget,
+  resolveDesktopUnsignedUpdateConfig,
   resolveDesktopUploadConfig,
 } from '../scripts/desktop-auto-update-environment.mjs'
 
@@ -118,6 +119,49 @@ describe('desktop auto-update environment', () => {
     expect(desktopUpdateMetadataFilename('1.2.3-beta.2', 'win32')).toBe('nightly.yml')
     expect(() => desktopUpdateMetadataFilename('not-semver', 'darwin')).toThrow(/invalid Desktop version/u)
     expect(() => desktopUpdateMetadataFilename('1.2.3', 'linux')).toThrow(/unsupported metadata platform/u)
+  })
+
+  it('keeps unsigned packages without an update source unless an origin is configured', () => {
+    expect(resolveDesktopUnsignedUpdateConfig({}, 'win32', 'x64')).toBeUndefined()
+    expect(resolveDesktopUnsignedUpdateConfig({ DSH_DESKTOP_UPDATE_ORIGIN: '  ' }, 'win32', 'x64')).toBeUndefined()
+  })
+
+  it.each([['darwin', 'arm64', 'mac-arm64'], ['win32', 'x64', 'win-x64']] as const)
+  ('resolves one qualification feed for %s %s', (platform, arch, target) => {
+    expect(resolveDesktopUnsignedUpdateConfig({
+      DSH_DESKTOP_UPDATE_ORIGIN: 'https://desktop-updates.example.com/',
+    }, platform, arch)).toEqual({
+      environment: 'qualification', channel: 'nightly', target,
+      origin: 'https://desktop-updates.example.com',
+      publicUrl: `https://desktop-updates.example.com/dsh-desk/feeds/${target}/`,
+      keyPrefix: `dsh-desk/feeds/${target}`,
+      binaryKeyPrefix: `dsh-desk/bin/${target}`,
+    })
+    expect(resolveDesktopUnsignedUpdateConfig({
+      DSH_DESKTOP_UPDATE_ORIGIN: 'https://desktop-updates.example.com',
+      DSH_DESKTOP_UPDATE_CHANNEL: 'stable',
+    }, platform, arch)).toMatchObject({
+      channel: 'stable',
+      binaryKeyPrefix: `dsh-desk/bin/${target}/stable`,
+    })
+  })
+
+  it('rejects a qualification feed that is not an allowed origin', () => {
+    expect(() => resolveDesktopUnsignedUpdateConfig({
+      DSH_DESKTOP_UPDATE_ORIGIN: 'http://desktop-updates.example.com',
+    }, 'win32', 'x64')).toThrow(/HTTPS origin/u)
+    expect(() => resolveDesktopUnsignedUpdateConfig({
+      DSH_DESKTOP_UPDATE_ORIGIN: 'https://desktop-updates.example.com/releases',
+    }, 'win32', 'x64')).toThrow(/without a path/u)
+  })
+
+  it('accepts a private-address HTTP qualification feed for the local test server', () => {
+    expect(resolveDesktopUnsignedUpdateConfig({
+      DSH_DESKTOP_UPDATE_ORIGIN: 'http://192.168.200.195:18080',
+    }, 'win32', 'x64')).toMatchObject({
+      origin: 'http://192.168.200.195:18080',
+      publicUrl: 'http://192.168.200.195:18080/dsh-desk/feeds/win-x64/',
+    })
   })
 })
 

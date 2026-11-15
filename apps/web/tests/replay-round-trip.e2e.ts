@@ -225,10 +225,10 @@ describe('web e2e: fresh round trip through the real assembly', () => {
     const system = systemPromptText(agent.session)
     if (system === undefined) throw new Error('the settled Web request has no system prompt')
     const paragraphs = system.split('\n\n')
-    expect(paragraphs.slice(0, 2)).toEqual([
-      'You are an AI agent powered by DeepSeek Harness.',
+    expect(paragraphs.slice(0, 1)).toEqual([
       'You are a coding agent powered by the deepseek-v4-flash model.',
     ])
+    expect(system).not.toContain('You are an AI agent powered by DeepSeek Harness.')
     const cwd = agent.session.header.cwd
     if (cwd === undefined) throw new Error('the Web session has no working directory')
     expect(system).not.toContain(cwd)

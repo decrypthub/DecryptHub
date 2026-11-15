@@ -8,7 +8,7 @@ process.env.DSH_DESKTOP_ONBOARDING = 'models'
 process.env.DSH_DESKTOP_ACCOUNT_PROVIDER = 'decrypthub'
 process.env.DSH_TELEMETRY_DISABLED = '1'
 if (app.isPackaged) {
-  process.env.DSH_WDH_ENTRY ??= join(process.resourcesPath, 'components', 'wdh', 'src', 'cli.mjs')
+  // WDH ships as an online component; only its data directory is deployment-owned.
   process.env.DSH_WDH_DATA_DIR ??= join(runtimeHome, 'wdh')
 }
 await import('./main.ts')

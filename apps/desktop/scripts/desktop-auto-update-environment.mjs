@@ -153,6 +153,59 @@ function httpsOrigin(value, name) {
 }
 
 /**
+ * Resolve the explicit qualification origin: HTTPS anywhere, HTTP only on a private address.
+ * Qualification packages are unsigned and live on the local test server, so a LAN feed keeps
+ * update downloads off the public network; public HTTP stays invalid.
+ * @param {string} value Configured origin.
+ * @param {string} name Setting name included in diagnostics.
+ * @returns {string} Normalized origin.
+ * @throws {Error} When the value is not an allowed origin.
+ */
+function qualificationOrigin(value, name) {
+  let parsed
+  try { parsed = new URL(value) } catch { throw new Error(`desktop auto-update: ${name} must be an absolute origin`) }
+  const privateHost = /^(?:10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|127(?:\.\d{1,3}){3}|localhost)$/u.test(parsed.hostname)
+  if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && privateHost)) {
+    throw new Error(`desktop auto-update: ${name} must be an HTTPS origin, or HTTP on a private address`)
+  }
+  if (parsed.username !== '' || parsed.password !== '' || parsed.pathname !== '/' || parsed.search !== '' || parsed.hash !== '') {
+    throw new Error(`desktop auto-update: ${name} must be an origin without a path, credentials, query, or fragment`)
+  }
+  return parsed.origin
+}
+
+/**
+ * Resolve an explicit generic feed for one unsigned qualification package.
+ *
+ * Unsigned packages carry no update source by default. Setting
+ * DSH_DESKTOP_UPDATE_ORIGIN opts this package into a self-hosted HTTPS feed so a
+ * local test server can exercise updates without signing credentials. The feed
+ * reuses the production channel file names and a channel-scoped binary prefix.
+ * @param {NodeJS.ProcessEnv} env Packaging settings.
+ * @param {NodeJS.Platform} platform Target Node.js platform.
+ * @param {string} arch Target architecture.
+ * @returns {{ environment: 'qualification', channel: 'nightly' | 'stable', target: 'mac-arm64' | 'mac-x64' | 'win-x64', origin: string, publicUrl: string, keyPrefix: string, binaryKeyPrefix: string } | undefined} Feed configuration, or undefined when unsigned packages keep no update source.
+ * @throws {Error} When DSH_DESKTOP_UPDATE_ORIGIN is not an HTTPS origin or the target is unsupported.
+ */
+export function resolveDesktopUnsignedUpdateConfig(env, platform, arch) {
+  const configured = env.DSH_DESKTOP_UPDATE_ORIGIN?.trim()
+  if (configured === undefined || configured === '') return undefined
+  const channel = resolveDesktopUpdateChannel(env)
+  const target = resolveDesktopAutoUpdateTarget(platform, arch)
+  const origin = qualificationOrigin(configured, 'DSH_DESKTOP_UPDATE_ORIGIN')
+  const keyPrefix = `dsh-desk/feeds/${target}`
+  return {
+    environment: 'qualification',
+    channel,
+    target,
+    origin,
+    keyPrefix,
+    binaryKeyPrefix: `dsh-desk/bin/${target}${channel === 'stable' ? '/stable' : ''}`,
+    publicUrl: `${origin}/${keyPrefix}/`,
+  }
+}
+
+/**
  * Resolve the public updater URL and object prefixes for one release target.
  * @param {NodeJS.ProcessEnv} env - Packaging or upload environment.
  * @param {NodeJS.Platform} platform - Target Node.js platform.
