@@ -6,8 +6,8 @@
 
 ## 基线与核查
 
-- 产品基线：DeepSeek Harness `0.2.2-rc.1`，`upstream/master^{/^Merge pull request #7873 }`。
-- 2026-11-15 核查的远端：`upstream/master`，`0.2.2-rc.3`，`upstream PR #8422`；比产品基线多 1,371 个提交。本次只 fetch，没有把上游合并进本轮收敛。
+- 产品基线：上游 PR #7873 合入 master 后声明 DeepSeek Harness `0.2.2-rc.1` 的快照；精确版本选择表达式见下方命令。此 master 快照不是较早的 release tag。
+- 2026-11-15 核查的远端：上游 PR #8422 合入 master 后声明 `0.2.2-rc.3` 的快照；比产品基线多 1,371 个提交。本次只 fetch，没有把上游合并进本轮收敛。
 - 产品分支：`feat/dsh-rc1`。旧 Tauri `origin/main` 不是本产品的基座。
 - `packages/core/` 与 `vendor/` 和固定基线一致。产品功能使用上游 Agent 循环、会话日志、工具执行、设置与插件生命周期。
 
@@ -21,6 +21,8 @@
 | 技能与会话工具 | `tool-skill-manage`、`tool-product-sessions` | 有用，但每次同步都要与上游 `skill-filesystem`、`tool-skill`、`sessionQuery` 和可选 `tool-session-query` 对比。重复能力优先退休。当前工具目录生成仍报告这两个产品包缺少 boot-manifest 登记。 |
 | 运行环境诊断 | `product-runtime` | 价值主要在诊断；保持为可移除插件，不进入执行引擎。 |
 | 品牌、独立数据、打包与更新 | `ui-brand-decrypthub`、`product-identity`、Desktop 构建配置 | 保留产品身份与数据隔离。散落的文案替换会增加合并工作；有现成品牌或配置扩展点时应集中处理。 |
+
+全仓文档门禁尚未通过：包登记、生成引用与文档要求仍需对齐。目前新增产品包共 13 个，但 `scripts/decrypthub-product.ts` 只列出五个发布排除项；复用上游 npm 发布流程前须补齐归属清单。本次收敛不发布 npm 包。
 
 ## 已移除的差异
 

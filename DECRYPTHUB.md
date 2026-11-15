@@ -14,7 +14,7 @@ Community login uses the [native DecryptHub account plugin](packages/client/ui-s
 
 ## Build and run
 
-Use Node.js 24.9 or later and the pinned pnpm toolchain. Install with `pnpm install --frozen-lockfile`, then use the root build commands documented in [AGENTS.md](AGENTS.md). The product plugins stay private and are packed separately for Desktop; they never enter the upstream npm publication family.
+Use Node.js 24.9 or later and the pinned pnpm toolchain. Install with `pnpm install --frozen-lockfile`, then use the root build commands documented in [AGENTS.md](AGENTS.md). Product plugins are packed locally for Desktop; the publication-exclusion inventory still needs reconciliation as recorded in [the upstream change record](UPSTREAM-CHANGES.md).
 
 Build WDH in the independent `WebDecryptHub-Runtime` checkout with its component builder. Set `DSH_DESKTOP_WDH_COMPONENT_DIR` to the resulting component directory, then run `pnpm --filter @deepseek-ai/dsh-desktop run package:mac:arm64:dir --unsigned`. The assembled application is at `apps/desktop/.desktop-build/targets/mac-arm64/unsigned-artifacts/mac-arm64/DecryptHub.app`. It uses bundled artifacts and the packaged runtime without a source watcher.
 

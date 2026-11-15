@@ -6,8 +6,8 @@ This reference records product additions, changes inside inherited runtime files
 
 ## Baseline and inspection
 
-- Product base: DeepSeek Harness `0.2.2-rc.1`, `upstream/master^{/^Merge pull request #7873 }`.
-- Remote inspected on 2026-11-15: `upstream/master`, `0.2.2-rc.3`, `upstream PR #8422`; 1,371 commits after the product base. Fetch only; no upstream merge is included in this cleanup.
+- Product base: the upstream master merge of PR #7873, declaring DeepSeek Harness `0.2.2-rc.1`; the exact revision selector is in the commands below. This master snapshot is not the earlier release tag.
+- Remote inspected on 2026-11-15: the upstream master merge of PR #8422, declaring `0.2.2-rc.3`; 1,371 commits after the product base. Fetch only; no upstream merge is included in this cleanup.
 - Product branch: `feat/dsh-rc1`. The old Tauri `origin/main` is not this product’s base.
 - `packages/core/` and `vendor/` match the pinned base. Product features use the upstream Agent loop, Session log, tool pipeline, settings, and plugin lifecycle.
 
@@ -21,6 +21,8 @@ This reference records product additions, changes inside inherited runtime files
 | Skill and session tools | `tool-skill-manage`, `tool-product-sessions` | Useful, but compare against upstream `skill-filesystem`, `tool-skill`, `sessionQuery` and optional `tool-session-query` on each sync. Prefer retiring a duplicate over maintaining it. Catalog generation currently reports missing boot-manifest entries for these two product packages. |
 | Runtime diagnostics | `product-runtime` | Optional diagnostic value; retain as a removable plugin rather than adding it to the execution engine. |
 | Branding, independent data, packaging and updates | `ui-brand-decrypthub`, `product-identity`, Desktop build configuration | Keep product identity and data separation. Scattered copy substitutions add merge work; consolidate through existing brand/configuration seams when available. |
+
+The full documentation gate is not green: package registration, generated references and documentation requirements still need reconciliation. There are 13 added product packages, but `scripts/decrypthub-product.ts` lists only five publication exclusions; reconcile that ownership list before using the upstream npm publication workflow. This cleanup does not publish npm packages.
 
 ## Removed deviations
 

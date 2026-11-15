@@ -14,7 +14,7 @@ DecryptHub 是兼容 DSH 插件与配置的独立产品分支。全局记忆、�
 
 ## 构建与运行
 
-使用 Node.js 24.9 或更新版本和项目固定的 pnpm 工具链。执行 `pnpm install --frozen-lockfile` 后，按照 [AGENTS.md](AGENTS.md) 使用根目录构建命令。产品插件保持私有，单独打包进入 Desktop，不进入上游 npm 发布集合。
+使用 Node.js 24.9 或更新版本和项目固定的 pnpm 工具链。执行 `pnpm install --frozen-lockfile` 后，按照 [AGENTS.md](AGENTS.md) 使用根目录构建命令。产品插件在本地打包进入 Desktop；发布排除项清单仍需按[上游差异记录](UPSTREAM-CHANGES.zh.md)补齐。
 
 在独立的 `WebDecryptHub-Runtime` 仓库使用其组件构建器构建 WDH。将 `DSH_DESKTOP_WDH_COMPONENT_DIR` 指向组件产物目录，再执行 `pnpm --filter @deepseek-ai/dsh-desktop run package:mac:arm64:dir --unsigned`。应用产物位于 `apps/desktop/.desktop-build/targets/mac-arm64/unsigned-artifacts/mac-arm64/DecryptHub.app`，运行打包产物和内置运行时，不监听源码。
 
