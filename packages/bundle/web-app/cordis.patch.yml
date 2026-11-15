@@ -16,6 +16,7 @@
 
 - id: system-prompt
   config:
+    includeHarnessIdentity: false
     personaPrefix: >-
       You are a coding agent powered by the {{model}} model.
 
@@ -54,13 +55,15 @@
         directory: !!js (ctx.get('profileContext')?.home ?? process.env.DSH_HOME ?? '') + '/components'
         bundledWdhEntry: !!js process.env.DSH_WDH_ENTRY ?? ''
         pythonCommand: python3
+        # 测试服组件目录；接入自有服务器后替换为正式地址。
+        componentFeed: !!js process.env.DSH_COMPONENT_FEED ?? 'http://192.168.200.195:18080/components'
 
     - id: decrypthub-integrations
       name: '@deepseek-ai/dsh-decrypthub-integrations'
       inject: [decrypthubComponents]
       config:
         wdh:
-          enabled: !!js Boolean(process.env.DSH_WDH_ENTRY)
+          enabled: true
           entry: !!js process.env.DSH_WDH_ENTRY ?? ''
           dataDirectory: !!js process.env.DSH_WDH_DATA_DIR ?? ''
           browser: cloak
@@ -183,12 +186,6 @@
       name: '@deepseek-ai/dsh-client-ui-settings-account'
       disabled: true
 
-    - id: ui-mcp
-      name: '@deepseek-ai/dsh-client-ui-mcp'
-
-    - id: ui-decrypthub-settings
-      name: '@deepseek-ai/dsh-client-ui-decrypthub-settings'
-
     - id: ui-settings-decrypthub-account
       name: '@deepseek-ai/dsh-client-ui-settings-decrypthub-account'
 
@@ -238,7 +235,8 @@
       inject: [webStartup]
       config:
         host: !!js ctx.webStartup.host ?? '127.0.0.1'
-        port: !!js ctx.webStartup.port ?? 3080
+        # DecryptHub default — not upstream 3080, so `dsh web` can coexist with DeepSeek Harness.
+        port: !!js ctx.webStartup.port ?? 47391
         tls: !!js ctx.webStartup.tls
         compression: gzip
         compressionLevel: 1
@@ -267,6 +265,7 @@
     # also drops the two value lines.
     - id: harness-dev-context
       name: '@deepseek-ai/dsh-harness-dev-context'
+      disabled: true
 
     # The client-plugin reload chain, always mounted: it is idle until a
     # rebuild watcher (pnpm run dev:web) actually rewrites client bundles. It
@@ -498,8 +497,6 @@
     # Model selection: the /model popupSelect + composer seat over session.models.
     - id: ui-model-selection
       name: '@deepseek-ai/dsh-client-ui-model-selection'
-      config:
-        effortControl: slider
 
     - id: ui-permission
       name: '@deepseek-ai/dsh-client-ui-permission-presets'
@@ -681,23 +678,6 @@
 - insert:
     - id: tool-product-runtime
       name: '@deepseek-ai/dsh-product-runtime'
-
-# Product row: product-memory.
-- insert:
-    - id: product-memory
-      name: '@deepseek-ai/dsh-product-memory'
-
-# Product row: tool-skill-manage.
-- insert:
-    - id: tool-skill-manage
-      name: '@deepseek-ai/dsh-tool-skill-manage'
-      config:
-        directory: !!js dshHomePath('skills')
-
-# Product row: product-persona.
-- insert:
-    - id: product-persona
-      name: '@deepseek-ai/dsh-product-persona'
 
 # Product row: tool-product-sessions.
 - insert:

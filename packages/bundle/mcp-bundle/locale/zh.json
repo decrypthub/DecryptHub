@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "技能与 MCP",
+    "description": "让模型创建与管理技能，并配置自定义 MCP 服务器与 DecryptHub 官方组件。在「技能与 MCP」页管理。",
+    "detail": "docs/DETAIL.zh.md"
+  }
+}

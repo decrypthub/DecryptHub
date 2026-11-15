@@ -2,7 +2,6 @@
   "name": "@deepseek-ai/dsh-tool-product-sessions",
   "description": "Model-facing session history: list recent sessions with titles and timestamps.",
   "version": "0.2.2-rc.1",
-  "private": true,
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -28,6 +27,7 @@
     "@deepseek-ai/dsh-tool-executor-native": "workspace:*",
     "@deepseek-ai/dsh-tool-testkit": "workspace:*",
     "@deepseek-ai/dsh-llm": "workspace:*",
+    "@deepseek-ai/dsh-session": "workspace:*",
     "@deepseek-ai/schemastery": "workspace:~"
   }
 }

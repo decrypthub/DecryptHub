@@ -209,12 +209,15 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'decrypthubComponents/cancelInstall': 'owner-only', // owner official component management
   'decrypthubComponents/checkUpdates': 'owner-only', // owner official component management
   'decrypthubComponents/configure': 'owner-only', // owner official component management
+  'decrypthubComponents/importPreview': 'owner-only', // owner copies Harness home data into this product
+  'decrypthubComponents/importRun': 'owner-only', // owner copies Harness home data into this product
   'decrypthubComponents/inspectBrowser': 'owner-only', // owner official component management
   'decrypthubComponents/installComponent': 'owner-only', // owner official component management
   'decrypthubComponents/installBrowser': 'owner-only', // owner official component management
   'decrypthubComponents/reconnect': 'owner-only', // owner official component management
   'decrypthubComponents/rollback': 'owner-only', // owner official component management
   'decrypthubComponents/snapshot': 'owner-only', // owner official component management
+  'decrypthubComponents/uninstall': 'owner-only', // owner official component management
   'decrypthubComponents/watch': 'owner-only', // owner official component management
   'mcpManager/probe': 'owner-only', // owner MCP server management
   'mcpManager/restart': 'owner-only', // owner MCP server management

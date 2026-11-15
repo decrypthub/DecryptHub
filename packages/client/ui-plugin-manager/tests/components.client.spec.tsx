@@ -785,6 +785,28 @@ describe('PluginManagerPage', () => {
     expect(document.querySelector('[data-plugin-count]')).toBeNull()
   })
 
+  it('lists default-on product bundles from EXTENSION_BUNDLES as official even when Host official is false', () => {
+    const memory = '@deepseek-ai/dsh-memory-bundle'
+    const mcp = '@deepseek-ai/dsh-mcp-bundle'
+    renderTab({
+      packages: [
+        pkg({
+          name: memory, official: false, optional: false, installed: false, availability: 'installation',
+          enabled: true, removable: false, meta: { title: 'Memory and role' },
+        }),
+        pkg({
+          name: mcp, official: false, optional: false, installed: false, availability: 'installation',
+          enabled: true, removable: false, meta: { title: 'Skills and MCP' },
+        }),
+        pkg({ name: '@deepseek-ai/dsh-experimental-voice-input-bundle', installed: false, optional: true, removable: false }),
+        pkg({ name: 'dsh-better-sidebar' }),
+      ],
+    })
+    expect(screen.getAllByRole('listitem').map(card => card.getAttribute('data-plugin-package'))).toEqual([
+      memory, mcp, '@deepseek-ai/dsh-experimental-voice-input-bundle', 'dsh-better-sidebar',
+    ])
+  })
+
   it.each([false, true])('hides persistent terminals from both lists and direct navigation without changing enabled=%s', (enabled) => {
     const name = '@deepseek-ai/dsh-experimental-terminal-bundle'
     const b = renderTab({ packages: [

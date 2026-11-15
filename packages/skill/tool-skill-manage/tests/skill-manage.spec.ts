@@ -5,7 +5,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import { executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it, onTestFinished } from 'vitest'
@@ -54,7 +54,7 @@ it('writes a skill bundle with frontmatter and lists it', async () => {
   expect(existsSync(created.path)).toBe(true)
   const content = readFileSync(join(root, 'release-checklist', 'SKILL.md'), 'utf8')
   expect(content).toContain('name: release-checklist')
-  expect(content).toContain('description: Use when preparing a release.')
+  expect(content).toContain('description: "Use when preparing a release."')
   expect(content).toContain('- run the gates')
   const listed = await call(ctx, 'skill_list', {}) as { skills: { name: string; description: string }[] }
   expect(listed.skills).toEqual([{ name: 'release-checklist', description: 'Use when preparing a release.' }])
@@ -83,4 +83,41 @@ it('refuses a non-kebab-case name without creating a directory', async () => {
   const { ctx, root } = await fixture()
   await call(ctx, 'skill_create', { name: 'Bad Name', description: 'x', body: 'y' })
   expect(existsSync(join(root, 'Bad Name'))).toBe(false)
+})
+
+it('quotes a description that carries YAML punctuation and refuses a multiline one', async () => {
+  const { ctx, root } = await fixture()
+  await call(ctx, 'skill_create', { name: 'quoted', description: 'Use when: preparing a release #1', body: 'x' })
+  const listed = await call(ctx, 'skill_list', {}) as { skills: { description: string }[] }
+  expect(listed.skills[0]?.description).toBe('Use when: preparing a release #1')
+  expect(readFileSync(join(root, 'quoted', 'SKILL.md'), 'utf8')).toContain('description: "Use when: preparing a release #1"')
+  const multiline = await executeModelToolFixture(ctx, {
+    callId: ToolCallId('call-multiline'),
+    name: 'skill_create',
+    arguments: { name: 'multiline', description: 'first line\nsecond line', body: 'x' },
+    signal: new AbortController().signal,
+  })
+  expect(multiline.isError).toBe(true)
+  expect(existsSync(join(root, 'multiline'))).toBe(false)
+})
+
+it('never overwrites or deletes a skill the user wrote by hand', async () => {
+  const { ctx, root } = await fixture()
+  mkdirSync(join(root, 'hand-written'))
+  writeFileSync(join(root, 'hand-written', 'SKILL.md'), '---\nname: hand-written\ndescription: mine\n---\n\nkeep me\n')
+  const overwrite = await executeModelToolFixture(ctx, {
+    callId: ToolCallId('call-hand-overwrite'),
+    name: 'skill_create',
+    arguments: { name: 'hand-written', description: 'replaced', body: 'x', overwrite: true },
+    signal: new AbortController().signal,
+  })
+  expect(overwrite.isError).toBe(true)
+  const remove = await executeModelToolFixture(ctx, {
+    callId: ToolCallId('call-hand-delete'),
+    name: 'skill_delete',
+    arguments: { name: 'hand-written' },
+    signal: new AbortController().signal,
+  })
+  expect(remove.isError).toBe(true)
+  expect(readFileSync(join(root, 'hand-written', 'SKILL.md'), 'utf8')).toContain('keep me')
 })

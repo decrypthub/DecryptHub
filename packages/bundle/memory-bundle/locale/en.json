@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Memory and role",
+    "description": "Keeps product memory the model can use across sessions, and the role definition that shapes how it answers. Open the Memory and role page to edit either.",
+    "detail": "docs/DETAIL.md"
+  }
+}

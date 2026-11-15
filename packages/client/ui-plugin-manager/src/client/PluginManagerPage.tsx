@@ -112,6 +112,16 @@ function rowsRunning(pkg: PackageView): boolean {
 }
 
 /**
+ * Whether the page treats a package as official: Host-reported official bundles, plus default-on
+ * installation bundles ranked in `EXTENSION_BUNDLES` (which cannot also be `OPTIONAL_BUNDLES`).
+ * @param pkg - a listed package view.
+ * @returns whether the Official group shows it.
+ */
+function asOfficial(pkg: PackageView): boolean {
+  return pkg.official || EXTENSION_BUNDLES.includes(pkg.name)
+}
+
+/**
  * Whether the main list shows an official optional bundle: any bundle outside `MORE_BUNDLES`, and any held-back one the profile enabled.
  * @param pkg - the official bundle as the Host reports it.
  * @returns whether the main list shows it.
@@ -1568,13 +1578,15 @@ export function PluginManagerPage(props: PluginManagerPageProps): ReactNode {
   }, [highlight, clearHighlight])
   const noticeLine = state.notice === null || state.notice.kind === 'refresh-failed' ? null : noticeText(state.notice, t)
 
-  // The page omits profile bundles and persistent terminals. Other installed or offered bundles and
-  // unreadable selections remain manageable; Settings' Plugin list inspects the full Host inventory.
+  // The page omits profile composition shells and persistent terminals. Default-on product bundles
+  // in EXTENSION_BUNDLES stay visible when enabled even though Host `official` only covers OPTIONAL
+  // and on-demand catalogs. Other installed or offered bundles and unreadable selections remain
+  // manageable; Settings' Plugin list inspects the full Host inventory.
   const listed = state.packages.filter(pkg => !HIDDEN_BUNDLES.has(pkg.name)
     && (pkg.listedByDefault !== false || pkg.enabled || pkg.installed || rowsRunning(pkg))
-    && (pkg.installed || pkg.official || pkg.error !== undefined))
-  const mine = listed.filter(pkg => !pkg.official)
-  const official = listed.filter(pkg => pkg.official)
+    && (pkg.installed || pkg.official || EXTENSION_BUNDLES.includes(pkg.name) || pkg.error !== undefined))
+  const mine = listed.filter(pkg => !asOfficial(pkg))
+  const official = listed.filter(asOfficial)
   // Both lists read one order over the eligible bundles: the main list holds the always-held ones plus the held-back
   // ones the profile enabled, and the More list holds the eligible ones, so enabling a bundle from the More list pins it
   // to the main list without moving it among its neighbours there.

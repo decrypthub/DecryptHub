@@ -1,12 +1,11 @@
 // @vitest-environment jsdom
-/** Both product settings sections register and render side by side. */
-import { waitFor } from '@testing-library/react'
+/** The fused memory/role section keeps memory as the host and opens role in a dialog. */
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { expect, it, onTestFinished, vi } from 'vitest'
 import { SlotTestRuntime } from '@deepseek-ai/dsh-client-test-runtime'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '../src/client/index.ts'
-import { MemoryPage } from '../src/client/MemoryPage.tsx'
-import { PersonaPage } from '../src/client/PersonaPage.tsx'
+import { MemoryPersonaPage } from '../src/client/MemoryPersonaPage.tsx'
 import { en, zh, personaEn, personaZh } from '../src/client/locales.ts'
 import { MemorySource } from '../src/client/source.ts'
 import { PersonaSource } from '../src/client/persona-source.ts'
@@ -34,8 +33,8 @@ const personaNamespace = {
 }
 
 /**
- * Register both sections against fake settings Remotes.
- * @returns the runtime with both contributions installed.
+ * Register the fused section against fake settings Remotes.
+ * @returns the runtime with the contribution installed.
  */
 async function fixture(): Promise<SlotTestRuntime> {
   const runtime = await SlotTestRuntime.create()
@@ -51,28 +50,40 @@ async function fixture(): Promise<SlotTestRuntime> {
   const memory = new MemorySource({ describe, write: vi.fn(async () => memoryNamespace) })
   const persona = new PersonaSource({ describe, write: vi.fn(async () => personaNamespace) })
   onTestFinished(() => { memory.dispose(); persona.dispose() })
+  const t = locale.bind('settings.memory')
+  const pt = locale.bind('settings.persona')
   runtime.slots.register({
-    name: 'settings.section', id: 'memory', label: () => zh.nav, locale: 'settings.memory',
-    inject: () => ({ hooks: { memory: memory.store }, source: memory }),
-  }, MemoryPage)
-  runtime.slots.register({
-    name: 'settings.section', id: 'persona', label: () => personaZh.nav, locale: 'settings.persona',
-    inject: () => ({ hooks: { persona: persona.store }, source: persona }),
-  }, PersonaPage)
+    name: 'settings.section', id: 'memory-persona', label: () => zh.nav, locale: 'settings.memory',
+    inject: () => ({
+      hooks: { memory: memory.store, persona: persona.store },
+      memory: { source: memory },
+      persona: { source: persona },
+      memoryT: t,
+      personaT: pt,
+    }),
+  }, MemoryPersonaPage)
   return runtime
 }
 
-it('exposes both sections in the settings nav', async () => {
+it('exposes one fused section in the settings nav', async () => {
   const runtime = await fixture()
-  const entries = runtime.slots.entries('settings.section')
-  expect(entries).toHaveLength(2)
+  expect(runtime.slots.entries('settings.section')).toHaveLength(1)
+  const label = runtime.slots.entries('settings.section')[0]?.options.label
+  expect(typeof label === 'function' ? label() : label).toBe('记忆与角色')
 })
 
-it('renders each section independently', async () => {
+it('opens the role editor in a dialog from Set role and keeps the memory list', async () => {
   const runtime = await fixture()
-  const memoryView = runtime.renderSlot('settings.section', { close: vi.fn() }, { only: 'memory' })
-  await waitFor(() => { expect(memoryView.view.getByText('记住的事实')).toBeTruthy() })
-  const personaView = runtime.renderSlot('settings.section', { close: vi.fn() }, { only: 'persona' })
-  const field = personaView.view.getByPlaceholderText(personaZh.placeholder) as HTMLTextAreaElement
-  await waitFor(() => { expect(field.value).toBe('你是中文助手。') })
+  const { view } = runtime.renderSlot('settings.section', { close: vi.fn() })
+  await waitFor(() => { expect(view.getByText('记住的事实')).toBeTruthy() })
+  expect(view.queryByRole('tab', { name: '角色' })).toBeNull()
+  expect(screen.queryByRole('dialog', { name: '角色' })).toBeNull()
+  expect(view.getByRole('button', { name: '添加记忆' })).toBeTruthy()
+  fireEvent.click(view.getByRole('button', { name: '设定角色' }))
+  const dialog = await screen.findByRole('dialog', { name: '角色' })
+  expect((dialog.querySelector('textarea') as HTMLTextAreaElement).value).toBe('你是中文助手。')
+  expect(view.getByText('记住的事实')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: personaZh.close }))
+  await waitFor(() => { expect(screen.queryByRole('dialog', { name: '角色' })).toBeNull() })
+  expect(view.getByText('记住的事实')).toBeTruthy()
 })

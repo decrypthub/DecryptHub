@@ -1,5 +1,5 @@
 ---
-description: "Custom MCP and official component management in DecryptHub."
+description: "DecryptHub Skills & MCP: MCP|Skills pill tabs; MCP stacks official above custom."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Review and save custom MCP servers, inspect their tools, and manage DecryptHub official components in the existing settings and sidebar. Imports identify conflicts and unsupported transports before saving. Connection settings use revision checks and credential references. Installation, transport and device facts are displayed independently.
+One sidebar and settings entry, "Skills & MCP", with Memory-style pill tabs for MCP and Skills. The MCP tab stacks official components above custom MCP. The Skills tab explains the skills root and can hand off to the agent. Official component cards show status and open a configuration dialog. Imports identify conflicts and unsupported transports before saving. Connection settings use revision checks and credential references. A third settings section, "Import from DSH", copies the conversations of an official Harness home into this app and groups them by their original workspace; only conversations are imported, because they are the one stable interchange unit.
 
 ## Table of Contents
 
@@ -22,7 +22,7 @@ Review and save custom MCP servers, inspect their tools, and manage DecryptHub o
 <a id="use-this-package"></a>
 ## Use this package
 
-The DecryptHub Web bundle mounts this plugin. Open Settings → Custom MCP to add a local command or Streamable HTTP server. Use Import configuration to review mcpServers JSON; conflicting names are skipped. Official components appears in the sidebar and settings. Configure device daemon addresses before enabling ADH or IDH. Browser downloads require explicit license consent.
+The DecryptHub Web bundle mounts this plugin. Open Skills & MCP; the MCP tab lists official WDH / ADH / IDH status rows above custom MCP. Opening a row configures install, browser kernel, or device connect. Add a local command or Streamable HTTP server, or import mcpServers JSON after review. Switch to the Skills tab to manage skills. Browser downloads require explicit license consent.
 
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
@@ -43,6 +43,7 @@ Indirectly, reconnecting may change tool definitions.
 <a id="known-limitations-and-deferred-work"></a>
 
 - SSE imports are reported as unsupported. Conflicting names must be resolved before importing.
+- The Harness import copies conversations only: tasks, model keys and plugins are intentionally not imported, and the skills catalog resolves from the newest conversation, so a home without conversations shows an explanatory empty state.
 - This build manages WDH tools and browser files; the integrated browser, capture and debugging workbench remains deferred.
 - MCP negotiation does not verify a connected Android or iOS target.
 

@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-decrypthub-components",
   "description": "Verified official DecryptHub components and actual installation status",
-  "version": "0.2.2-alpha.3",
+  "version": "0.2.2-rc.1",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
@@ -63,6 +63,5 @@
     "@deepseek-ai/dsh-session": "workspace:*",
     "@deepseek-ai/dsh-mcp-manager": "workspace:*",
     "@deepseek-ai/dsh-subprocess": "workspace:*"
-  },
-  "private": true
+  }
 }

@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 摘要
 
-为模型提供三个工具：`skill_create` 写入带 frontmatter 的 `<name>/SKILL.md`，`skill_list` 读取已存技能，`skill_delete` 删除其一。同一目录同时作为 `skill-filesystem` 的 root 挂载，因此写入的技能通过上游 watcher 进入下一步的目录，而不是走私有通路。
+为模型提供三个工具：`skill_create` 写入带 frontmatter 的 `<name>/SKILL.md`，`skill_list` 读取已存技能，`skill_delete` 删除其一。description 以 JSON 引号形式写入 YAML 标量且必须单行，因此标点不会悄悄破坏目录解析所读的 frontmatter。同一目录同时作为 `skill-filesystem` 的 root 挂载，因此写入的技能通过上游 watcher 进入下一步的目录，而不是走私有通路。工具会在 `.created-by-agent.json` 中记录自己创建的名称，拒绝覆盖或删除不属于自己的技能，模型因此无法破坏手写技能。
 
 ## 目录
 
@@ -21,7 +21,7 @@ kind: "package-reference"
 
 ## 使用本包
 
-挂载本插件并把 `directory` 指向可写根目录，同时把同一目录配置到 `dsh-skill-filesystem` 的 `roots`。名称使用 kebab-case，使目录名、目录 id 与 `/name` 调用保持一致；不带 `overwrite` 的创建不会覆盖已有技能。
+挂载本插件并把 `directory` 指向可写根目录，同时把同一目录配置到 `dsh-skill-filesystem` 的 `roots`。名称使用 kebab-case，使目录名、目录 id 与 `/name` 调用保持一致；不带 `overwrite` 的创建不会覆盖已有技能，而 `overwrite` 与 `skill_delete` 还要求该技能由工具自己创建。
 
 <a id="model-experience"></a>
 
@@ -31,7 +31,7 @@ kind: "package-reference"
 
 #### What the model sees
 
-三个工具 schema：`skill_create`（name、description、body、可选 overwrite）、`skill_list`（无参数）、`skill_delete`（name）。描述写明各自的使用时机，结果为一行短文本，指明写入路径或删除结果。
+三个工具 schema：`skill_create`（name、description、body、可选 overwrite）、`skill_list`（无参数）、`skill_delete`（name）。描述写明各自的使用时机，结果为一行短文本，指明写入路径或删除结果。被拒绝的覆盖或删除会说明该技能由工具之外写入，需由用户移除。
 
 #### Token effect
 
@@ -47,6 +47,7 @@ kind: "package-reference"
 
 - **只支持整文件替换** — 带 `overwrite` 的 `skill_create` 会替换正文而非增量修改，模型必须重发完整指令。
 - **暂未暴露调用策略** — 写出的技能默认可被模型与用户调用，`disable-model-invocation` 等 frontmatter 字段尚未通过工具开放。
+- **归属从本版本开始** — 在该清单存在之前写入的技能一律按手写处理，模型替换或删除前必须先询问用户。
 
 <a id="dev-note"></a>
 ### 开发注记

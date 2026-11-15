@@ -78,28 +78,102 @@ export async function fetchComponentRelease(id: ComponentId, signal: AbortSignal
   return selectComponentRelease(id, releaseId === undefined ? value : [value])
 }
 
-/** Download and hash one fixed release asset, accepting only GitHub asset redirects.
+const feedEntrySchema = z.object({
+  version: z.string().regex(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u),
+  name: z.string().min(1).max(160).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*\.zip$/u),
+  size: z.number().int().positive().max(256 * 1024 ** 2),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+})
+const feedIndexSchema = z.object({ version: z.literal(1), components: z.record(z.string(), feedEntrySchema) })
+
+/**
+ * Validate an operator-owned component feed base URL: HTTPS anywhere, HTTP only on a private address.
+ * @param value - configured feed base URL, optionally carrying a path such as `/components`.
+ * @returns base URL ending in `/`; `index.json` and archives resolve against it.
+ * @throws {Error} When the value is not an allowed base URL.
+ */
+export function componentFeedBaseUrl(value: string): URL {
+  let base: URL
+  try { base = new URL(value) } catch { throw new Error('Component feed must be an absolute URL') }
+  const privateHostPattern = String.raw`^(?:10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|` +
+    String.raw`172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|127(?:\.\d{1,3}){3}|localhost)$`
+  const privateHost = new RegExp(privateHostPattern, 'u').test(base.hostname)
+  if (base.protocol !== 'https:' && !(base.protocol === 'http:' && privateHost)) {
+    throw new Error('Component feed must use HTTPS, or HTTP on a private address')
+  }
+  if (base.username !== '' || base.password !== '' || base.search !== '' || base.hash !== '') {
+    throw new Error('Component feed must not carry credentials, query, or fragment')
+  }
+  if (!base.pathname.endsWith('/')) base.pathname += '/'
+  return base
+}
+
+/**
+ * Read one component entry from an operator-owned index.json.
+ * @param base - verified feed base URL.
+ * @param id - component identity.
+ * @param signal - request lifetime.
+ * @param timeoutMs - bounded metadata request duration.
+ * @returns selected entry, or null when the feed does not offer this component.
+ * @throws {Error} When the feed is unreachable or malformed.
+ */
+export async function fetchFeedRelease(base: URL, id: ComponentId, signal: AbortSignal,
+  timeoutMs: number): Promise<ComponentRelease | null> {
+  const response = await fetch(new URL('index.json', base), {
+    headers: { accept: 'application/json', 'user-agent': 'DecryptHub' }, redirect: 'error',
+    signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
+  })
+  if (!response.ok) { await response.body?.cancel(); throw new Error(`Component feed lookup failed (${response.status})`) }
+  const reader = response.body?.getReader()
+  if (!reader) throw new Error('Empty component feed response')
+  const chunks: Uint8Array[] = []
+  let size = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      size += value.length
+      if (size > 1024 ** 2) { await reader.cancel(); throw new Error('Component feed response is too large') }
+      chunks.push(value)
+    }
+  } finally { await reader.cancel().catch(() => undefined); reader.releaseLock() }
+  const parsed = feedIndexSchema.safeParse(JSON.parse(Buffer.concat(chunks).toString('utf8')))
+  if (!parsed.success) throw new Error('Component feed index is malformed')
+  const entry = parsed.data.components[id]
+  if (entry === undefined) return null
+  const url = new URL(entry.name, base)
+  if (!url.href.startsWith(base.href)) throw new Error('Component feed entry escapes the feed base URL')
+  return { id, releaseId: 0, assetId: 0, name: entry.name, version: entry.version, size: entry.size, sha256: entry.sha256, url: url.href }
+}
+
+/** Download and hash one fixed release asset, accepting only the selected source.
  * @param asset - reverified immutable asset.
  * @param filename - exclusive temporary output.
  * @param signal - installation lifetime.
  * @param progress - received-byte observation.
+ * @param allowedBase - operator feed base URL; omit for the code-owned GitHub repository.
  * @returns after exact size and SHA-256 verification.
  */
 export async function downloadComponent(asset: ComponentRelease, filename: string, signal: AbortSignal,
-  progress: (received: number) => void): Promise<void> {
+  progress: (received: number) => void, allowedBase?: URL): Promise<void> {
   let url = new URL(asset.url)
   let response: Response | undefined
-  for (let redirect = 0; redirect < 6; redirect++) {
-    if (url.protocol !== 'https:' || url.port || url.username || url.password
-      || !['github.com', 'release-assets.githubusercontent.com', 'objects.githubusercontent.com'].includes(url.hostname)) {
-      throw new Error('Untrusted component download redirect')
+  if (allowedBase !== undefined) {
+    if (!url.href.startsWith(allowedBase.href)) throw new Error('Untrusted component download base URL')
+    response = await fetch(url, { redirect: 'error', signal })
+  } else {
+    for (let redirect = 0; redirect < 6; redirect++) {
+      if (url.protocol !== 'https:' || url.port || url.username || url.password
+        || !['github.com', 'release-assets.githubusercontent.com', 'objects.githubusercontent.com'].includes(url.hostname)) {
+        throw new Error('Untrusted component download redirect')
+      }
+      response = await fetch(url, { redirect: 'manual', signal })
+      if (![301, 302, 303, 307, 308].includes(response.status)) break
+      const location = response.headers.get('location')
+      await response.body?.cancel()
+      if (!location) throw new Error('Invalid component download redirect')
+      url = new URL(location, url)
     }
-    response = await fetch(url, { redirect: 'manual', signal })
-    if (![301, 302, 303, 307, 308].includes(response.status)) break
-    const location = response.headers.get('location')
-    await response.body?.cancel()
-    if (!location) throw new Error('Invalid component download redirect')
-    url = new URL(location, url)
   }
   if (!response?.ok || !response.body) { await response?.body?.cancel(); throw new Error('Component download failed') }
   const output = await fs.open(filename, 'wx', 0o600)

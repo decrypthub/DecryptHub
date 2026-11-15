@@ -32,6 +32,8 @@ export interface ComponentView {
   id: ComponentId
   installed: InstalledComponent | null
   localCommand: string | null
+  /** First `--version` line from the local CLI when no managed install is present. */
+  localVersion: string | null
   previousVersion: string | null
   latestVersion: string | null
   catalogError: string | null
@@ -41,6 +43,8 @@ export interface ComponentView {
 /** One refreshable catalog snapshot. */
 export interface ComponentsSnapshot {
   components: ComponentView[]
+  /** Tools the WDH component last reported while a session had it connected. */
+  wdhTools: number | null
   wdh: WdhConnectionView[]
   configuration: OfficialConfiguration | null
   browser: BrowserKernelView
@@ -61,7 +65,13 @@ export interface OfficialConfiguration {
   idh: OfficialDeviceConfiguration
 }
 /** Device daemon address is separate from the local MCP process. */
-export interface OfficialDeviceConfiguration { enabled: boolean; command: string; args: string[]; endpoint: string }
+export interface OfficialDeviceConfiguration { enabled: boolean; command: string; args: string[]; endpoint: string; devices: string[] }
+/** Categories a Harness home import can copy: conversations are the only stable unit. */
+export type ImportKind = 'sessions'
+/** One preview row. */
+export interface ImportItem { readonly id: ImportKind; readonly count: number; readonly seconds: number; readonly detail: string }
+/** Outcome of copying one category. */
+export interface ImportResult { readonly id: ImportKind; readonly status: 'imported' | 'skipped' | 'empty'; readonly detail: string }
 
 declare module '@deepseek-ai/cordis' {
   interface Events {

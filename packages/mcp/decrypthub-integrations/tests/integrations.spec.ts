@@ -14,6 +14,16 @@ import * as Integration from '../src/index.ts'
 
 const signal = new AbortController().signal
 
+/** Match a filesystem path inside one or two layers of JSON string encoding (Windows). */
+function expectJsonPath(value: unknown, path: string): void {
+  const encoded = JSON.stringify(value)
+  expect(
+    encoded.includes(path)
+    || encoded.includes(path.replaceAll('\\', '\\\\'))
+    || encoded.includes(path.replaceAll('\\', '\\\\\\\\')),
+  ).toBe(true)
+}
+
 async function setup() {
   const directory = await mkdtemp(join(tmpdir(), 'decrypthub-mcp-'))
   const first = join(directory, 'first'), second = join(directory, 'second')
@@ -51,8 +61,8 @@ describe('DecryptHub MCP composition', () => {
     const one = await workspace(ctx, agent), two = await workspace(ctx, other)
     expect(one.isError).toBeFalsy()
     expect(two.isError).toBeFalsy()
-    expect(JSON.stringify(one)).toContain(first)
-    expect(JSON.stringify(two)).toContain(second)
+    expectJsonPath(one, first)
+    expectJsonPath(two, second)
     await plugin.dispose()
     expect((await workspace(ctx, agent)).isError).toBe(true)
     expect((await workspace(ctx, other)).isError).toBe(true)
@@ -61,7 +71,7 @@ describe('DecryptHub MCP composition', () => {
   it('denies the old directory immediately and reconnects before the next step', async () => {
     const { ctx, agent, first, second } = await setup()
     await step(ctx, agent)
-    expect(JSON.stringify(await workspace(ctx, agent))).toContain(first)
+    expectJsonPath(await workspace(ctx, agent), first)
     await ctx.workingDirectory.set(agent, second, signal)
     const stale = await workspace(ctx, agent)
     expect(stale.isError).toBe(true)
@@ -72,14 +82,16 @@ describe('DecryptHub MCP composition', () => {
     await step(ctx, agent)
     const current = await workspace(ctx, agent)
     expect(current.isError).toBeFalsy()
-    expect(JSON.stringify(current)).toContain(second)
+    expectJsonPath(current, second)
   })
 
-  it('starts no device server unless enabled and rejects an ambiguous WDH installation', async () => {
+  it('starts no device server unless enabled and keeps settings alive without WDH paths', async () => {
     const config = Integration.Config({}).get()
     expect(config.adh.enabled).toBe(false)
     expect(config.idh.enabled).toBe(false)
     expect(config.wdh.enabled).toBe(false)
-    await expect(Integration.apply(new Context(), Integration.Config({ wdh: { enabled: true } }))).rejects.toThrow('absolute paths')
+    const ctx = new Context()
+    onTestFinished(async () => { await ctx.fiber.dispose() })
+    await expect(Integration.apply(ctx, Integration.Config({ wdh: { enabled: true } }))).resolves.toBeUndefined()
   })
 })

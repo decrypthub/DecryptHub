@@ -1,0 +1,9 @@
+# Skill management tools and the fused Skills / MCP management page.
+- insert:
+    - id: tool-skill-manage
+      name: '@deepseek-ai/dsh-tool-skill-manage'
+      config:
+        directory: !!js dshHomePath('skills')
+
+    - id: ui-mcp
+      name: '@deepseek-ai/dsh-client-ui-mcp'

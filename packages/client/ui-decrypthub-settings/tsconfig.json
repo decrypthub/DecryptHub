@@ -7,11 +7,14 @@
     { "path": "../ui-renderer" },
     { "path": "../ui-settings/tsconfig.client.json" },
     { "path": "../ui-slots" },
+    { "path": "../ui-primitives" },
     { "path": "../ui-layout" },
     { "path": "../ui-sidebar" },
+    { "path": "../ui-workspace" },
     { "path": "../locale/tsconfig.client.json" },
     { "path": "../store" },
     { "path": "../../api/remotes/tsconfig.client.json" },
-    { "path": "../../settings/settings" }
+    { "path": "../../settings/settings" },
+    { "path": "../../util/crypto" }
   ]
 }

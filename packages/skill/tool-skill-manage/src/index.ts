@@ -30,15 +30,59 @@ export const Config = z.object({
 /** Skill names are kebab-case so the directory, the catalog id, and `/name` agree. */
 const SKILL_NAME = /^[a-z][a-z0-9-]{0,62}$/
 
+/** Bookkeeping file naming the skills this tool created. */
+const MANIFEST = '.created-by-agent.json'
+
 /**
- * Render one skill bundle body with its frontmatter.
+ * Read the names this tool owns. A missing or malformed manifest counts as
+ * empty: the tool must never treat an unowned skill as its own.
+ * @param root - writable skill root.
+ * @returns owned skill names.
+ */
+async function readManifest(root: string): Promise<Set<string>> {
+  try {
+    const document = JSON.parse(await readFile(join(root, MANIFEST), 'utf8')) as { skills?: unknown }
+    return new Set(Array.isArray(document.skills) ? document.skills.filter((item): item is string => typeof item === 'string') : [])
+  } catch {
+    // A corrupt manifest must not unlock user-authored skills.
+    return new Set()
+  }
+}
+
+/**
+ * Record one skill name as tool-owned.
+ * @param root - writable skill root.
+ * @param name - kebab-case skill name.
+ */
+async function remember(root: string, name: string): Promise<void> {
+  const skills = await readManifest(root)
+  if (skills.has(name)) return
+  skills.add(name)
+  await writeFile(join(root, MANIFEST), `${JSON.stringify({ skills: [...skills].sort() }, null, 2)}\n`)
+}
+
+/**
+ * Drop one skill name from the owned set.
+ * @param root - writable skill root.
+ * @param name - kebab-case skill name.
+ */
+async function forget(root: string, name: string): Promise<void> {
+  const skills = await readManifest(root)
+  if (!skills.delete(name)) return
+  await writeFile(join(root, MANIFEST), `${JSON.stringify({ skills: [...skills].sort() }, null, 2)}\n`)
+}
+
+/**
+ * Render one skill bundle body with its frontmatter. The description is a
+ * JSON-quoted YAML scalar so a colon or `#` cannot silently corrupt the
+ * frontmatter the catalog parser reads.
  * @param name - kebab-case skill name.
  * @param description - one-line discovery text.
  * @param body - instruction markdown.
  * @returns the complete `SKILL.md` content.
  */
 function renderSkill(name: string, description: string, body: string): string {
-  return `---\nname: ${name}\ndescription: ${description}\n---\n\n${body.trim()}\n`
+  return `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n---\n\n${body.trim()}\n`
 }
 
 /**
@@ -48,8 +92,15 @@ function renderSkill(name: string, description: string, body: string): string {
  */
 async function readDescription(path: string): Promise<string> {
   const text = await readFile(path, 'utf8')
-  const match = /^description:\s*(.+)$/m.exec(text)
-  return match?.[1]?.trim() ?? ''
+  const raw = /^description:\s*(.+)$/m.exec(text)?.[1]?.trim() ?? ''
+  if (!raw.startsWith('"')) return raw
+  try {
+    const value: unknown = JSON.parse(raw)
+    return typeof value === 'string' ? value : ''
+  } catch {
+    // A hand-written value that merely starts with a quote stays verbatim.
+    return raw
+  }
 }
 
 /**
@@ -82,14 +133,20 @@ export function apply(ctx: Context, config: Config): void {
     },
     async execute(args) {
       if (!SKILL_NAME.test(args.name)) throw new Error('skill_create: name must be kebab-case, at most 63 characters')
+      if (/[\r\n]/.test(args.description)) throw new Error('skill_create: description must be one line')
       const directory = join(root, args.name)
       const path = join(directory, 'SKILL.md')
-      if (args.overwrite !== true) {
-        const exists = await stat(directory).then(() => true, () => false)
-        if (exists) throw new Error(`skill_create: skill "${args.name}" already exists; pass overwrite to replace it`)
+      const exists = await stat(directory).then(() => true, () => false)
+      if (exists) {
+        if (args.overwrite !== true) throw new Error(`skill_create: skill "${args.name}" already exists; pass overwrite to replace it`)
+        const owned = await readManifest(root)
+        if (!owned.has(args.name)) {
+          throw new Error(`skill_create: skill "${args.name}" was created outside this tool; choose another name or ask the user to remove it first`)
+        }
       }
       await mkdir(directory, { recursive: true })
       await writeFile(path, renderSkill(args.name, args.description, args.body), 'utf8')
+      await remember(root, args.name)
       return { name: args.name, path }
     },
   }))
@@ -155,7 +212,14 @@ export function apply(ctx: Context, config: Config): void {
       if (!SKILL_NAME.test(args.name)) throw new Error('skill_delete: name must be kebab-case, at most 63 characters')
       const directory = join(root, args.name)
       const exists = await stat(directory).then(() => true, () => false)
-      if (exists) await rm(directory, { recursive: true, force: true })
+      if (exists) {
+        const owned = await readManifest(root)
+        if (!owned.has(args.name)) {
+          throw new Error(`skill_delete: skill "${args.name}" was created outside this tool; ask the user to remove it`)
+        }
+        await rm(directory, { recursive: true, force: true })
+        await forget(root, args.name)
+      }
       return { removed: exists }
     },
   }))

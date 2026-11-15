@@ -56,6 +56,7 @@ const deviceServer = (command: string): z<Partial<DeviceServer>, DeviceServer> =
   command: z.string().default(command),
   args: z.array(String).default(['mcp']),
   endpoint: z.string().default(''),
+  devices: z.array(String).default([]),
 })
 
 /** Product composition schema; no device server starts until explicitly enabled. */
@@ -106,9 +107,15 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     if (isStopped()) return
     const plain: IntegrationConfig = { ...next, adh: { ...next.adh, args: [...next.adh.args] },
       idh: { ...next.idh, args: [...next.idh.args] } }
-    child = ctx.plugin(mountIntegration, plain)
-    await child.await()
-    previous = key
+    try {
+      child = ctx.plugin(mountIntegration, plain)
+      await child.await()
+      previous = key
+    } catch (error) {
+      // Keep the settings namespace alive so Official components stays configurable.
+      child = undefined
+      ctx.logger.error(error)
+    }
   }
   const isStopped = (): boolean => stopped
   ctx.on('loader/volatile-update', () => {
@@ -121,9 +128,6 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
 
 async function mountIntegration(ctx: Context, config: IntegrationConfig): Promise<void> {
   const { wdh } = config
-  if (wdh.enabled && (!isAbsolute(wdh.entry) || !isAbsolute(wdh.dataDirectory))) {
-    throw new Error('DecryptHub WDH: entry and dataDirectory must be absolute paths; configure the installed component first.')
-  }
   const devices = new Map<'adh' | 'idh', () => Promise<void>>()
   for (const serverName of ['adh', 'idh'] as const) {
     const server = config[serverName]
@@ -146,6 +150,19 @@ async function mountIntegration(ctx: Context, config: IntegrationConfig): Promis
   }
   if (!wdh.enabled) return
 
+  const components = ctx.get('decrypthubComponents')
+  const entry = components === undefined ? wdh.entry : await components.wdhEntry(wdh.entry)
+  let dataDirectory = wdh.dataDirectory
+  if (!isAbsolute(dataDirectory)) {
+    const home = process.env.DSH_HOME
+    if (typeof home === 'string' && isAbsolute(home)) dataDirectory = join(home, 'wdh')
+  }
+  if (!isAbsolute(entry) || !isAbsolute(dataDirectory)) {
+    // Do not fail the plugin: Official components needs this settings namespace to stay editable.
+    ctx.logger.warn('DecryptHub WDH: entry and dataDirectory must be absolute paths; WDH stays disconnected until an official component is installed.')
+    return
+  }
+
   const bindings = new Map<Agent, Binding>()
   const operations = new Map<Agent, Promise<void>>()
   let stopped = false
@@ -162,31 +179,30 @@ async function mountIntegration(ctx: Context, config: IntegrationConfig): Promis
   const bind = async (agent: Agent): Promise<void> => {
     if (stopped) return
     const cwd = ctx.workingDirectory.get(agent.session)
-    const components = ctx.get('decrypthubComponents')
-    const entry = components === undefined ? wdh.entry : await components.wdhEntry(wdh.entry)
+    const liveComponents = ctx.get('decrypthubComponents')
+    const nextEntry = liveComponents === undefined ? entry : await liveComponents.wdhEntry(entry)
     const previous = bindings.get(agent)
-    if (previous?.cwd === cwd && previous.entry === entry) return
+    if (previous?.cwd === cwd && previous.entry === nextEntry) return
     if (previous !== undefined) await retire(previous)
     // oxlint-disable-next-line typescript/no-unnecessary-condition -- Teardown may set stopped while transport closure is awaited.
     if (stopped) return
     const directoryKey = createHash('sha256').update(`${agent.id}\0${cwd}`).digest('hex')
     const handle = agent.ctx.plugin(McpClient, {
       transport: 'stdio', serverName: 'wdh', command: process.execPath,
-      args: [entry, 'mcp', '--browser', wdh.browser, '--root', cwd,
-        '--data-dir', join(wdh.dataDirectory, directoryKey), '--kernel-dir', wdh.dataDirectory],
+      args: [nextEntry, 'mcp', '--browser', wdh.browser, '--root', cwd,
+        '--data-dir', join(dataDirectory, directoryKey), '--kernel-dir', dataDirectory],
       env: {}, cwd, startupTimeoutMs: config.startupTimeoutMs,
       closeTimeoutMs: config.closeTimeoutMs, toolCallTimeoutMs: config.toolCallTimeoutMs,
     })
-    const binding: Binding = { cwd, entry, handle }
+    const binding: Binding = { cwd, entry: nextEntry, handle }
     bindings.set(agent, binding)
     await handle.await()
     const status = McpClient.connectionStatusOf(handle)
-    if (components !== undefined && status !== undefined) {
-      binding.unobserve = components.observeWdh(agent.id, cwd, () => status.current(), listener => status.onChange(listener))
+    if (liveComponents !== undefined && status !== undefined) {
+      binding.unobserve = liveComponents.observeWdh(agent.id, cwd, () => status.current(), listener => status.onChange(listener))
     }
   }
 
-  const components = ctx.get('decrypthubComponents')
   if (components !== undefined) ctx.effect(() => components.registerReconnect('wdh', async () => {
     for (const [agent, binding] of bindings) {
       await operations.get(agent)

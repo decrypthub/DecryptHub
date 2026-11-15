@@ -1018,6 +1018,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'updated local state.',
       },
       {
+        signature: '@Remote async uninstall(id: ComponentId): Promise<ComponentsSnapshot>',
+        description: 'Remove a managed official installation; packaged WDH remains when the deployment ships one.',
+        parameters: [{ name: 'id', description: 'component identity.' }],
+        returns: 'updated local state after the activation pointer moves.',
+      },
+      {
         signature: 'async wdhEntry(fallback: string): Promise<string>',
         description: 'Resolve the verified WDH entry or the deployment fallback.',
         parameters: [{ name: 'fallback', description: 'explicitly configured local WDH entry.' }],

@@ -24,6 +24,8 @@ Inspect WDH, ADH and IDH availability, check official releases, and activate ver
 
 The DecryptHub Web composition mounts this owner-only Remote service with an absolute component directory. Optional bundledWdhEntry points to the packaged WDH CLI. The official components page requests snapshots, reviewed installs, cancellation, rollback, browser inspection and revision-checked connection settings. No catalog request occurs until the user checks for updates.
 
+`importPreview` and `importRun` copy the conversations of a selected official Harness home into this product home, and nothing else. Conversations are the only stable interchange unit: the session JSONL format is versioned with an explicit migration contract. Sessions are copied one `<projectKey>/<sessionId>` directory at a time, only memberships whose stored log exists are adopted, and sessions whose physical compression differs from the destination root are skipped with a count. The projection cache is copied for the imported sessions so their titles survive; the JSON workspace fallback is rewritten through a temporary file. Tasks, model credentials and plugins are intentionally not imported: they are internal versioned files whose version skew would break the destination, and a plugin bundle needs a real installation path rather than a file copy.
+
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 
@@ -45,6 +47,8 @@ Indirectly, reconnecting may change tool definitions.
 - Only code-owned DecryptHub repositories and compatible archives with published SHA-256 digests can install.
 - Managed device runtimes require Python 3.10 or newer. Device authorization and live target verification are not performed by this service.
 - Download and device behavior still require verification against actual releases and supported devices.
+- **Harness import copies conversations only** — tasks, model credentials and plugins are not imported; the import page exposes one conversation category, while model routing, automation and plugins stay on their own pages.
+- **One log compression per destination** — plaintext and Zstandard generations cannot share a session root; the import skips the incompatible side instead of breaking the destination backend, and the result reports how many sessions were skipped.
 
 <a id="dev-note"></a>
 ### Dev Note

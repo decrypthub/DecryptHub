@@ -405,12 +405,18 @@ importers:
       '@deepseek-ai/dsh-launch-environment':
         specifier: workspace:*
         version: link:../../packages/util/launch-environment
+      '@deepseek-ai/dsh-mcp-bundle':
+        specifier: workspace:*
+        version: link:../../packages/bundle/mcp-bundle
       '@deepseek-ai/dsh-mcp-client':
         specifier: workspace:*
         version: link:../../packages/mcp/mcp-client
       '@deepseek-ai/dsh-mcp-resources':
         specifier: workspace:*
         version: link:../../packages/mcp/mcp-resources
+      '@deepseek-ai/dsh-memory-bundle':
+        specifier: workspace:*
+        version: link:../../packages/bundle/memory-bundle
       '@deepseek-ai/dsh-official-bundles':
         specifier: workspace:*
         version: link:../../packages/util/official-bundles
@@ -2773,6 +2779,35 @@ importers:
         specifier: workspace:*
         version: link:../../interaction/user-approval
 
+  packages/bundle/mcp-bundle:
+    dependencies:
+      '@deepseek-ai/dsh-client-ui-mcp':
+        specifier: workspace:*
+        version: link:../../client/ui-mcp
+      '@deepseek-ai/dsh-tool-skill-manage':
+        specifier: workspace:*
+        version: link:../../skill/tool-skill-manage
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+
+  packages/bundle/memory-bundle:
+    dependencies:
+      '@deepseek-ai/dsh-client-ui-decrypthub-settings':
+        specifier: workspace:*
+        version: link:../../client/ui-decrypthub-settings
+      '@deepseek-ai/dsh-product-memory':
+        specifier: workspace:*
+        version: link:../../host/product-memory
+      '@deepseek-ai/dsh-product-persona':
+        specifier: workspace:*
+        version: link:../../host/product-persona
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+
   packages/bundle/sdk-app:
     dependencies:
       '@deepseek-ai/dsh-client-connection':
@@ -3044,9 +3079,6 @@ importers:
       '@deepseek-ai/dsh-client-ui-cordis':
         specifier: workspace:*
         version: link:../../extensions/ui-cordis
-      '@deepseek-ai/dsh-client-ui-decrypthub-settings':
-        specifier: workspace:*
-        version: link:../../client/ui-decrypthub-settings
       '@deepseek-ai/dsh-client-ui-deliverables':
         specifier: workspace:*
         version: link:../../client/ui-deliverables
@@ -3077,9 +3109,6 @@ importers:
       '@deepseek-ai/dsh-client-ui-layout':
         specifier: workspace:*
         version: link:../../client/ui-layout
-      '@deepseek-ai/dsh-client-ui-mcp':
-        specifier: workspace:*
-        version: link:../../client/ui-mcp
       '@deepseek-ai/dsh-client-ui-message-feedback':
         specifier: workspace:*
         version: link:../../client/ui-message-feedback
@@ -3284,12 +3313,6 @@ importers:
       '@deepseek-ai/dsh-plugin-market':
         specifier: workspace:*
         version: link:../../boot/plugin-market
-      '@deepseek-ai/dsh-product-memory':
-        specifier: workspace:*
-        version: link:../../host/product-memory
-      '@deepseek-ai/dsh-product-persona':
-        specifier: workspace:*
-        version: link:../../host/product-persona
       '@deepseek-ai/dsh-schedule':
         specifier: workspace:*
         version: link:../../schedule/schedule
@@ -3365,9 +3388,6 @@ importers:
       '@deepseek-ai/dsh-tool-skill':
         specifier: workspace:*
         version: link:../../skill/tool-skill
-      '@deepseek-ai/dsh-tool-skill-manage':
-        specifier: workspace:*
-        version: link:../../skill/tool-skill-manage
       '@deepseek-ai/dsh-tool-subagent':
         specifier: workspace:*
         version: link:../../subagent/tool-subagent
@@ -4418,6 +4438,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-layout':
         specifier: workspace:*
         version: link:../ui-layout
+      '@deepseek-ai/dsh-client-ui-primitives':
+        specifier: workspace:*
+        version: link:../ui-primitives
       '@deepseek-ai/dsh-client-ui-renderer':
         specifier: workspace:*
         version: link:../ui-renderer
@@ -4430,6 +4453,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-slots':
         specifier: workspace:*
         version: link:../ui-slots
+      '@deepseek-ai/dsh-client-ui-workspace':
+        specifier: workspace:*
+        version: link:../ui-workspace
       '@deepseek-ai/dsh-settings':
         specifier: workspace:*
         version: link:../../settings/settings
@@ -4439,6 +4465,9 @@ importers:
       '@testing-library/react':
         specifier: ^16.3.3
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      clsx:
+        specifier: ^2.1.1
+        version: 2.1.1
       react:
         specifier: ^18.2.0
         version: 18.3.1
@@ -4962,6 +4991,9 @@ importers:
       '@deepseek-ai/dsh-api-remotes':
         specifier: workspace:*
         version: link:../../api/remotes
+      '@deepseek-ai/dsh-api-session-controller':
+        specifier: workspace:*
+        version: link:../../api/session-controller
       '@deepseek-ai/dsh-client-locale':
         specifier: workspace:*
         version: link:../locale
@@ -4971,6 +5003,9 @@ importers:
       '@deepseek-ai/dsh-client-test-runtime':
         specifier: workspace:*
         version: link:../../test-support/client-runtime
+      '@deepseek-ai/dsh-client-ui-conversation':
+        specifier: workspace:*
+        version: link:../ui-conversation
       '@deepseek-ai/dsh-client-ui-layout':
         specifier: workspace:*
         version: link:../ui-layout
@@ -4980,6 +5015,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-renderer':
         specifier: workspace:*
         version: link:../ui-renderer
+      '@deepseek-ai/dsh-client-ui-session':
+        specifier: workspace:*
+        version: link:../ui-session
       '@deepseek-ai/dsh-client-ui-settings':
         specifier: workspace:*
         version: link:../ui-settings
@@ -4989,6 +5027,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-slots':
         specifier: workspace:*
         version: link:../ui-slots
+      '@deepseek-ai/dsh-client-ui-workspace':
+        specifier: workspace:*
+        version: link:../ui-workspace
       '@deepseek-ai/dsh-decrypthub-components':
         specifier: workspace:*
         version: link:../../mcp/decrypthub-components
@@ -12874,6 +12915,9 @@ importers:
       '@deepseek-ai/cordis':
         specifier: workspace:~
         version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-agent':
+        specifier: workspace:*
+        version: link:../../core/agent
       '@deepseek-ai/dsh-llm':
         specifier: workspace:*
         version: link:../../llm/llm
@@ -15479,6 +15523,9 @@ importers:
       '@deepseek-ai/dsh-llm':
         specifier: workspace:*
         version: link:../../llm/llm
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:*
+        version: link:../../core/session
       '@deepseek-ai/dsh-session-query':
         specifier: workspace:*
         version: link:../../session-query/session-query

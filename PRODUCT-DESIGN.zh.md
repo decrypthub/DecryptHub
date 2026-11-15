@@ -2,7 +2,7 @@
 
 [English](PRODUCT-DESIGN.md) | 中文
 
-DecryptHub 是基于 DeepSeek Harness 发展的独立产品分支，兼容 DSH 的插件和配置是产品要求；全局记忆、自定义 MCP、官方 MCP 和分析工作台也是必须保留的产品能力。DSH 承载会话与执行，DecryptHub 决定功能、导航和交互。旧设计依据来自 [UI 系统](../DecryptHub-Desktop/docs/ui-system.md)、[工作标签](../DecryptHub-Desktop/docs/workspace-tabs.md)、[组件架构](../DecryptHub-Desktop/docs/component-architecture.md)、[插件管理](../DecryptHub-Desktop/docs/plugins.md)和[思考强度选择](../DecryptHub-Desktop/docs/thinking-slider-20261104.md)。旧 Tauri 源码与用户数据保留在原目录。
+DecryptHub 是基于 DeepSeek Harness 发展的独立产品分支，兼容 DSH 的插件和配置是产品要求；全局记忆、自定义 MCP、官方 MCP 和分析工作台也是必须保留的产品能力。DSH 承载会话与执行，DecryptHub 决定功能、导航和交互。旧设计依据来自 [UI 系统](../DecryptHub-Desktop/docs/ui-system.md)、[工作标签](../DecryptHub-Desktop/docs/workspace-tabs.md)、[组件架构](../DecryptHub-Desktop/docs/component-architecture.md)和[插件管理](../DecryptHub-Desktop/docs/plugins.md)。旧 Tauri 源码与用户数据保留在原目录。
 
 ## 产品与兼容原则
 
@@ -25,8 +25,8 @@ DSH 插件与配置导入需要识别来源和兼容版本，列出可导入项�
 | 全局记忆与技能 | 全局内容跨项目生效，项目与会话内容分别隔离；可查看、按作用域管理和删除 | 旧版实现位于 `ui/src/memory-panel.jsx`，当前新主干的产品管理页与 Agent 读写接入尚未迁移 |
 | 系统记忆 | 产品内置内容和已连接插件的环境说明只读，但可查看正文与来源 | 旧版 `sidecar/system-memory.mjs` 已提供来源与正文；新主干的产品查看页尚未迁移 |
 | 模型渠道 | 保留 DSH 官方 DeepSeek API 适配器和供应商预设；自定义渠道提供三种 API 格式、内部 ID 自动生成、API 地址独占一行 | 使用原有供应商目录、自定义渠道表单、验证、凭据存储和冲突检查 |
-| 思考强度 | 当前英文档位、模型入口、离散滑杆；不带快速或复位按钮 | 使用模型声明与 Radix Slider，保留 DSH 模型搜索与 Host 保存流程 |
-| Agent 模式 | 保留手动预设切换、模型菜单的团队开关和 Agent 委派能力 | 启用 DSH 预设入口；思考滑杆下方继续显示团队扩展，保留团队和子代理运行组件 |
+| 思考强度 | 使用 Harness 模型菜单：模型行和思考强度子菜单，档位名称来自当前模型 | 默认 `menu` 呈现，产品不再使用思考滑杆 |
+| Agent 模式 | 保留手动预设切换、模型菜单的团队开关和 Agent 委派能力 | 启用 DSH 预设入口；团队开关留在模型菜单里，保留团队和子代理运行组件 |
 | 自定义 MCP | 服务配置、配置导入、启停、重连、工具与真实连接状态 | `ui-mcp` 已接入带版本检查的配置、JSON 导入预览、启停、重连、工具检查和实时状态 |
 | 官方 MCP 与组件 | WDH / ADH / IDH 使用官方目录、安装、版本与连接管理；与自定义 MCP 分开，安装、连接、目标状态分别呈现 | `ui-mcp` 与 `decrypthub-components` 已接入侧栏及设置管理：校验版本、可取消安装、回滚和独立连接状态；真实发布下载及设备行为仍待验证 |
 | WDH 工作台 | 同一会话共享 WDH 连接，网页、网络请求、脚本调试和 Profile 联动；桌面使用 CloakBrowser | 产品组合选择 Cloak；网页画面、抓包与调试子视图尚未迁移，DSH 普通浏览器标签不视为替代 |
@@ -35,7 +35,7 @@ DSH 插件与配置导入需要识别来源和兼容版本，列出可导入项�
 
 ## 验收要求
 
-交互复用现有服务和成熟控件，产品层不维护第二套 Agent、会话日志或滚动状态机。思考档位只能来自当前模型；拖动预览不写入 Host，提交失败恢复受控选择，旧请求不得清除较新的预览。API 渠道保持原有凭据处理和设置修订检查。
+交互复用现有服务和成熟控件，产品层不维护第二套 Agent、会话日志或滚动状态机。思考档位只能来自当前模型，并使用 Harness 的档位菜单。API 渠道保持原有凭据处理和设置修订检查。
 
 组件页面只有读取真实安装、连接和目标信息后才能报告相应状态。安装了 CLI 不表示设备连接成功，建立 MCP 连接不表示已选中目标。未接入的能力不以静态“就绪”卡片或无实际作用的按钮代替。
 

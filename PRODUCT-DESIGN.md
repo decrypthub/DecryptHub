@@ -2,7 +2,7 @@
 
 English | [中文](PRODUCT-DESIGN.zh.md)
 
-DecryptHub is an independent product fork of DeepSeek Harness. Importing compatible DSH plugins and configuration is a product requirement, alongside global memory, custom MCP, official MCP, and the analysis workbench. DSH owns sessions and execution; DecryptHub owns features, navigation, and interaction. The existing design sources are [UI system](../DecryptHub-Desktop/docs/ui-system.md), [work tabs](../DecryptHub-Desktop/docs/workspace-tabs.md), [component architecture](../DecryptHub-Desktop/docs/component-architecture.md), [plugin management](../DecryptHub-Desktop/docs/plugins.md), and [reasoning selection](../DecryptHub-Desktop/docs/thinking-slider-20261104.md). The old Tauri source and user data remain in their original directories.
+DecryptHub is an independent product fork of DeepSeek Harness. Importing compatible DSH plugins and configuration is a product requirement, alongside global memory, custom MCP, official MCP, and the analysis workbench. DSH owns sessions and execution; DecryptHub owns features, navigation, and interaction. The existing design sources are [UI system](../DecryptHub-Desktop/docs/ui-system.md), [work tabs](../DecryptHub-Desktop/docs/workspace-tabs.md), [component architecture](../DecryptHub-Desktop/docs/component-architecture.md), and [plugin management](../DecryptHub-Desktop/docs/plugins.md). The old Tauri source and user data remain in their original directories.
 
 ## Product and compatibility principles
 
@@ -25,8 +25,8 @@ The model page retains the DSH provider catalog and offers three API formats for
 | Global memory and skills | Global content across projects, isolated project and session content; viewing, scope-aware management, and deletion | Existing implementation is in `ui/src/memory-panel.jsx`; the new product management page and Agent read/write integration still await migration |
 | System memory | Read-only product content and connected-plugin environment instructions, with readable bodies and sources | Existing `sidecar/system-memory.mjs` provides sources and bodies; the new product viewer still awaits migration |
 | API channels | Retain the DSH official DeepSeek API adapter and provider catalog; custom channels offer three API formats, generated internal identities, and a full-width endpoint field | Existing provider catalog, custom-channel forms, validation, credentials, and revision checks |
-| Reasoning | Current English level, model entry, discrete slider; no fast or reset button | Model declarations and Radix Slider; retain DSH model search and Host persistence |
-| Agent mode | Retain manual preset selection, the model-menu team switch, and Agent delegation | DSH preset entry enabled; team extensions remain below the reasoning slider, with team and subagent activity retained |
+| Reasoning | Harness model menu: model row and effort submenu, with level names from the selected model | Default `menu` presentation; no product reasoning slider |
+| Agent mode | Retain manual preset selection, the model-menu team switch, and Agent delegation | DSH preset entry enabled; the team switch stays in the model menu, with team and subagent activity retained |
 | Custom MCP | Server configuration, configuration import, enablement, reconnection, tools, and actual connection state | Implemented in `ui-mcp`: revision-checked forms, reviewed JSON imports, enablement, reconnect, tool inspection and live state |
 | Official MCP and components | Official WDH / ADH / IDH catalog, installation, versions, and connection management; separate from custom MCP with distinct installation, connection, and target state | Sidebar and settings management implemented in `ui-mcp` and `decrypthub-components`: verified versions, cancellable installs, rollback and separate connection state; actual release downloads and device behavior still require validation |
 | WDH workbench | One shared connection per session, linked webpage, network, debugger, and Profile; CloakBrowser on Desktop | Product composition selects Cloak; page rendering, capture, and debugging subviews still await migration; the ordinary DSH browser tab is not their replacement |
@@ -35,7 +35,7 @@ The model page retains the DSH provider catalog and offers three API formats for
 
 ## Acceptance requirements
 
-Interactions reuse existing services and maintained controls. The product layer owns no second Agent, session log, or scroll state machine. Reasoning levels come only from the selected model. Drag previews do not write to the Host; failed submissions restore the controlled selection and older completions cannot clear newer previews. API channels retain credential handling and settings revision checks.
+Interactions reuse existing services and maintained controls. The product layer owns no second Agent, session log, or scroll state machine. Reasoning levels come only from the selected model and use the Harness effort menu. API channels retain credential handling and settings revision checks.
 
 Component pages report installation, connection, and target facts only after reading their actual sources. Installing a CLI does not establish a device connection; connecting MCP does not select a target. Pending capabilities are not represented by static “Ready” cards or inactive action buttons.
 

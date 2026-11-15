@@ -3,14 +3,15 @@ import { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService, principalOf } from '@deepseek-ai/dsh-typert-protocol'
 import Schema from '@deepseek-ai/schemastery'
 import { promises as fs } from 'node:fs'
-import { isAbsolute, join } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { z } from 'zod'
-import { componentExecutable, componentIds, ComponentFiles } from './files.ts'
-import { downloadComponent, fetchComponentRelease, type ComponentRelease } from './releases.ts'
+import { componentExecutable, componentIds, ComponentFiles, probeCommandVersion } from './files.ts'
+import { defaultHarnessHome, previewHarnessImport, runHarnessImport, type AdoptedGroups, type ImportedWorkspace } from './harness-import.ts'
+import { componentFeedBaseUrl, downloadComponent, fetchComponentRelease, fetchFeedRelease, type ComponentRelease } from './releases.ts'
 import { extractComponentZip } from './zip.ts'
-import type { ComponentId, ComponentOperation, ComponentsSnapshot, InstalledComponent, WdhConnectionView } from './types.ts'
+import type { ComponentId, ComponentOperation, ComponentsSnapshot, ImportItem, ImportKind, ImportResult, InstalledComponent, WdhConnectionView } from './types.ts'
 import type { McpConnectionStatus } from '@deepseek-ai/dsh-mcp-client/types'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-settings'
@@ -18,6 +19,7 @@ import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-mcp-manager'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import type { BrowserKernelView } from './types.ts'
+import { probeTools } from './tool-probe.ts'
 export type { ComponentId, ComponentOperation, ComponentView, ComponentsSnapshot, InstalledComponent, WdhConnectionView } from './types.ts'
 
 /** Deployment-owned directories; no catalog can choose an executable. */
@@ -28,6 +30,8 @@ export interface Config {
   bundledWdhEntry: string
   /** Local Python interpreter used for managed device components. */
   pythonCommand: string
+  /** Operator-owned release feed origin; empty keeps the code-owned GitHub repositories. */
+  componentFeed: string
   /** Deadline for release metadata and browser file inspection. */
   requestTimeoutMs: number
   /** Deadline for component and browser downloads. */
@@ -38,6 +42,7 @@ export interface Config {
 /** Validated component deployment configuration. */
 export const Config = Schema.object({
   directory: Schema.string().required(), bundledWdhEntry: Schema.string().default(''), pythonCommand: Schema.string().default('python3'),
+  componentFeed: Schema.string().default(''),
   requestTimeoutMs: Schema.number().min(1).default(20_000), downloadTimeoutMs: Schema.number().min(1).default(600_000),
   processGraceMs: Schema.number().min(1).default(3000),
 })
@@ -59,11 +64,17 @@ export class DecryptHubComponents extends TypertRemoteService {
   static Config = Config
   static inject = ['settings', 'agents', 'mcpManager', 'subprocess']
   private readonly files: ComponentFiles
+  private readonly feed: URL | undefined
   private readonly catalog = new Map<ComponentId, ComponentRelease | null>()
   private readonly catalogErrors = new Map<ComponentId, string>()
   private readonly operations = new Map<ComponentId, ComponentOperation>()
   private readonly jobs = new Map<ComponentId, { controller: AbortController; done: Promise<void> }>()
   private readonly wdh = new Map<string, WdhConnectionView>()
+  /** Last measured WDH tool count; measured on demand, not tied to a live session. */
+  private wdhTools: number | null = null
+  private readonly measuring = new Map<ComponentId, Promise<string[] | null>>()
+  /** Cached `command --version` tokens keyed by absolute executable path. */
+  private readonly localVersions = new Map<string, string | null>()
   private readonly listeners = new Set<() => void>()
   private readonly lifetime = new AbortController()
   private revision = 0
@@ -78,6 +89,7 @@ export class DecryptHubComponents extends TypertRemoteService {
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'decrypthubComponents', { namespace: 'decrypthubComponents' })
     if (!isAbsolute(config.directory) || (config.bundledWdhEntry && !isAbsolute(config.bundledWdhEntry))) throw new Error('Component directories must be absolute')
+    this.feed = config.componentFeed.trim() === '' ? undefined : componentFeedBaseUrl(config.componentFeed.trim())
     this.files = new ComponentFiles(config.directory, config.bundledWdhEntry)
     ctx.on('settings/document-updated', (ns) => {
       if (ns === 'decrypthub-integrations') { this.browser = { state: 'unchecked', version: null }; this.changed() }
@@ -97,6 +109,81 @@ export class DecryptHubComponents extends TypertRemoteService {
 
   private changed(): void { this.revision++; for (const listener of this.listeners) listener() }
 
+  /** Describe official Harness data that can be copied into this product home.
+   * @param source - harness home; empty uses `~/.dsh`.
+   * @returns counts and a planning duration for each category.
+   */
+  @Remote
+  async importPreview(source: string): Promise<{ source: string; items: ImportItem[] }> {
+    this.assertOwner()
+    const from = source.trim() === '' ? defaultHarnessHome() : source
+    const destination = process.env.DSH_HOME
+    if (destination === undefined || destination.trim() === '') throw new Error('DSH_HOME is not set')
+    return { source: from, items: [...await previewHarnessImport(from, destination)] }
+  }
+
+  /** Copy the selected categories. Existing rows in this product home stay.
+   * @param source - harness home; empty uses `~/.dsh`.
+   * @param kinds - categories the user selected.
+   * @returns one outcome per selected category.
+   */
+  @Remote
+  async importRun(source: string, kinds: ImportKind[]): Promise<{ results: ImportResult[] }> {
+    this.assertOwner()
+    const from = source.trim() === '' ? defaultHarnessHome() : source
+    const destination = process.env.DSH_HOME
+    if (destination === undefined || destination.trim() === '') throw new Error('DSH_HOME is not set')
+    return { results: [...await runHarnessImport(from, destination, kinds, records => this.adoptWorkspaces(records))] }
+  }
+
+  /** Recreate workspace accounts through the live registry so imported sessions stay grouped.
+   * @param records - workspace accounts read from the source home.
+   * @returns how many groups and session memberships were added.
+   */
+  private async adoptWorkspaces(records: readonly ImportedWorkspace[]): Promise<AdoptedGroups | undefined> {
+    const registry = this.ctx.get('workspaceRegistry')
+    if (registry === undefined) return undefined
+    let workspaces = 0
+    let sessions = 0
+    let skipped = 0
+    let unattached = 0
+    for (const record of records) {
+      try {
+        const info = await fs.stat(record.path)
+        if (!info.isDirectory()) {
+          skipped += 1
+          continue
+        }
+      } catch (error) {
+        skipped += 1
+        this.ctx.logger.warn(`decrypthub-components: workspace "${record.title}" path unavailable: ${error instanceof Error ? error.message : String(error)}`)
+        continue
+      }
+      const existing = registry.list().find((item: { path: string }) => item.path === record.path)
+      let workspace: { sessionIds: readonly string[]; attachSession(sessionId: string): Promise<void> }
+      try {
+        workspace = existing ?? await registry.create(record.path, record.title)
+      } catch (error) {
+        skipped += 1
+        this.ctx.logger.warn(`decrypthub-components: workspace "${record.title}" not created: ${error instanceof Error ? error.message : String(error)}`)
+        continue
+      }
+      if (existing === undefined) workspaces += 1
+      const have = new Set(workspace.sessionIds)
+      for (const sessionId of record.sessionIds) {
+        if (have.has(sessionId)) continue
+        try {
+          await workspace.attachSession(sessionId)
+          sessions += 1
+        } catch (error) {
+          unattached += 1
+          this.ctx.logger.warn(`decrypthub-components: session ${sessionId} not attached to "${record.title}": ${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
+    }
+    return { workspaces, sessions, ...skipped > 0 ? { skipped } : {}, ...unattached > 0 ? { unattached } : {} }
+  }
+
   /** Read actual local installations without performing network requests.
    * @returns component versions, local CLI availability and observed WDH transports.
    */
@@ -104,7 +191,7 @@ export class DecryptHubComponents extends TypertRemoteService {
   async snapshot(): Promise<ComponentsSnapshot> {
     this.assertOwner()
     const namespace = this.ctx.settings.describe({ redactSecrets: true }).find(row => row.ns === 'decrypthub-integrations')
-    const device = z.object({ enabled: z.boolean(), command: z.string(), args: z.array(z.string()), endpoint: z.string().default('') })
+    const device = z.object({ enabled: z.boolean(), command: z.string(), args: z.array(z.string()), endpoint: z.string().default(''), devices: z.array(z.string()).default([]) })
     const configuration = z.object({ wdh: z.object({ enabled: z.boolean(), browser: z.enum(['system', 'cloak']) }), adh: device, idh: device }).safeParse(namespace?.value)
     const components = await Promise.all(componentIds.map(async (id) => {
       let installed: InstalledComponent | null = null
@@ -112,13 +199,58 @@ export class DecryptHubComponents extends TypertRemoteService {
       let localError: string | null = null
       try { installed = await this.files.resolve(id); previousVersion = await this.files.previous(id) }
       catch (_error) { localError = 'Component metadata or checksum verification failed' }
-      return { id, installed, previousVersion, localError,
-        localCommand: id === 'wdh' ? null : await componentExecutable(configuration.success ? configuration.data[id].command : id, process.env.PATH ?? ''),
+      const localCommand = id === 'wdh' ? null
+        : await componentExecutable(configuration.success ? configuration.data[id].command : id, process.env.PATH ?? '')
+      let localVersion: string | null = null
+      if (localCommand !== null) {
+        if (!this.localVersions.has(localCommand)) this.localVersions.set(localCommand, await probeCommandVersion(localCommand))
+        localVersion = this.localVersions.get(localCommand) ?? null
+      }
+      return { id, installed, previousVersion, localError, localCommand, localVersion,
         latestVersion: this.catalog.get(id)?.version ?? null, catalogError: this.catalogErrors.get(id) ?? null,
         operation: this.operations.get(id) ?? null }
     }))
-    return { components, wdh: [...this.wdh.values()], browser: this.browser, configuration: namespace && configuration.success
-      ? { ...configuration.data, revision: namespace.revision, writable: this.ctx.settings.writable } : null }
+    return {
+      components,
+      wdhTools: this.wdhTools,
+      wdh: [...this.wdh.values()],
+      browser: this.browser,
+      configuration: namespace && configuration.success
+        ? { ...configuration.data, revision: namespace.revision, writable: this.ctx.settings.writable }
+        : null,
+    }
+  }
+
+  /** Start one installed component once and list its tools without keeping a connection.
+   * @param id - component whose runtime is started.
+   * @returns the advertised raw tool names, or null when the component cannot start.
+   */
+  @Remote
+  async measureTools(id: ComponentId): Promise<string[] | null> {
+    this.assertOwner()
+    const running = this.measuring.get(id)
+    if (running !== undefined) return running
+    const work = (async (): Promise<string[] | null> => {
+      const home = join(this.config.directory, 'data', id)
+      await fs.mkdir(home, { recursive: true })
+      // A device gateway may be a local CLI, so only WDH needs a managed installation.
+      const installed = id === 'wdh' ? await this.files.resolve(id) : null
+      if (id === 'wdh') {
+        if (installed === null) return null
+        const names = await probeTools(this.ctx, process.execPath, home, [installed.entry, 'mcp', '--root', home,
+          '--data-dir', home, '--kernel-dir', dirname(home)], {})
+        if (names !== null && names.length !== this.wdhTools) { this.wdhTools = names.length; this.changed() }
+        return names
+      }
+      const namespace = this.ctx.settings.describe({ redactSecrets: true }).find(row => row.ns === 'decrypthub-integrations')
+      const entry = z.object({ command: z.string(), args: z.array(z.string()), endpoint: z.string().default('') }).safeParse(
+        (namespace?.value as Record<string, unknown> | undefined)?.[id])
+      if (!entry.success) return null
+      const runtime = await this.runtime(id, entry.data.command || id, entry.data.args, entry.data.endpoint)
+      return probeTools(this.ctx, runtime.command, runtime.cwd ?? home, runtime.args, runtime.env)
+    })().finally(() => { this.measuring.delete(id) })
+    this.measuring.set(id, work)
+    return work
   }
 
   /** Observe version, installation and WDH state changes with a complete initial snapshot.
@@ -150,7 +282,9 @@ export class DecryptHubComponents extends TypertRemoteService {
     if (this.checking !== undefined) return this.checking
     const work = Promise.all(componentIds.map(async (id) => {
       try {
-        this.catalog.set(id, await fetchComponentRelease(id, this.lifetime.signal, this.config.requestTimeoutMs))
+        this.catalog.set(id, this.feed === undefined
+          ? await fetchComponentRelease(id, this.lifetime.signal, this.config.requestTimeoutMs)
+          : await fetchFeedRelease(this.feed, id, this.lifetime.signal, this.config.requestTimeoutMs))
         this.catalogErrors.delete(id)
       } catch (_error) { this.catalogErrors.set(id, 'Unable to check the official release catalog') }
     })).then(async () => { this.changed(); return this.snapshot() })
@@ -170,7 +304,13 @@ export class DecryptHubComponents extends TypertRemoteService {
     if (this.closed || this.jobs.size > 0) throw new Error('Wait for the current component operation to finish')
     const controller = new AbortController()
     this.operations.set(id, { kind: 'component', phase: 'checking', received: 0, total: 0 })
-    const done = this.installOnce(id, expectedVersion, controller.signal).finally(() => { this.jobs.delete(id); this.changed() })
+    const done = this.installOnce(id, expectedVersion, controller.signal).finally(() => {
+      this.jobs.delete(id)
+      // Terminal success/cancel must not keep a sticky progress row in the product UI.
+      const phase = this.operations.get(id)?.phase
+      if (phase === 'installed' || phase === 'cancelled') this.operations.delete(id)
+      this.changed()
+    })
     this.jobs.set(id, { controller, done })
     this.changed()
   }
@@ -183,17 +323,21 @@ export class DecryptHubComponents extends TypertRemoteService {
     }
     try {
       const bounded = AbortSignal.any([signal, AbortSignal.timeout(this.config.downloadTimeoutMs)])
-      const asset = await fetchComponentRelease(id, bounded, this.config.requestTimeoutMs)
+      const asset = this.feed === undefined
+        ? await fetchComponentRelease(id, bounded, this.config.requestTimeoutMs)
+        : await fetchFeedRelease(this.feed, id, bounded, this.config.requestTimeoutMs)
       if (asset === null) throw new Error('No compatible official archive with a published checksum')
       if (asset.version !== expectedVersion) throw new Error('The reviewed component version changed; check updates again')
-      const verified = await fetchComponentRelease(id, bounded, this.config.requestTimeoutMs, asset.releaseId)
-      if (verified === null || verified.assetId !== asset.assetId || verified.sha256 !== asset.sha256
+      const verified = this.feed === undefined
+        ? await fetchComponentRelease(id, bounded, this.config.requestTimeoutMs, asset.releaseId)
+        : await fetchFeedRelease(this.feed, id, bounded, this.config.requestTimeoutMs)
+      if (verified === null || verified.sha256 !== asset.sha256
         || verified.version !== asset.version || verified.name !== asset.name || verified.size !== asset.size) throw new Error('Official release changed; check updates again')
       await fs.mkdir(this.config.directory, { recursive: true })
       stage = await fs.mkdtemp(join(this.config.directory, 'install-'))
       const archive = join(stage, 'component.zip')
       progress({ phase: 'downloading', version: asset.version, total: asset.size })
-      await downloadComponent(verified, archive, bounded, (received) =>{  progress({ received }) })
+      await downloadComponent(verified, archive, bounded, (received) =>{  progress({ received }) }, this.feed)
       const extracted = join(stage, 'package')
       await fs.mkdir(extracted)
       progress({ phase: 'verifying' })
@@ -203,13 +347,20 @@ export class DecryptHubComponents extends TypertRemoteService {
       await this.files.install(extracted, id, verified.version, bounded)
       this.catalog.set(id, verified)
       this.ctx.emit('decrypthub-components/activated', id)
-      progress({ phase: 'installed' })
+      // Drop the progress row immediately; a sticky `installed` phase left the dialog looking unfinished.
+      this.operations.delete(id)
+      this.changed()
     } catch (_error) {
-      progress({ phase: signal.aborted ? 'cancelled' : 'failed',
-        ...signal.aborted ? {} : { error: 'Official component installation failed; check local component status before retrying' } })
+      if (signal.aborted) {
+        this.operations.delete(id)
+        this.changed()
+      } else {
+        progress({ phase: 'failed', error: 'Official component installation failed; check local component status before retrying' })
+      }
     } finally {
       if (stage !== undefined) await fs.rm(stage, { recursive: true, force: true }).catch((_error: unknown) => {
-        progress({ error: 'Temporary installation files could not be cleaned' })
+        const current = this.operations.get(id)
+        if (current?.phase === 'failed') progress({ error: 'Temporary installation files could not be cleaned' })
       })
     }
   }
@@ -235,6 +386,32 @@ export class DecryptHubComponents extends TypertRemoteService {
     this.assertOwner()
     if (this.jobs.size) throw new Error('A component installation is still running')
     await this.files.rollback(id)
+    this.ctx.emit('decrypthub-components/activated', id)
+    this.changed()
+    return this.snapshot()
+  }
+
+  /** Remove a managed official installation; packaged WDH remains when the deployment ships one.
+   * @param id - component identity.
+   * @returns updated local state after the activation pointer moves.
+   */
+  @Remote
+  async uninstall(id: ComponentId): Promise<ComponentsSnapshot> {
+    this.assertOwner()
+    if (this.jobs.size) throw new Error('A component installation is still running')
+    const installed = await this.files.resolve(id)
+    if (installed === null || installed.source !== 'managed') throw new Error('Only a downloaded component can be removed')
+    await this.files.uninstall(id)
+    if (id === 'wdh') this.browser = { state: 'unchecked', version: null }
+    try {
+      const namespace = this.ctx.settings.describe({ redactSecrets: true }).find(row => row.ns === 'decrypthub-integrations')
+      const enabled = z.object({ [id]: z.object({ enabled: z.boolean() }).passthrough() }).passthrough().safeParse(namespace?.value)
+      if (namespace && enabled.success && enabled.data[id]?.enabled === true) {
+        await this.ctx.settings.mutate('decrypthub-integrations', [{ op: 'set', path: [id, 'enabled'], value: false }], namespace.revision)
+      }
+    } catch (_error) {
+      // Settings may be unavailable; the installation pointer is already cleared.
+    }
     this.ctx.emit('decrypthub-components/activated', id)
     this.changed()
     return this.snapshot()
@@ -288,7 +465,12 @@ export class DecryptHubComponents extends TypertRemoteService {
    */
   observeWdh(agentId: SessionId, workspace: string, read: () => McpConnectionStatus,
     subscribe: (listener: () => void) => () => void): () => void {
-    const update = (): void => { this.wdh.set(agentId, { agentId, workspace, status: read() }); this.changed() }
+    const update = (): void => {
+      const status = read()
+      if (status.state === 'connected' && status.toolCount > 0) this.wdhTools = status.toolCount
+      this.wdh.set(agentId, { agentId, workspace, status })
+      this.changed()
+    }
     const stop = subscribe(update)
     update()
     return () => { stop(); this.wdh.delete(agentId); this.changed() }
@@ -335,7 +517,8 @@ export class DecryptHubComponents extends TypertRemoteService {
   @Remote
   async configure(id: ComponentId, enabled: boolean, command: string, args: string[], endpoint: string,
     browser: 'system' | 'cloak', expectedRevision: number): Promise<void> {
-    this.assertOwner(); this.assertIdle()
+    // Enabling only changes what the next session loads; running sessions keep their connections.
+    this.assertOwner()
     if (this.jobs.size) throw new Error('A component operation is still running')
     if (endpoint) {
       const url = new URL(endpoint)
@@ -401,11 +584,12 @@ export class DecryptHubComponents extends TypertRemoteService {
     const done = (async () => {
       try {
         await this.browserCommand(['kernel', 'install', 'cloak'], AbortSignal.any([controller.signal, this.lifetime.signal, AbortSignal.timeout(this.config.downloadTimeoutMs)]))
-        this.operations.set('wdh', { kind: 'browser', phase: 'installed', received: 0, total: 0 })
         await this.inspectBrowser()
+        this.operations.delete('wdh')
       } catch (_error) {
         this.operations.set('wdh', { kind: 'browser', phase: controller.signal.aborted ? 'cancelled' : 'failed', received: 0, total: 0,
           ...controller.signal.aborted ? {} : { error: 'Browser kernel installation failed; inspect the browser state before retrying' } })
+        if (controller.signal.aborted) this.operations.delete('wdh')
       } finally { this.jobs.delete('wdh'); this.changed() }
     })()
     this.jobs.set('wdh', { controller, done }); this.changed()

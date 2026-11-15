@@ -57,13 +57,14 @@ describe('MCP settings source', () => {
 
 describe('official component observations', () => {
   it('retains an observed snapshot on stream failure and closes subscriptions on reset', async () => {
-    const value: ComponentsSnapshot = { components: [], wdh: [], configuration: null, browser: { state: 'unchecked', version: null } }
+    const value: ComponentsSnapshot = { components: [], wdhTools: null, wdh: [], configuration: null, browser: { state: 'unchecked', version: null } }
     const signals: AbortSignal[] = []
     const ops: ComponentsOperations = {
       async *watch(signal) { signals.push(signal); yield value; throw new Error('disconnected') },
       connections: signal => waiting(signal), snapshot: async () => value,
-      checkUpdates: async () => {}, install: async () => {}, cancel: async () => {}, rollback: async () => {},
-      configure: async () => {}, reconnect: async () => {}, inspectBrowser: async () => {}, installBrowser: async () => {},
+      checkUpdates: async () => {}, install: async () => {}, cancel: async () => {}, rollback: async () => {}, uninstall: async () => {},
+      configure: async () => {}, reconnect: async () => {},
+      inspectBrowser: async () => {}, installBrowser: async () => {}, measureTools: async () => null,
     }
     const source = new ComponentsSource(ops)
     source.load()

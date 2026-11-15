@@ -12,10 +12,12 @@ export interface ComponentsOperations {
   install(id: ComponentId, version: string): Promise<unknown>
   cancel(id: ComponentId): Promise<unknown>
   rollback(id: ComponentId): Promise<unknown>
+  uninstall(id: ComponentId): Promise<unknown>
   configure(id: ComponentId, config: OfficialConfiguration): Promise<unknown>
   reconnect(id: ComponentId): Promise<unknown>
   inspectBrowser(): Promise<unknown>
   installBrowser(accepted: boolean): Promise<unknown>
+  measureTools(id: ComponentId): Promise<unknown>
 }
 /** Retained state distinguishes observation failures from known installation facts. */
 export interface ComponentsState {
@@ -77,6 +79,14 @@ export class ComponentsSource {
     this.store.set({ ...this.store.getSnapshot(), busy: true })
     try { await command(this.operations) }
     finally { this.finish() }
+  }
+
+  /** Run a background observation that must not lock the editor controls.
+   * @param command - read-only or status-refresh operation.
+   */
+  async observe<T>(command: (operations: ComponentsOperations) => Promise<T>): Promise<T | undefined> {
+    if (!this.live) return undefined
+    return command(this.operations)
   }
   private finish(): void { if (this.live) this.store.set({ ...this.store.getSnapshot(), busy: false }) }
 

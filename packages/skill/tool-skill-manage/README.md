@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Gives the model three tools over one writable skill root: `skill_create` writes `<name>/SKILL.md` with frontmatter, `skill_list` reads the stored bundles, and `skill_delete` removes one. The same directory is mounted as a `skill-filesystem` root, so an authored skill reaches the next step's catalog through the upstream watcher instead of a private code path.
+Gives the model three tools over one writable skill root: `skill_create` writes `<name>/SKILL.md` with frontmatter, `skill_list` reads the stored bundles, and `skill_delete` removes one. The description is a JSON-quoted YAML scalar and must stay on one line, so punctuation cannot silently break the frontmatter the catalog parser reads. The same directory is mounted as a `skill-filesystem` root, so an authored skill reaches the next step's catalog through the upstream watcher instead of a private code path. The tool records the names it created in `.created-by-agent.json` and refuses to overwrite or delete a skill it does not own, so a model cannot destroy a hand-written skill.
 
 ## Table of Contents
 
@@ -21,7 +21,7 @@ Gives the model three tools over one writable skill root: `skill_create` writes 
 
 ## Use this package
 
-Mount the plugin with `directory` pointing at the writable root, and give `dsh-skill-filesystem` the same directory under `roots`. Names are kebab-case so the directory, catalog id, and `/name` invocation agree; a create without `overwrite` refuses to replace an existing skill.
+Mount the plugin with `directory` pointing at the writable root, and give `dsh-skill-filesystem` the same directory under `roots`. Names are kebab-case so the directory, catalog id, and `/name` invocation agree; a create without `overwrite` refuses to replace an existing skill, and both `overwrite` and `skill_delete` additionally require the skill to be tool-authored.
 
 <a id="model-experience"></a>
 
@@ -31,7 +31,7 @@ Mount the plugin with `directory` pointing at the writable root, and give `dsh-s
 
 #### What the model sees
 
-Three tool schemas: `skill_create` (name, description, body, optional overwrite), `skill_list` (no arguments), and `skill_delete` (name). Descriptions state when to use each, and results are one short line naming the stored path or the removal outcome.
+Three tool schemas: `skill_create` (name, description, body, optional overwrite), `skill_list` (no arguments), and `skill_delete` (name). Descriptions state when to use each, and results are one short line naming the stored path or the removal outcome. A refused overwrite or delete reports that the skill was written outside the tool and must be removed by the user.
 
 #### Token effect
 
@@ -47,6 +47,7 @@ Creating a skill appends a catalog entry, which changes the injected catalog sec
 
 - **Whole-file replace only** — `skill_create` with `overwrite` replaces the body rather than patching it, so the model must resend the full instructions.
 - **No invocation policy yet** — authored skills are model- and user-invocable; frontmatter fields such as `disable-model-invocation` are not exposed through the tools.
+- **Ownership starts with this version** — skills written before the manifest existed are treated as hand-authored, so the model must ask the user before those can be replaced or removed.
 
 <a id="dev-note"></a>
 ### Dev Note

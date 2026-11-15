@@ -1,0 +1,10 @@
+# Product memory, role definition, and their fused management page.
+- insert:
+    - id: product-memory
+      name: '@deepseek-ai/dsh-product-memory'
+
+    - id: product-persona
+      name: '@deepseek-ai/dsh-product-persona'
+
+    - id: ui-decrypthub-settings
+      name: '@deepseek-ai/dsh-client-ui-decrypthub-settings'

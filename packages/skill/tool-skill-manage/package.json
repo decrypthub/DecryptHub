@@ -2,7 +2,6 @@
   "name": "@deepseek-ai/dsh-tool-skill-manage",
   "description": "Model-facing skill authoring: create, list, and delete skills under the product skill root.",
   "version": "0.2.2-rc.1",
-  "private": true,
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",

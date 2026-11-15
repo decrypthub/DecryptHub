@@ -12,7 +12,12 @@ export const PROFILE_TEMPLATES: Record<string, ProfileTemplate> = {
     bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-acp-app'],
   },
   web: {
-    bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'],
+    bundles: [
+      '@deepseek-ai/dsh-base',
+      '@deepseek-ai/dsh-web-app',
+      '@deepseek-ai/dsh-memory-bundle',
+      '@deepseek-ai/dsh-mcp-bundle',
+    ],
   },
   headless: {
     bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless'],
@@ -30,6 +35,8 @@ export const PROFILE_TEMPLATES: Record<string, ProfileTemplate> = {
  * match with the {@link PROFILE_TEMPLATES} entry of the same name and leaves every other list untouched.
  */
 export const INSTALLATION_OWNED_PROFILE_TUPLES: Readonly<Record<string, readonly string[]>> = {
+  // Earlier DecryptHub Web/Desktop defaults before product feature bundles were split out of web-app.
+  web: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'],
   headless: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-headless'],
 }
 

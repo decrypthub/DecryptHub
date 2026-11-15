@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Adds one read-only tool, `session_list`, that reports the most recently updated sessions in the workspace with their ids, titles, and update times. It reads through the shared `ctx.sessionQuery` service, so the listing follows the same live-preferred corpus the rest of the product uses and never opens a session of its own.
+Adds two read-only tools: `session_list` reports the newest-created sessions of the calling workspace with their ids, titles, and creation times, and `session_read` returns the trailing user and assistant messages of one session in that workspace. Both read through the shared `ctx.sessionQuery` service, so they follow the same live-preferred corpus the rest of the product uses and never open a session of their own.
 
 ## Table of Contents
 
@@ -21,17 +21,17 @@ Adds one read-only tool, `session_list`, that reports the most recently updated 
 
 ## Use this package
 
-Mount the plugin in a composition that provides `sessionQuery`. `maxSessions` caps how many sessions one call may return; the tool's `limit` argument narrows that further but cannot exceed it.
+Mount the plugin in a composition that provides `sessionQuery`. `maxSessions` caps how many sessions one call may return; the tool's `limit` argument narrows that further but cannot exceed it. Both tools filter by the calling agent's workspace and refuse to read a session stored under another workspace.
 
 <a id="model-experience"></a>
 
 ## Model Experience
 
-### session list
+### session tools
 
 #### What the model sees
 
-One `session_list` schema with an optional `limit`, and one line per session in the result: `updatedAt id title`. The description tells the model to call it when the user refers to earlier work and the session holding it is unknown.
+Two schemas: `session_list` with an optional `limit`, and `session_read` with a required `id` and an optional `limit`. List results are one line per session (`createdAt id title`); read results are one line per message (`role: text`) taken from the stored user and assistant events, with tool traffic omitted. The descriptions tell the model to call them when the user refers to earlier work whose session is unknown.
 
 #### Token effect
 
@@ -45,8 +45,9 @@ The schema and its position are stable, so the prompt prefix stays cacheable. Li
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **No content search** — the tool lists sessions but does not search inside them; full-text search needs the SQLite session-query backend and a product tool for it.
+- **No content search** — the tools list sessions and read their trailing messages but do not search across them; full-text search needs the SQLite session-query backend and a product tool for it.
 - **Titles are best effort** — a session without a generated title reports an empty string, so the model must fall back to the id.
+- **Creation time only** — the stored header records creation, not last activity, so the listing is newest-created order rather than most-recently-active order.
 
 <a id="dev-note"></a>
 ### Dev Note
@@ -54,6 +55,6 @@ The schema and its position are stable, so the prompt prefix stays cacheable. Li
 <details>
 <summary>Working context for maintainers — click to expand</summary>
 
-The upstream `dsh-tool-session-query` package already covers search and event reads, but it lives in `packages/experimental`, and a release bundle must not depend on an experimental package. This package is the product-owned subset that may ship in the default composition.
+The upstream `dsh-tool-session-query` package already covers search and event reads, but it lives in `packages/experimental`, and a release bundle must not depend on an experimental package. This package is the product-owned subset that may ship in the default composition. The reader reconstructs messages from the durable event payloads (`user/message`, `assistant/message`) instead of a synthesized field, so it works on imported legacy generations after their first migration.
 
 </details>

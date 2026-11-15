@@ -1,0 +1,12 @@
+<svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="8" y="7" width="20" height="22" rx="3" fill="url(#memory-card)" />
+  <path d="M12 13H24M12 18H21M12 23H18" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" />
+  <circle cx="26" cy="26" r="5.5" fill="#2F6B4F" stroke="#E8F3EC" stroke-width="1.5" />
+  <path d="M24.2 26.1L25.6 27.5L28.1 24.6" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+  <defs>
+    <linearGradient id="memory-card" x1="10" y1="8" x2="26" y2="28" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4C9A6E" />
+      <stop offset="1" stop-color="#2F6B4F" />
+    </linearGradient>
+  </defs>
+</svg>

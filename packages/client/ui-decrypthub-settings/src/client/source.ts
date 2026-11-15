@@ -10,6 +10,8 @@ export const MEMORY_NS = 'product-memory'
 export interface MemoryEntryView {
   text: string
   scope: string
+  /** Workspace a project entry belongs to; preserved when the page rewrites it. */
+  workspace?: string
   /** ISO-8601 creation stamp owned by the namespace; preserved on rewrite. */
   createdAt?: string
   /** ISO-8601 last-write stamp owned by the namespace. */
@@ -81,7 +83,13 @@ export class MemorySource {
     await this.operations.write([{
       op: 'set',
       path: ['entries', key],
-      value: { text, scope, createdAt: existing?.createdAt ?? now, updatedAt: now },
+      value: {
+        text,
+        scope,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+        ...existing?.workspace === undefined ? {} : { workspace: existing.workspace },
+      },
     }], this.store.getSnapshot().revision)
     await this.load()
   }

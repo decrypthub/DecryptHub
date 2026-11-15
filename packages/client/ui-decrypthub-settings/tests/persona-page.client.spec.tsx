@@ -7,7 +7,7 @@ import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '../src/client/index.ts'
 import { PersonaPage } from '../src/client/PersonaPage.tsx'
 import { personaEn, personaZh } from '../src/client/locales.ts'
-import { PersonaSource } from '../src/client/persona-source.ts'
+import { PersonaSource, type PersonaOperations } from '../src/client/persona-source.ts'
 
 /** One namespace row the fake Remote returns. */
 const namespace = {
@@ -24,7 +24,7 @@ const namespace = {
  * Compose the role section against a fake settings Remote.
  * @returns the runtime and the write spy.
  */
-async function fixture(): Promise<{ runtime: SlotTestRuntime; write: ReturnType<typeof vi.fn> }> {
+async function fixture(describe?: PersonaOperations['describe']): Promise<{ runtime: SlotTestRuntime; write: ReturnType<typeof vi.fn> }> {
   const runtime = await SlotTestRuntime.create()
   onTestFinished(() => runtime.dispose())
   const locale = new LocaleRuntime(runtime.ctx)
@@ -35,7 +35,7 @@ async function fixture(): Promise<{ runtime: SlotTestRuntime; write: ReturnType<
   await runtime.declare({ 'settings.section': { kind: 'list', scope: 'root' } })
   const write = vi.fn(async () => namespace)
   const source = new PersonaSource({
-    describe: async () => ({ writable: true, hasDocument: true, namespaces: [namespace] }),
+    describe: describe ?? (async () => ({ writable: true, hasDocument: true, namespaces: [namespace] })),
     write,
   })
   onTestFinished(() => { source.dispose() })
@@ -49,8 +49,8 @@ async function fixture(): Promise<{ runtime: SlotTestRuntime; write: ReturnType<
 it('shows the stored role text and saves an edit', async () => {
   const { runtime, write } = await fixture()
   const { view } = runtime.renderSlot('settings.section', { close: vi.fn() })
+  await waitFor(() => { expect((view.getByPlaceholderText(personaZh.placeholder) as HTMLTextAreaElement).value).toBe('你是分析助手。') })
   const field = view.getByPlaceholderText(personaZh.placeholder) as HTMLTextAreaElement
-  await waitFor(() => { expect(field.value).toBe('你是分析助手。') })
   fireEvent.change(field, { target: { value: '你是逆向分析专家。' } })
   fireEvent.click(view.getByRole('button', { name: personaZh.save }))
   await waitFor(() => { expect(write).toHaveBeenCalledTimes(1) })
@@ -58,4 +58,19 @@ it('shows the stored role text and saves an edit', async () => {
   expect(ops[0]?.op).toBe('set')
   expect(ops[0]?.path).toEqual(['persona'])
   expect(ops[0]?.value).toBe('你是逆向分析专家。')
+})
+
+it('prevents editing after a load failure and enables it after retry', async () => {
+  const describe = vi.fn<PersonaOperations['describe']>()
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValue({ writable: true, hasDocument: true, namespaces: [namespace] })
+  const { runtime, write } = await fixture(describe)
+  const { view } = runtime.renderSlot('settings.section', { close: vi.fn() })
+  await waitFor(() => { expect(view.getByText(personaZh.failed)).toBeTruthy() })
+  expect(view.getByPlaceholderText(personaZh.placeholder).hasAttribute('disabled')).toBe(true)
+  expect(view.getByRole('button', { name: personaZh.save }).hasAttribute('disabled')).toBe(true)
+  expect(write).not.toHaveBeenCalled()
+  fireEvent.click(view.getByRole('button', { name: personaZh.retry }))
+  await waitFor(() => { expect((view.getByPlaceholderText(personaZh.placeholder) as HTMLTextAreaElement).value).toBe('你是分析助手。') })
+  expect(view.getByPlaceholderText(personaZh.placeholder).hasAttribute('disabled')).toBe(false)
 })

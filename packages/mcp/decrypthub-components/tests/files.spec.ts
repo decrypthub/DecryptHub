@@ -40,6 +40,17 @@ describe('verified official components', () => {
     expect((await files.rollback('idh')).version).toBe('1.0.0')
     expect((await files.rollback('idh')).version).toBe('2.0.0')
   })
+  it('removes managed activations and deletes their version directories', async () => {
+    const { stage, files, root } = await fixture()
+    const first = await stage('1.0.0'), second = await stage('2.0.0')
+    const signal = new AbortController().signal
+    await files.install(first.directory, 'idh', '1.0.0', signal)
+    await files.install(second.directory, 'idh', '2.0.0', signal)
+    await files.uninstall('idh')
+    expect(await files.resolve('idh')).toBeNull()
+    expect(await files.previous('idh')).toBeNull()
+    expect(await fs.readdir(join(root, 'components', 'versions'))).toEqual([])
+  })
   it('serializes concurrent activations so the predecessor remains available', async () => {
     const { stage, files } = await fixture()
     const first = await stage('1.0.0'), second = await stage('2.0.0')

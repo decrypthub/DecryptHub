@@ -204,6 +204,33 @@ export class ComponentFiles {
     await this.write(pointers)
     return result
   }
+
+  /** Remove managed activations for one component and delete their version directories.
+   * @param id - component identity.
+   * @returns after pointers are rewritten; falls back to a packaged WDH when present.
+   */
+  async uninstall(id: ComponentId): Promise<void> {
+    return this.serialize(() => this.uninstallVersion(id))
+  }
+
+  private async uninstallVersion(id: ComponentId): Promise<void> {
+    const pointers = await this.pointers()
+    const current = pointers[id]
+    if (!current?.current || current.current === '@bundled') throw new Error('No managed component to remove')
+    const remove = [current.current, current.previous].filter((pointer): pointer is string =>
+      typeof pointer === 'string' && pointer !== '@bundled' && pointer.startsWith('versions/'))
+    const nextPointers: Pointers = { ...pointers }
+    if (id === 'wdh' && this.bundledEntry) nextPointers.wdh = { current: '@bundled' }
+    else if (id === 'wdh') delete nextPointers.wdh
+    else if (id === 'adh') delete nextPointers.adh
+    else delete nextPointers.idh
+    await this.write(nextPointers)
+    for (const location of remove) {
+      await fs.rm(await componentPath(this.root, location), { recursive: true, force: true }).catch((_error: unknown) => {
+        // Directory cleanup is best-effort after the activation pointer already moved.
+      })
+    }
+  }
 }
 
 /** Find a concrete executable in absolute PATH directories without launching it.
@@ -219,4 +246,28 @@ export async function componentExecutable(command: string, pathValue: string): P
     catch (_error) { /* Unavailable PATH candidates are not installations. */ }
   }
   return null
+}
+
+/** Read a local gateway's `--version` output and keep a short version token when present.
+ * @param command - absolute executable path from {@link componentExecutable}.
+ * @returns version string such as `0.1.1`, the first output line, or null when the process fails.
+ */
+export async function probeCommandVersion(command: string): Promise<string | null> {
+  try {
+    const { execFile } = await import('node:child_process')
+    const { promisify } = await import('node:util')
+    const run = promisify(execFile)
+    const result = await run(command, ['--version'], {
+      encoding: 'utf8',
+      timeout: 3_000,
+      windowsHide: true,
+      maxBuffer: 64 * 1024,
+    })
+    const line = `${result.stdout}\n${result.stderr}`.split(/\r?\n/u).map(row => row.trim()).find(row => row.length > 0)
+    if (line === undefined) return null
+    const match = /\b(\d+\.\d+\.\d+(?:[-+][\w.]+)?)\b/u.exec(line)
+    return match?.[1] ?? line
+  } catch (_error) {
+    return null
+  }
 }

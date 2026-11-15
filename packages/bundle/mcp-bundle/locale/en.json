@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Skills and MCP",
+    "description": "Lets the model create and manage skills, and configure custom MCP servers plus official DecryptHub components. Open the Skills and MCP page to manage them.",
+    "detail": "docs/DETAIL.md"
+  }
+}

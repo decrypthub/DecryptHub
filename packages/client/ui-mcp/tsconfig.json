@@ -33,6 +33,12 @@
       "path": "../../api/remotes/tsconfig.client.json"
     },
     {
+      "path": "../../api/session-controller/tsconfig.client.json"
+    },
+    {
+      "path": "../ui-session"
+    },
+    {
       "path": "../../mcp/mcp-manager"
     },
     {
@@ -54,10 +60,16 @@
       "path": "../ui-sidebar"
     },
     {
+      "path": "../ui-workspace"
+    },
+    {
       "path": "../../util/crypto"
     },
     {
       "path": "../../api/remote-access/tsconfig.client.json"
+    },
+    {
+      "path": "../ui-conversation/tsconfig.client.json"
     }
   ]
 }

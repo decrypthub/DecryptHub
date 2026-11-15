@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 摘要
 
-把持久事实存放在本插件的设置命名空间中，将条目作为单条系统提示词片段注入（受 `maxSectionChars` 限制），并向模型提供 `memory_write`、`memory_list`、`memory_delete`。条目带 `user` 或 `project` 作用域与 ISO-8601 时间戳；持久化由设置命名空间负责，重启后仍在，且不额外写入会话事件。
+把持久事实存放在本插件的设置命名空间中，作为两条受 `maxSectionChars` 限制的系统提示词片段注入，并向模型提供 `memory_write`、`memory_list`、`memory_delete`。条目带 `user` 或 `project` 作用域与 ISO-8601 时间戳：`user` 条目全局注入，`project` 条目只注入写入它的那个工作区的智能体（条目会记录该工作区）。持久化由设置命名空间负责，重启后仍在，且不额外写入会话事件。
 
 ## 目录
 
@@ -21,7 +21,7 @@ kind: "package-reference"
 
 ## 使用本包
 
-在带设置服务的 profile 组合中挂载本插件。它注册序号 150 的 `product-memory` 片段，并向模型注册三个工具；`maxSectionChars` 限定注入长度。
+在带设置服务的 profile 组合中挂载本插件。它注册序号 150 的全局 `product-memory` 片段与每智能体的 `product-memory:workspace` 片段，并向模型注册三个工具；`maxSectionChars` 分别限定两段注入长度。`project` 写入会记录调用智能体的工作区，因此同名条目不会跨工作区泄漏。
 
 <a id="model-experience"></a>
 
@@ -31,7 +31,7 @@ kind: "package-reference"
 
 #### What the model sees
 
-注入一条片段，按 `(scope) text [id]` 逐行列出条目（受 `maxSectionChars` 限制），另加 `memory_write`、`memory_list`、`memory_delete` 三个 schema。片段带 id，模型可直接更新或删除某条而无需先读取。
+全局片段按 `(user) text [id]` 逐行列出跨项目条目；每智能体片段列出该工作区的 `project` 条目。两段均受 `maxSectionChars` 限制，另加 `memory_write`、`memory_list`、`memory_delete` 三个 schema。片段带 id，模型可直接更新或删除某条而无需先读取；`memory_list` 与 `memory_delete` 只能看到调用方工作区可见的条目。
 
 #### Token effect
 
@@ -46,6 +46,7 @@ kind: "package-reference"
 <a id="known-limitations-and-deferred-work"></a>
 
 - **生成页未验证** — 单测组合中 `settings.describe()` 能带 `autoGenerate: true` 暴露该命名空间，但在打包后的桌面端里渲染尚未端到端验证；手工检查时设置面只显示账号分区。若生成式表单无法表达条目字典，改用产品自有 `ui-decrypthub-settings` 页。
+- **历史 project 条目** — 没有记录工作区的条目来自工作区标记上线之前。它们会在所有工作区可见而不是被丢弃；在某个工作区用 `memory_write` 以 project 作用域重写后会补记该工作区。设置页对「新建」条目禁用 project 作用域（页面没有可绑定的工作区）；工作区记忆请在对话里让智能体写入。
 
 <a id="dev-note"></a>
 ### 开发注记

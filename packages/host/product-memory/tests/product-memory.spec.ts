@@ -1,4 +1,4 @@
-/** Product memory stores entries in its settings namespace, injects them, and exposes model tools. */
+/** Product memory scopes entries per workspace, injects them, and exposes model tools. */
 import { Context } from '@deepseek-ai/cordis'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -11,7 +11,7 @@ import * as productMemory from '../src/index.ts'
 /** Settings state the stub serves, shaped like the plugin's namespace value. */
 interface StubState {
   maxSectionChars: number
-  entries: Record<string, { text: string; scope: string; createdAt: string; updatedAt: string }>
+  entries: Record<string, { text: string; scope: string; workspace?: string; createdAt: string; updatedAt: string }>
 }
 
 /** One path edit as the settings service receives it. */
@@ -29,6 +29,7 @@ async function fixture(): Promise<{ ctx: Context; state: StubState }> {
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
   const state: StubState = { maxSectionChars: 2000, entries: {} }
+  ctx.provide('agents', { list: () => [] } as never)
   ctx.provide('settings', {
     configure: () => () => undefined,
     describe: () => [{ ns: 'product-memory', value: state, revision: 1, applies: 'live', autoGenerate: true, schema: {} }],
@@ -53,39 +54,64 @@ async function fixture(): Promise<{ ctx: Context; state: StubState }> {
  * @param ctx - fixture context.
  * @param name - tool name.
  * @param args - tool arguments.
- * @returns the settled result value.
+ * @param cwd - calling workspace, when the test simulates an agent.
+ * @returns the settled execution result.
  */
-async function call(ctx: Context, name: string, args: unknown): Promise<unknown> {
-  const result = await executeModelToolFixture(ctx, {
-    callId: ToolCallId(`call-${name}`),
+async function call(ctx: Context, name: string, args: unknown, cwd?: string) {
+  return executeModelToolFixture(ctx, {
+    callId: ToolCallId(`call-${name}-${cwd ?? 'none'}`),
     name,
     arguments: args,
     signal: new AbortController().signal,
+    ...cwd === undefined ? {} : { agent: { session: { header: { cwd } } } as never },
   })
-  return result.value
 }
 
 it('writes a memory into the settings namespace and lists it', async () => {
   const { ctx, state } = await fixture()
-  const written = await call(ctx, 'memory_write', { text: '用户偏好中文回答', scope: 'user' }) as { id: string; scope: string }
+  const result = await call(ctx, 'memory_write', { text: '用户偏好中文回答', scope: 'user' })
+  const written = result.value as { id: string; scope: string }
   expect(written.scope).toBe('user')
   expect(state.entries[written.id]?.text).toBe('用户偏好中文回答')
-  const listed = await call(ctx, 'memory_list', {}) as { entries: { id: string; text: string }[] }
-  expect(listed.entries).toHaveLength(1)
+  const listed = await call(ctx, 'memory_list', {})
+  expect((listed.value as { entries: unknown[] }).entries).toHaveLength(1)
 })
 
-it('injects stored memories into the assembled prompt', async () => {
+it('injects cross-project memories without interpolating braces', async () => {
   const { ctx } = await fixture()
-  await call(ctx, 'memory_write', { text: '项目要求提交信息用中文', scope: 'project' })
+  await call(ctx, 'memory_write', { text: '模板 {{unknown}} 保持原样', scope: 'user' })
   const assembly = await ctx.systemPrompt.assemble({})
-  const sections = assembly.sections.map(section => section.text).join('\n')
-  expect(sections).toContain('项目要求提交信息用中文')
+  expect(assembly.sections.map(section => section.text).join('\n')).toContain('模板 {{unknown}} 保持原样')
 })
 
-it('deletes a memory from the settings namespace', async () => {
-  const { ctx, state } = await fixture()
-  const written = await call(ctx, 'memory_write', { text: '临时事实' }) as { id: string }
-  const removed = await call(ctx, 'memory_delete', { id: written.id }) as { removed: boolean }
-  expect(removed.removed).toBe(true)
-  expect(state.entries[written.id]).toBeUndefined()
+it('keeps project memories out of the cross-project section', async () => {
+  const { ctx } = await fixture()
+  await call(ctx, 'memory_write', { text: 'A 工作区约束', scope: 'project' }, 'C:\\work\\a')
+  await call(ctx, 'memory_write', { text: '全局偏好', scope: 'user' })
+  const text = (await ctx.systemPrompt.assemble({})).sections.map(section => section.text).join('\n')
+  expect(text).toContain('全局偏好')
+  expect(text).not.toContain('A 工作区约束')
+})
+
+it('lists and deletes only memories of the calling workspace', async () => {
+  const { ctx } = await fixture()
+  await call(ctx, 'memory_write', { text: 'A 工作区约束', scope: 'project' }, 'C:\\work\\a')
+  await call(ctx, 'memory_write', { text: 'B 工作区约束', scope: 'project' }, 'C:\\work\\b')
+
+  const inA = await call(ctx, 'memory_list', {}, 'C:\\work\\a')
+  expect((inA.value as { entries: { text: string }[] }).entries.map(entry => entry.text)).toEqual(['A 工作区约束'])
+  const inB = await call(ctx, 'memory_list', {}, 'C:\\work\\b')
+  expect((inB.value as { entries: { text: string }[] }).entries.map(entry => entry.text)).toEqual(['B 工作区约束'])
+  const withoutWorkspace = await call(ctx, 'memory_list', {})
+  expect((withoutWorkspace.value as { entries: unknown[] }).entries).toHaveLength(0)
+
+  const id = (await call(ctx, 'memory_write', { text: 'A 工作区约束 2', scope: 'project' }, 'C:\\work\\a')).value as { id: string }
+  expect((await call(ctx, 'memory_delete', { id: id.id }, 'C:\\work\\b')).value).toEqual({ removed: false })
+  expect((await call(ctx, 'memory_delete', { id: id.id }, 'C:\\work\\a')).value).toEqual({ removed: true })
+})
+
+it('refuses a project memory when the caller has no workspace', async () => {
+  const { ctx } = await fixture()
+  const result = await call(ctx, 'memory_write', { text: '没有工作区', scope: 'project' })
+  expect(result.isError).toBe(true)
 })

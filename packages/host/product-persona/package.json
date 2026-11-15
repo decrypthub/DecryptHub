@@ -2,7 +2,6 @@
   "name": "@deepseek-ai/dsh-product-persona",
   "description": "User-editable role definition injected as a system-prompt section",
   "version": "0.2.2-rc.1",
-  "private": true,
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
