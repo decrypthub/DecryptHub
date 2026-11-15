@@ -71,7 +71,7 @@ Each row is an inherited runtime or packaging implementation that still differs 
 
 ## Sync and verification
 
-The Windows prepared-runtime smoke passed native payload, offline plugin, and Office operation checks. Its temporary profile cleanup stalled on a dangling pnpm junction; removing only that isolated test junction allowed the unchanged upstream cleanup to finish. An NSIS resource-path failure under an isolated build root is addressed by the documented generated include wrapper, without changing installer source.
+The Windows prepared-runtime smoke passed native payload, offline plugin, and Office operation checks. Its temporary profile cleanup stalled on a dangling pnpm junction; removing only that isolated test junction allowed the unchanged upstream cleanup to finish. An NSIS resource-path failure under an isolated build root is addressed by the documented generated include wrapper, without changing installer source. The assembled-runtime smoke uses upstream behavior: the obsolete product requirement for a bundled WDH was removed because components are installed independently. WDH payload-integrity checks remain in their component verification tests.
 
 Fetch upstream and pin the reviewed release merge. Start from product mainline in an isolated worktree; prefer upstream behavior at every patch site and remove newly redundant product code. Regenerate catalogs from the merged source. Run focused product and Desktop checks plus the ordinary build, then inspect a separately packaged client using isolated upgrade data before publishing its test feed. Preserve the user’s running installation and real data.
 
