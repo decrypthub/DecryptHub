@@ -6,8 +6,6 @@ kind: "package-reference"
 
 [English](README.md) | 中文
 
-`openSettingsDocument` 可指定视图：`overrides` 保留原用户配置编辑行为，`composed` 打开 provider 生成的完整配置快照；原生打开过程保留调用方取消检查。
-
 ## 概述
 
 `@deepseek-ai/dsh-api-settings-controller` 为浏览器配置界面提供生成的 `ctx.remote.settings` 与 `ctx.remote.credentials` namespace。它返回脱敏的 settings 与凭据元数据，支持 settings 与凭据写入而不返回机密值，并在 Host 桌面打开由提供方持有的 settings 或 Agent preset 位置。提供方缺失时，namespace 仍会注册，并返回可操作的配置错误。

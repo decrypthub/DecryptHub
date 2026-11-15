@@ -159,18 +159,17 @@ export class SettingsController extends TypertRemoteService {
 
   /**
    * Materialize the provider-owned settings document and open it in a native text editor.
-   * @param view - user overrides by default, or the complete unevaluated configuration snapshot.
    * @param signal - caller lifetime; abort terminates preparation or the native command.
    * @returns confirmation after the native opener accepts the document.
    * @throws RemoteError when no document exists, preparation fails, or opening fails.
    */
   @Remote
-  async openSettingsDocument(view: 'overrides' | 'composed' | undefined, signal: AbortSignal): Promise<SettingsDocumentOpenValue> {
+  async openSettingsDocument(signal: AbortSignal): Promise<SettingsDocumentOpenValue> {
     const settings = this.provider()
     if (isAborted(signal)) throw new RemoteError('gateway/cancelled', 'settings document open was aborted', {})
     let path: string
     try {
-      path = await settings.prepareDocument(view)
+      path = await settings.prepareDocument()
     } catch (error: unknown) {
       if (isAborted(signal)) throw new RemoteError('gateway/cancelled', 'settings document preparation was aborted', {})
       throw new RemoteError('gateway/internal', `settings document preparation failed: ${messageOf(error)}`, {}, { cause: error })

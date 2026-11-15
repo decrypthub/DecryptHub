@@ -1,6 +1,6 @@
 # 跨设备交接
 
-当前产品分支：`feat/dsh-rc1`，远端：`https://github.com/decrypthub/DecryptHub.git`。它等于上游 DeepSeek Harness `0.2.2-rc.1`（上游 `master` = `fcc0ad4621`）加一个产品提交。`main` 是更早的 Tauri 实现，`handoff/ui-alignment-20261104` 是它的 UI 交接快照；两者都只读，不要合并进本分支。
+当前产品分支：`feat/dsh-rc1`，远端：`https://github.com/decrypthub/DecryptHub.git`。固定上游基线是 DeepSeek Harness `0.2.2-rc.1`（upstream PR #7873）；保留的产品修改与已核对的上游最新提交见[上游差异记录](UPSTREAM-CHANGES.zh.md)。`main` 是更早的 Tauri 实现，`handoff/ui-alignment-20261104` 是它的 UI 交接快照；两者都只读，不要合并进本分支。
 
 ## 在另一台电脑接续
 
@@ -18,7 +18,7 @@ WDH 独立运行时：`https://github.com/decrypthub/WebDecryptHub.git`，本次
 
 ## 当前实现与待完成项
 
-已接入品牌及独立数据目录、DecryptHub 社区登录、三种自定义 API 格式、英文思考强度滑杆、自定义 MCP、官方 WDH / ADH / IDH 管理与校验安装。保留 DSH 供应商目录、官方 API 适配器、Agent 预设、团队与开发者工具；关闭官方账号入口、首启公告、官方密钥自动引导、遥测及会话上传。
+已接入品牌及独立数据目录、DecryptHub 社区登录、三种自定义 API 格式、上游思考强度菜单、自定义 MCP、官方 WDH / ADH / IDH 管理与校验安装。保留 DSH 供应商目录、官方 API 适配器、Agent 预设、团队与开发者工具；关闭官方账号入口、首启公告、官方密钥自动引导、遥测及会话上传。
 
 全局记忆与系统记忆管理页、专用 DSH 插件配置导入、WDH 内嵌浏览器/抓包/调试工作台尚未迁移。真实设备连接、官方组件真实发布下载及生产账号接口尚未完成端到端验证。
 

@@ -46,10 +46,6 @@ export function SettingsDocumentAction({ controller, useSnapshot, t }: SettingsD
       >
         {t('openDocument')}
       </Button>
-      <Button variant="outline" size="sm" disabled={state.opening}
-        onClick={() => { void controller.open('composed') }}>
-        {t('openComposedDocument')}
-      </Button>
     </div>
   )
 }

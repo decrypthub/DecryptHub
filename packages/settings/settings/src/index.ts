@@ -291,12 +291,9 @@ export class SettingsForms extends Service {
   /** Current profile patch shown by the native configuration editor. */
   get documentPath(): string { return this.ownerContext.configEditor.documentPath }
   /** Locate the profile patch for native editing.
-   * @param view - editable user overrides or a separate full-composition snapshot.
    * @returns The existing profile patch path.
    */
-  prepareDocument(view: 'overrides' | 'composed' = 'overrides'): Promise<string> {
-    return view === 'composed' ? this.ownerContext.configEditor.prepareComposedDocument() : Promise.resolve(this.documentPath)
-  }
+  prepareDocument(): Promise<string> { return Promise.resolve(this.documentPath) }
 
   /** Read active plugin schemas and their live values.
    * @param options Redaction required for remote callers.

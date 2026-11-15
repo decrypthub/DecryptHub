@@ -32,9 +32,7 @@ describe('SettingsDocumentStore', () => {
       status: 'ready', opening: false, error: null,
     })
     await controller.open()
-    expect(openDocument).toHaveBeenCalledWith('overrides')
-    await controller.open('composed')
-    expect(openDocument).toHaveBeenLastCalledWith('composed')
+    expect(openDocument).toHaveBeenCalledWith()
   })
 
   it('marks absent or failed metadata unavailable without opening anything', async () => {

@@ -573,22 +573,6 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-client-shortcuts -->
 
-<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-client-ui-model-selection -->
-<a id="deepseek-aidsh-client-ui-model-selection"></a>
-
-## `@deepseek-ai/dsh-client-ui-model-selection`
-
-- `source`: [`packages/client/ui-model-selection/src/presentation.ts:5`](../packages/client/ui-model-selection/src/presentation.ts)
-
-```ts config-catalog
-/** Model selection presentation; provider metadata remains authoritative for supported efforts. */
-export interface Config {
-  /** Use the compact menu or a discrete reasoning slider in the composer. */
-  effortControl: 'menu' | 'slider'
-}
-```
-<!-- END GENERATED config-catalog:@deepseek-ai/dsh-client-ui-model-selection -->
-
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-client-ui-plugin-manager -->
 <a id="deepseek-aidsh-client-ui-plugin-manager"></a>
 
@@ -671,8 +655,6 @@ export type OnboardingProcess = 'compact' | 'standard' | 'detailed'
 export interface Config {
   /** Offer the browser API-key step when no native shell owns credential onboarding. */
   credentialOnboarding: boolean
-  /** Offer the installed provider directory; false keeps only configured channels and the custom API form. */
-  providerCatalog: boolean
   /** Show the upstream preview notice on first browser launch. */
   welcomeNotice: boolean
 }
@@ -879,7 +861,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-decrypthub-components`
 
 - `inject`: `settings` · `agents` · `mcpManager` · `subprocess`
-- `source`: [`packages/mcp/decrypthub-components/src/index.ts:24`](../packages/mcp/decrypthub-components/src/index.ts)
+- `source`: [`packages/mcp/decrypthub-components/src/index.ts:28`](../packages/mcp/decrypthub-components/src/index.ts)
 
 ```ts config-catalog
 /** Deployment-owned directories; no catalog can choose an executable. */
@@ -890,6 +872,8 @@ export interface Config {
   bundledWdhEntry: string
   /** Local Python interpreter used for managed device components. */
   pythonCommand: string
+  /** Operator-owned release feed origin; empty keeps the code-owned GitHub repositories. */
+  componentFeed: string
   /** Deadline for release metadata and browser file inspection. */
   requestTimeoutMs: number
   /** Deadline for component and browser downloads. */
@@ -907,7 +891,7 @@ export interface Config {
 
 - `inject`: `tools` · `workingDirectory` · `mcpManager`
 - `refs`: `Volatile` (`@deepseek-ai/cosmokit`)
-- `source`: [`packages/mcp/decrypthub-integrations/src/index.ts:77`](../packages/mcp/decrypthub-integrations/src/index.ts)
+- `source`: [`packages/mcp/decrypthub-integrations/src/index.ts:79`](../packages/mcp/decrypthub-integrations/src/index.ts)
 
 ```ts config-catalog
 /** Live product connection configuration. */
@@ -2875,6 +2859,56 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-plugin-package-inventory-deepseek -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-product-memory -->
+<a id="deepseek-aidsh-product-memory"></a>
+
+## `@deepseek-ai/dsh-product-memory`
+
+- `inject`: `systemPrompt` · `tools` · `settings` · `agents`
+- `source`: [`packages/host/product-memory/src/index.ts:38`](../packages/host/product-memory/src/index.ts)
+
+```ts config-catalog
+/** Deployment-varying limits and stored entries. */
+export interface Config {
+  /** Character budget of the injected section; entries beyond it are omitted. */
+  maxSectionChars: number
+  /** Stored entries keyed by id, so one path-addressed edit touches one entry. */
+  entries: Record<string, MemoryEntry>
+}
+
+/** One stored memory entry. */
+export interface MemoryEntry {
+  /** The remembered fact, one sentence. */
+  text: string
+  /** `user` applies across projects; `project` applies to one workspace. */
+  scope: string
+  /** Absolute workspace directory a `project` entry belongs to. */
+  workspace?: string
+  /** ISO-8601 creation stamp. */
+  createdAt: string
+  /** ISO-8601 last-write stamp. */
+  updatedAt: string
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-product-memory -->
+
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-product-persona -->
+<a id="deepseek-aidsh-product-persona"></a>
+
+## `@deepseek-ai/dsh-product-persona`
+
+- `inject`: `systemPrompt` · `settings`
+- `source`: [`packages/host/product-persona/src/index.ts:20`](../packages/host/product-persona/src/index.ts)
+
+```ts config-catalog
+/** Role definition the deployment or user maintains. */
+export interface Config {
+  /** Role text prepended to every request. Empty text contributes nothing. */
+  persona: string
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-product-persona -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-ptc-runtime-node -->
 <a id="deepseek-aidsh-ptc-runtime-node"></a>
 
@@ -4353,6 +4387,23 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-tool-present -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-tool-product-sessions -->
+<a id="deepseek-aidsh-tool-product-sessions"></a>
+
+## `@deepseek-ai/dsh-tool-product-sessions`
+
+- `inject`: `tools` · `sessionQuery`
+- `source`: [`packages/session/tool-product-sessions/src/index.ts:21`](../packages/session/tool-product-sessions/src/index.ts)
+
+```ts config-catalog
+/** Listing limits. */
+export interface Config {
+  /** Maximum sessions returned by one call. */
+  maxSessions: number
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-tool-product-sessions -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-tool-pwsh -->
 <a id="deepseek-aidsh-tool-pwsh"></a>
 
@@ -4464,6 +4515,23 @@ export interface Config {
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-tool-skill -->
+
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-tool-skill-manage -->
+<a id="deepseek-aidsh-tool-skill-manage"></a>
+
+## `@deepseek-ai/dsh-tool-skill-manage`
+
+- `inject`: `tools`
+- `source`: [`packages/skill/tool-skill-manage/src/index.ts:20`](../packages/skill/tool-skill-manage/src/index.ts)
+
+```ts config-catalog
+/** Where authored skills live. */
+export interface Config {
+  /** Absolute directory holding one `<name>/SKILL.md` bundle per skill. */
+  directory: string
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-tool-skill-manage -->
 
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-tool-str-replace-editor -->
 <a id="deepseek-aidsh-tool-str-replace-editor"></a>
@@ -5015,6 +5083,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 | `@deepseek-ai/dsh-client-ui-conversation` | — | [`packages/client/ui-conversation/src/index.ts`](../packages/client/ui-conversation/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-cordis` | — | [`packages/extensions/ui-cordis/src/index.ts`](../packages/extensions/ui-cordis/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-creation-recommendations` | — | [`packages/experimental/client-ui-creation-recommendations/src/index.ts`](../packages/experimental/client-ui-creation-recommendations/src/index.ts) |
+| `@deepseek-ai/dsh-client-ui-decrypthub-settings` | — | [`packages/client/ui-decrypthub-settings/src/index.ts`](../packages/client/ui-decrypthub-settings/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-deliverables` | `connection` · `sessionQuery` · `sessionController` · `workspaceFiles` · `fs` · `sandboxPolicy` · `workspaceChanges` | [`packages/client/ui-deliverables/src/index.ts`](../packages/client/ui-deliverables/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-directory-picker-browse` | — | [`packages/client/ui-directory-picker-browse/src/index.ts`](../packages/client/ui-directory-picker-browse/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-directory-picker-native` | — | [`packages/client/ui-directory-picker-native/src/index.ts`](../packages/client/ui-directory-picker-native/src/index.ts) |
@@ -5027,6 +5096,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 | `@deepseek-ai/dsh-client-ui-layout` | — | [`packages/client/ui-layout/src/index.ts`](../packages/client/ui-layout/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-mcp` | — | [`packages/client/ui-mcp/src/index.ts`](../packages/client/ui-mcp/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-message-feedback` | — | [`packages/client/ui-message-feedback/src/index.ts`](../packages/client/ui-message-feedback/src/index.ts) |
+| `@deepseek-ai/dsh-client-ui-model-selection` | — | [`packages/client/ui-model-selection/src/index.ts`](../packages/client/ui-model-selection/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-open-in-app` | — | [`packages/client/ui-open-in-app/src/index.ts`](../packages/client/ui-open-in-app/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-permission-presets` | — | [`packages/client/ui-permission-presets/src/index.ts`](../packages/client/ui-permission-presets/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-plan` | — | [`packages/client/ui-plan/src/index.ts`](../packages/client/ui-plan/src/index.ts) |
@@ -5091,6 +5161,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 | `@deepseek-ai/dsh-message-quotes` | — | [`packages/session/message-quotes/src/index.ts`](../packages/session/message-quotes/src/index.ts) |
 | `@deepseek-ai/dsh-otel` | — | [`packages/telemetry/otel/src/index.ts`](../packages/telemetry/otel/src/index.ts) |
 | `@deepseek-ai/dsh-plugin-recommendations` | `pluginManager` · `agents` · `skills` · `actionCards` | [`packages/experimental/plugin-recommendations/src/index.ts`](../packages/experimental/plugin-recommendations/src/index.ts) |
+| `@deepseek-ai/dsh-product-runtime` | `tools` | [`packages/host/product-runtime/src/index.ts`](../packages/host/product-runtime/src/index.ts) |
 | `@deepseek-ai/dsh-sandbox-ssh` | `ssh` | [`packages/ssh/sandbox-ssh/src/index.ts`](../packages/ssh/sandbox-ssh/src/index.ts) |
 | `@deepseek-ai/dsh-session` | — | [`packages/core/session/src/index.ts`](../packages/core/session/src/index.ts) |
 | `@deepseek-ai/dsh-session-checkpoint-policy` | `llm` · `sessionPersistence` · `sessions` · `tools` | [`packages/session/session-checkpoint-policy/src/index.ts`](../packages/session/session-checkpoint-policy/src/index.ts) |
@@ -5186,6 +5257,8 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 | `@deepseek-ai/dsh-llm-deepseek` | — | [`packages/llm/llm-deepseek/src/index.ts`](../packages/llm/llm-deepseek/src/index.ts) |
 | `@deepseek-ai/dsh-llm-mock-server` | — | [`packages/test-support/llm-mock-server/src/index.ts`](../packages/test-support/llm-mock-server/src/index.ts) |
 | `@deepseek-ai/dsh-loader-smoke` | — | [`packages/test-support/loader-smoke/src/index.ts`](../packages/test-support/loader-smoke/src/index.ts) |
+| `@deepseek-ai/dsh-mcp-bundle` | — | [`packages/bundle/mcp-bundle/src/index.ts`](../packages/bundle/mcp-bundle/src/index.ts) |
+| `@deepseek-ai/dsh-memory-bundle` | — | [`packages/bundle/memory-bundle/src/index.ts`](../packages/bundle/memory-bundle/src/index.ts) |
 | `@deepseek-ai/dsh-native-command` | — | [`packages/util/native-command/src/index.ts`](../packages/util/native-command/src/index.ts) |
 | `@deepseek-ai/dsh-official-bundles` | — | [`packages/util/official-bundles/src/index.ts`](../packages/util/official-bundles/src/index.ts) |
 | `@deepseek-ai/dsh-output-retention` | — | [`packages/util/output-retention/src/index.ts`](../packages/util/output-retention/src/index.ts) |

@@ -58,12 +58,6 @@
     },
     {
       "path": "../product-analytics/tsconfig.client.json"
-    },
-    {
-      "path": "../../host/webserver"
-    },
-    {
-      "path": "../../../vendor/schemastery"
     }
   ]
 }

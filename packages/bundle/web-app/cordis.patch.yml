@@ -379,7 +379,6 @@
       name: '@deepseek-ai/dsh-client-ui-settings-models'
       config:
         credentialOnboarding: false
-        providerCatalog: true
         welcomeNotice: false
 
     # Plugin management: the sidebar Plugins page installs, enables, disables,

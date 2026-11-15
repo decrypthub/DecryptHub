@@ -1,6 +1,6 @@
 # Cross-device handoff
 
-Product branch: `feat/dsh-rc1` in `https://github.com/decrypthub/DecryptHub.git`. It is upstream DeepSeek Harness `0.2.2-rc.1` (upstream `master` = `fcc0ad4621`) plus one product commit. `main` holds the previous Tauri implementation and `handoff/ui-alignment-20261104` its UI handoff snapshot; treat both as read-only and do not merge them into this branch. See [the detailed Chinese handoff](HANDOFF.zh.md).
+Product branch: `feat/dsh-rc1` in `https://github.com/decrypthub/DecryptHub.git`. Its pinned upstream base is DeepSeek Harness `0.2.2-rc.1` (upstream PR #7873); retained product patches and the observed upstream head are recorded in [the upstream change record](UPSTREAM-CHANGES.md). `main` holds the previous Tauri implementation and `handoff/ui-alignment-20261104` its UI handoff snapshot; treat both as read-only and do not merge them into this branch. See [the detailed Chinese handoff](HANDOFF.zh.md).
 
 ```sh
 git clone --branch feat/dsh-rc1 https://github.com/decrypthub/DecryptHub.git DecryptHub-DSH

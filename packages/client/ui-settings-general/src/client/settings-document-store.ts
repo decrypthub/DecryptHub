@@ -54,7 +54,7 @@ export class SettingsDocumentStore {
    * Open the loaded document once; concurrent gestures collapse behind the in-flight action.
    * @returns after the native-open request settles, or immediately when unavailable/already opening.
    */
-  async open(view: 'overrides' | 'composed' = 'overrides'): Promise<void> {
+  async open(): Promise<void> {
     const current = this.store.getSnapshot()
     if (current.status !== 'ready' || current.opening) return
     this.store.update((state) => {
@@ -62,7 +62,7 @@ export class SettingsDocumentStore {
       state.error = null
     })
     try {
-      const result = await this.ctx.remote.settings.openSettingsDocument(view)
+      const result = await this.ctx.remote.settings.openSettingsDocument()
       if (!result.ok) {
         const { message } = result.error
         this.store.update((state) => { state.error = message })

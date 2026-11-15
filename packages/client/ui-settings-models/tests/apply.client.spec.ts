@@ -79,7 +79,7 @@ describe('ui-settings-models apply', () => {
       const rows: IndexInjection[] = []
       ctx.emit('webserver/index-inject', rows, PAGE_PEER)
       expect(rows).toEqual([{ kind: 'global', name: ONBOARDING_CONFIG_GLOBAL,
-        value: { credentialOnboarding: false, providerCatalog: true, welcomeNotice: true } }])
+        value: { credentialOnboarding: false, welcomeNotice: true } }])
       for (const row of rows) if (row.kind === 'global') vi.stubGlobal(row.name, row.value)
       const plugin = ctx.plugin({ inject: [...inject], apply })
       await plugin.await()
@@ -99,7 +99,7 @@ describe('ui-settings-models apply', () => {
   })
 
   it('defaults to browser onboarding and rejects malformed bootstrap options', async () => {
-    expect(hostPlugin.Config({})).toEqual({ credentialOnboarding: true, providerCatalog: true, welcomeNotice: true })
+    expect(hostPlugin.Config({})).toEqual({ credentialOnboarding: true, welcomeNotice: true })
     expect(hostPlugin.Config['~standard'].validate({ credentialOnboarding: 'false' })).toHaveProperty('issues')
     const { ctx } = await bench()
     try {
@@ -110,16 +110,14 @@ describe('ui-settings-models apply', () => {
     }
   })
 
-  it('allows a product composition to omit the upstream notice and provider directory', async () => {
+  it('allows a product composition to omit the upstream notice', async () => {
     const { ctx, slots } = await bench()
     declare(slots)
-    vi.stubGlobal(ONBOARDING_CONFIG_GLOBAL, { credentialOnboarding: false, providerCatalog: false, welcomeNotice: false })
+    vi.stubGlobal(ONBOARDING_CONFIG_GLOBAL, { credentialOnboarding: false, welcomeNotice: false })
     try {
       const plugin = ctx.plugin({ inject: [...inject], apply })
       await plugin.await()
       expect(slots.entries('settings.onboarding').map(entry => entry.options.id)).toEqual(['deepseek-official'])
-      const section = slots.entries('settings.section').find(entry => entry.options.id === 'models')!
-      expect((section.inject as () => { providerCatalog: boolean })().providerCatalog).toBe(false)
       await plugin.dispose()
     } finally {
       await ctx.fiber.dispose()

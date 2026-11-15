@@ -58,10 +58,7 @@ describe('native path opener', () => {
     })
     expect(run.mock.calls).toEqual([
       ['wslpath', ['-w', '/home/test user/settings.yaml'], requestSignal, 'hidden'],
-      ['powershell.exe', [
-        '-NoProfile', '-WindowStyle', 'Hidden', '-Command',
-        "Start-Process -FilePath notepad.exe -ArgumentList '\\\\wsl.localhost\\Ubuntu\\home\\test user\\settings.yaml'",
-      ], requestSignal, 'hidden'],
+      ['explorer.exe', ['file://wsl.localhost/Ubuntu/home/test%20user/settings.yaml'], requestSignal, 'visible'],
     ])
   })
 
@@ -140,22 +137,15 @@ describe('native path opener', () => {
     )
   })
 
-  it('opens a Windows text document in Notepad without consulting the association', async () => {
+  it('uses the Windows desktop association for text documents', async () => {
     const run = vi.fn<PathOpenerRunner>(async () => ({ stdout: '', stderr: '' }))
     await openNativeTextFile('C:\\work\\settings.yaml', signal(), { platform: 'win32', run })
-    expect(run).toHaveBeenCalledExactlyOnceWith('powershell.exe', [
-      '-NoProfile', '-WindowStyle', 'Hidden', '-Command',
-      "Start-Process -FilePath notepad.exe -ArgumentList 'C:\\work\\settings.yaml'",
-    ], expect.any(AbortSignal), 'hidden')
-  })
-
-  it('escapes a single quote inside the Notepad argument', async () => {
-    const run = vi.fn<PathOpenerRunner>(async () => ({ stdout: '', stderr: '' }))
-    await openNativeTextFile("C:\\work\\Bob's settings.yaml", signal(), { platform: 'win32', run })
-    expect(run).toHaveBeenCalledWith('powershell.exe', [
-      '-NoProfile', '-WindowStyle', 'Hidden', '-Command',
-      "Start-Process -FilePath notepad.exe -ArgumentList 'C:\\work\\Bob''s settings.yaml'",
-    ], expect.any(AbortSignal), 'hidden')
+    expect(run).toHaveBeenCalledWith(
+      'explorer.exe',
+      ['file:///C:/work/settings.yaml'],
+      expect.any(AbortSignal),
+      'visible',
+    )
   })
 
   it('opens with Linux xdg-open', async () => {

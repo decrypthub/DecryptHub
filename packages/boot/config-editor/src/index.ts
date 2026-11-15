@@ -7,7 +7,7 @@ import { entryListSchema, type PatchOptions } from '@deepseek-ai/cordis-plugin-i
 import yaml from 'js-yaml'
 import type { Entry, EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-hmr'
-import { composeEntries, loadProfileDirectory, readProfilePatches, reconcileProfilePatches, renderConfigDump } from '@deepseek-ai/dsh-app-boot'
+import { composeEntries, loadProfileDirectory, readProfilePatches, reconcileProfilePatches } from '@deepseek-ai/dsh-app-boot'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { isMap, isSeq, parseDocument, Scalar, visit } from 'yaml'
 
@@ -32,21 +32,6 @@ export class ConfigEditor extends Service {
 
   /** The profile patch edited by this service. */
   get documentPath(): string { return this.ownerContext.profileContext.patchPath }
-
-  /** Materialize the same unevaluated composition as `dsh --dump-config` without changing user overrides.
-   * @returns a UTF-8 snapshot whose edits do not affect the running profile.
-   */
-  async prepareComposedDocument(): Promise<string> {
-    const profile = this.ownerContext.profileContext
-    const path = join(profile.dir, 'cordis.composed.view.yml')
-    const content = renderConfigDump('dsh', join(profile.dir, 'cordis.yml'), [{
-      label: 'Profile bundles + user overrides + home overrides + launch overlays',
-      patches: readProfilePatches('dsh', profile),
-    }])
-    await writeFileAtomic(path, '\uFEFF# Composed configuration snapshot (UTF-8). Edits to this file are not applied.\n'
-      + '# Edit cordis.patch.yml to override the inherited defaults. !!js expressions are preserved, not evaluated.\n\n' + content, { mode: 0o600 })
-    return path
-  }
 
   /** Addressable profile rows; nested Includes have independent configuration ownership.
    * @returns Active entries with unique profile patch ids.

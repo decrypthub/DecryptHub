@@ -7,8 +7,6 @@ kind: "package-reference"
 
 [English](README.md) | 中文
 
-配置文件可选择可编辑的 profile 覆盖项或独立的完整配置快照；查看时不把 `!!js` 表达式展开成运行时密钥。
-
 ## 概述
 
 编辑插件通过 `.volatile()` 声明的字段，并查看其实际值。表单以 profile 条目 id 标识插件、保留秘密值，并拒绝过期写入。更改通过当前 profile 的 Cordis patch 持久化。

@@ -10,7 +10,7 @@ DecryptHub 是兼容 DSH 插件与配置的独立产品分支。全局记忆、�
 
 预览版使用应用标识 `cn.decrypthub.desktop.preview`、名称 `DecryptHub` 和 URL 协议 `decrypthub`。Electron 默认数据目录位于操作系统应用数据目录下的 `DecryptHub-DSH`，Harness 数据位于其中的 `runtime` 子目录。仍支持显式指定用户数据和 Harness 数据目录。不读取或修改旧 Tauri 数据目录。
 
-社区登录使用[原生 DecryptHub 账号插件](packages/client/ui-settings-decrypthub-account/README.zh.md)。产品保留 DSH 官方 DeepSeek API 适配器、供应商目录、手动 Agent 预设、团队模式开关和开发者工具，社区身份不授权模型推理。首启公告、官方密钥自动引导、官方产品分析、会话上传和会话遥测关闭。首次启动进入工作区，用户在模型设置中配置密钥。自定义渠道支持 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages，接口格式使用下拉框，内部标识自动生成。思考强度保持英文档位和离散滑杆。未签发预览包不带自动更新发布配置。
+社区登录使用[原生 DecryptHub 账号插件](packages/client/ui-settings-decrypthub-account/README.zh.md)。产品保留 DSH 官方 DeepSeek API 适配器、供应商目录、手动 Agent 预设、团队模式开关和开发者工具，社区身份不授权模型推理。首启公告、官方密钥自动引导、官方产品分析、会话上传和会话遥测关闭。首次启动进入工作区，用户在模型设置中配置密钥。自定义渠道支持 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages，复用上游提供方表单。思考强度使用上游档位菜单。内部测试构建通过打包环境配置更新源。
 
 ## 构建与运行
 
