@@ -7,6 +7,8 @@ kind: "package-reference"
 
 English | [中文](README.zh.md)
 
+The composed configuration view uses the same unevaluated profile composition as `dsh --dump-config`. It is a separate UTF-8 BOM snapshot; editing it has no effect on the user override file.
+
 ## Summary
 
 Save plugin configuration in the active profile’s patch and apply it immediately. Writes validate the complete candidate before touching disk and serialize with profile changes and HMR. Invalid values and higher-layer overrides leave the file unchanged.

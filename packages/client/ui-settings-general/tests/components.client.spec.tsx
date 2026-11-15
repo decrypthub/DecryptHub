@@ -164,7 +164,9 @@ describe('SettingsDocumentAction', () => {
     />)
     const action = await screen.findByRole('button', { name: 'Open configuration file' })
     fireEvent.click(action)
-    await waitFor(() => { expect(openDocument).toHaveBeenCalledWith() })
+    await waitFor(() => { expect(openDocument).toHaveBeenCalledWith('overrides') })
+    fireEvent.click(screen.getByRole('button', { name: 'View full configuration' }))
+    await waitFor(() => { expect(openDocument).toHaveBeenLastCalledWith('composed') })
   })
 
   it('stays absent without a document and follows a mirror refresh to available', async () => {

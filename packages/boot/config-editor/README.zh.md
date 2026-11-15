@@ -7,6 +7,8 @@ kind: "package-reference"
 
 [English](README.md) | 中文
 
+完整配置视图复用 `dsh --dump-config` 的未求值 profile 合成逻辑，生成独立的 UTF-8 BOM 快照；编辑快照不会改变用户覆盖配置。
+
 ## 概述
 
 将插件配置保存到当前 profile 的 patch 并立即应用。写入在改动磁盘前验证完整候选值，并与 profile 更改及 HMR 串行执行。无效值和更高层覆盖不会改动文件。

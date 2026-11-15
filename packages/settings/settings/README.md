@@ -7,6 +7,8 @@ kind: "package-reference"
 
 English | [中文](README.zh.md)
 
+Document preparation selects the editable profile overrides or a separate composed configuration snapshot. Neither viewing path expands `!!js` expressions into runtime secrets.
+
 ## Summary
 
 Edit fields that plugins declare with `.volatile()` and inspect their effective values. Forms identify each plugin by its profile entry id, preserve secret values, and refuse stale writes. Changes persist through the active profile’s Cordis patch.

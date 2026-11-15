@@ -6,6 +6,20 @@ import { parse } from 'yaml'
 import z from '@deepseek-ai/schemastery'
 import { configurationFixture as fixture } from './configuration-fixture.ts'
 
+it('opens a complete UTF-8 composition separately from the editable override file', async () => {
+  const { ctx, profile } = await fixture()
+  const before = readFileSync(profile.patchPath, 'utf8')
+  const snapshot = await ctx.settings.prepareDocument('composed')
+  const source = readFileSync(snapshot, 'utf8')
+  expect(snapshot).not.toBe(profile.patchPath)
+  expect(source.charCodeAt(0)).toBe(0xFEFF)
+  expect(source).toContain('default-model')
+  expect(source).toContain('second')
+  expect(source).toContain('Edits to this file are not applied')
+  expect(readFileSync(profile.patchPath, 'utf8')).toBe(before)
+  expect(await ctx.settings.prepareDocument()).toBe(profile.patchPath)
+})
+
 it('persists a model edit, updates the real consumer without remounting, and restores it at restart', async () => {
   const { ctx, profile, start } = await fixture()
   const consumer = ctx.agentDefaultModel
