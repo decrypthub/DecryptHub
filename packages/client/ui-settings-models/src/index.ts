@@ -2,7 +2,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
-import { Config, ONBOARDING_CONFIG_GLOBAL } from './onboarding-config.ts'
+import { type Config, ONBOARDING_CONFIG_GLOBAL } from './onboarding-config.ts'
 
 export { Config } from './onboarding-config.ts'
 
@@ -16,7 +16,7 @@ export function apply(ctx: Context, config: Config): void {
     table.push({
       kind: 'global',
       name: ONBOARDING_CONFIG_GLOBAL,
-      value: Config(config),
+      value: { credentialOnboarding: config.credentialOnboarding },
     })
   })
 }

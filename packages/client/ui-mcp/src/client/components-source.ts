@@ -84,6 +84,7 @@ export class ComponentsSource {
 
   /** Run a background observation that must not lock the editor controls.
    * @param command - read-only or status-refresh operation.
+   * @returns The observation, or undefined after this source is disposed.
    */
   async observe<T>(command: (operations: ComponentsOperations) => Promise<T>): Promise<T | undefined> {
     if (!this.live) return undefined

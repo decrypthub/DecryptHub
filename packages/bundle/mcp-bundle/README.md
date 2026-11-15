@@ -59,3 +59,8 @@ The layer adds no request content directly; the mounted skill tools own cache ef
 ## Known Limitations and Deferred Work
 
 - Disabling the bundle removes skill tools and the MCP management page together; the shared MCP manager in the web composition remains.
+
+<a id="dev-note"></a>
+### Dev Note
+
+None.

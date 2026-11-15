@@ -7,7 +7,7 @@ kind: "package-reference"
 
 [English](README.md) | 中文
 
-## 摘要
+## 概述
 
 贡献一个 `settings.section` 入口及对应主面板：默认展示记忆目录，标题旁「设定角色」在同一表面切换到角色编辑（可返回记忆）。记忆目录可列出、搜索、添加、编辑、删除 `product-memory` 条目；角色视图编辑 `product-persona` 文本。两者都通过 `ctx.remote.settings` 读写，因此设置页、设置文档与智能体自己的工具修改的是同一份持久数据，并共用同一套 revision 校验。优先走「让智能体记住 / 设置」，手动编辑作为备选。
 
@@ -50,7 +50,7 @@ kind: "package-reference"
 - **新建条目只能是跨项目** — 页面没有可绑定的工作区，因此新建时 project 作用域被禁用；工作区记忆由智能体在对话中写入。
 
 <a id="dev-note"></a>
-### 开发注记
+### 开发备注
 
 <details>
 <summary>维护者工作上下文 — 点击展开</summary>

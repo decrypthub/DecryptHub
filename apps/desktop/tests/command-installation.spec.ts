@@ -193,7 +193,7 @@ describe.skipIf(process.platform === 'win32')('macOS command entry ownership', (
     expect(failure).toBeInstanceOf(AggregateError)
     if (!(failure instanceof AggregateError)) throw new Error('Removal did not report both failures')
     expect(failure.errors).toMatchObject([{ code: 'EACCES' }, { code: 'EPERM' }])
-    expect(failure.message).toContain('The DecryptHub command link is preserved at ')
+    expect(failure.message).toContain('The Desktop command link is preserved at ')
     barrier.beforeUnlink = undefined; barrier.afterStat = undefined
     const preserved = (await readdir(f.root)).filter(name => name.startsWith('.dsh-command-backup-'))
     expect(preserved).toHaveLength(1)

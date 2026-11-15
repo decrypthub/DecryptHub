@@ -45,6 +45,8 @@ it('refuses traversal and payload symlinks before reading their bytes', async ()
   entry.path = 'src/cli.mjs'
   await save()
   await rm(join(root, 'src/cli.mjs'))
-  await symlink(join(root, 'component.json'), join(root, 'src/cli.mjs'))
+  // A junction exercises link rejection without Windows file-symlink privileges.
+  await symlink(process.platform === 'win32' ? join(root, 'src') : join(root, 'component.json'),
+    join(root, 'src/cli.mjs'), process.platform === 'win32' ? 'junction' : 'file')
   await expect(verifyWdhComponent(root, target)).rejects.toThrow('regular owned payload')
 })

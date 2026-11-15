@@ -7,7 +7,7 @@ kind: "package-reference"
 
 [English](README.md) | 中文
 
-## 摘要
+## 概述
 
 注册一个内置工具，回答当前 Host 服务的产品名、Harness 主目录、平台和 Node 版本。该工具不读取服务或会话状态，只报告进程级事实，因此在任何挂载它的 profile 中都成立。
 
@@ -48,7 +48,7 @@ schema 不带参数，每次请求只占少量固定 token。结果是单行短�
 - **仅进程级事实** — 尚未暴露构建版本等元数据，因为 Host 没有把这类信息传入插件环境。
 
 <a id="dev-note"></a>
-### 开发注记
+### 开发备注
 
 <details>
 <summary>维护者工作上下文 — 点击展开</summary>

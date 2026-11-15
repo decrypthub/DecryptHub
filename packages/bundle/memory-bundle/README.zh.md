@@ -7,11 +7,11 @@ kind: "package-bundle"
 
 [English](README.md) | 中文
 
-## Summary
+## 概述
 
 DecryptHub 在默认 Web 与 Desktop profile 中随附本组合包，因此产品记忆与角色定义无需另行安装即可使用。它在插件页以官方内置项出现。关闭后会从 profile 中撤下记忆与角色的 Host 行及其管理页。
 
-## Table of Contents
+## 目录
 
 - [Use this package](#use-this-package)
 - [Understand the implementation](#understand-the-implementation)
@@ -59,3 +59,8 @@ DecryptHub 在默认 Web 与 Desktop profile 中随附本组合包，因此产�
 ## Known Limitations and Deferred Work
 
 - 关闭本组合包会同时移除记忆与角色，因为管理页已融合；没有按面拆分的 profile 开关。
+
+<a id="dev-note"></a>
+### 开发备注
+
+无。

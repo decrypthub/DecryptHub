@@ -7,9 +7,9 @@ kind: "package-reference"
 
 [English](README.md) | 中文
 
-## 摘要
+## 概述
 
-为模型提供三个工具：`skill_create` 写入带 frontmatter 的 `<name>/SKILL.md`，`skill_list` 读取已存技能，`skill_delete` 删除其一。description 以 JSON 引号形式写入 YAML 标量且必须单行，因此标点不会悄悄破坏目录解析所读的 frontmatter。同一目录同时作为 `skill-filesystem` 的 root 挂载，因此写入的技能通过上游 watcher 进入下一步的目录，而不是走私有通路。工具会在 `.created-by-agent.json` 中记录自己创建的名称，拒绝覆盖或删除不属于自己的技能，模型因此无法破坏手写技能。
+在一个可写技能目录中提供 `skill_create`、`skill_list` 和 `skill_delete`。创建的技能使用 `<name>/SKILL.md`，description 使用 JSON 引号包围的单行 YAML 标量。上游 `skill-filesystem` 扫描该目录，新增技能通过其 watcher 进入下一轮目录。`.created-by-agent.json` 记录工具创建的名称；工具拒绝覆盖或删除手写技能。
 
 ## 目录
 
@@ -50,7 +50,7 @@ kind: "package-reference"
 - **归属从本版本开始** — 在该清单存在之前写入的技能一律按手写处理，模型替换或删除前必须先询问用户。
 
 <a id="dev-note"></a>
-### 开发注记
+### 开发备注
 
 <details>
 <summary>维护者工作上下文 — 点击展开</summary>

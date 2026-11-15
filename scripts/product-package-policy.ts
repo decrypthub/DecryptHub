@@ -16,11 +16,16 @@ export interface ProductPackagePolicy {
  * Optional integrations may be reached by an optional bundle without becoming default capabilities.
  */
 export const PRODUCT_PACKAGE_POLICY: Readonly<Record<string, ProductPackagePolicy>> = {
+  'packages/client/ui-account-notifications': { category: 'optional', reason: 'Upstream account notifications are disabled alongside the upstream account UI in this product.' },
+  'packages/context/harness-dev-context': { category: 'optional', reason: 'Upstream repository development instructions are disabled in the independent product composition.' },
   'packages/client/ui-settings-session-log': { category: 'optional', reason: 'Official session-log upload UI is disabled in the downstream product.' },
   'packages/client/ui-settings-account': { category: 'optional', reason: 'Upstream account UI retained for compatibility; DecryptHub configures API models directly.' },
   'packages/host/product-telemetry-otel': { category: 'optional', reason: 'Upstream telemetry exporter retained for compatibility and disabled in DecryptHub.' },
   'packages/client/ui-brand-official': { category: 'optional', reason: 'Upstream brand package retained for compatibility; DecryptHub mounts its own identity.' },
+  'packages/host/authentication-desktop': { category: 'optional', reason: 'Mounted by the private Desktop Host with its parent-process credential, outside default Web profiles.' },
   'packages/core/agent-tool-presentation': { category: 'optional', reason: 'Deprecated selector retained for existing executor configurations.' },
+  'packages/client/script-realm': { category: 'optional', reason: 'Script environment provider registry for explicitly selected Client integrations.' },
+  'packages/client/script-realm-iframe': { category: 'optional', reason: 'Iframe execution provider registered only by an explicitly selected Client plugin.' },
   'packages/browser-use/browser-use': { category: 'optional', reason: 'Service definition used by explicitly selected browser providers.' },
   'packages/computer-use/computer-use': { category: 'optional', reason: 'Service definition used by explicitly selected computer providers.' },
   'packages/lsp/lsp': { category: 'optional', reason: 'Service definition for deployment-configured language servers.' },

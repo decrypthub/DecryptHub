@@ -16,23 +16,8 @@
 
 - id: system-prompt
   config:
-    includeHarnessIdentity: false
     personaPrefix: >-
       You are a coding agent powered by the {{model}} model.
-
-# The downstream product has no official session-log upload destination.
-- id: session-log-deepseek
-  disabled: true
-
-- id: session-telemetry-otel
-  disabled: true
-
-# Community identity does not authorize DeepSeek's account inference route.
-- id: llm-deepseek-account
-  disabled: true
-
-- id: deepseek-account
-  disabled: true
 
 # Full-text session search is opt-in (the base row's `openAt: never`). This
 # restatement keeps the Web values on one ephemeral in-memory index; a
@@ -49,39 +34,9 @@
 # `dsh.client` rows are the browser roster the modules node half scans into
 # window.__DSH_BOOT__; the modules row is simultaneously a host row.
 - insert:
-    - id: decrypthub-components
-      name: '@deepseek-ai/dsh-decrypthub-components'
-      config:
-        directory: !!js (ctx.get('profileContext')?.home ?? process.env.DSH_HOME ?? '') + '/components'
-        bundledWdhEntry: !!js process.env.DSH_WDH_ENTRY ?? ''
-        pythonCommand: python3
-        # 测试服组件目录；接入自有服务器后替换为正式地址。
-        componentFeed: !!js process.env.DSH_COMPONENT_FEED ?? 'http://192.168.200.195:18080/components'
-
-    - id: decrypthub-integrations
-      name: '@deepseek-ai/dsh-decrypthub-integrations'
-      inject: [decrypthubComponents]
-      config:
-        wdh:
-          enabled: true
-          entry: !!js process.env.DSH_WDH_ENTRY ?? ''
-          dataDirectory: !!js process.env.DSH_WDH_DATA_DIR ?? ''
-          browser: cloak
-        adh:
-          enabled: false
-          command: adh
-          args: [mcp]
-        idh:
-          enabled: false
-          command: idh
-          args: [mcp]
-        startupTimeoutMs: 10000
-        closeTimeoutMs: 5000
-        toolCallTimeoutMs: 60000
-
     - id: desktop-product-telemetry
       name: '@deepseek-ai/dsh-host-product-telemetry-otel'
-      disabled: true
+      disabled: !!js "ctx.get('profileContext')?.name !== 'desktop'"
       config:
         scheduledDelayMillis: 30000
         timeoutMillis: 15000
@@ -93,7 +48,7 @@
 
     - id: product-analytics
       name: '@deepseek-ai/dsh-client-product-analytics'
-      disabled: true
+      disabled: !!js "ctx.get('profileContext')?.name !== 'desktop'"
       config:
         enabled: true
         appVersion: !!js process.env.DSH_CLIENT_VERSION
@@ -184,14 +139,9 @@
     # reports an actionable error when its settings-domain provider is absent.
     - id: ui-settings-account
       name: '@deepseek-ai/dsh-client-ui-settings-account'
-      disabled: true
 
-    - id: ui-settings-decrypthub-account
-      name: '@deepseek-ai/dsh-client-ui-settings-decrypthub-account'
-
-    - id: account-controller
-      name: '@deepseek-ai/dsh-api-account-controller'
-      disabled: true
+    - id: ui-account-notifications
+      name: '@deepseek-ai/dsh-client-ui-account-notifications'
 
     - id: settings-controller
       name: '@deepseek-ai/dsh-api-settings-controller'
@@ -235,8 +185,7 @@
       inject: [webStartup]
       config:
         host: !!js ctx.webStartup.host ?? '127.0.0.1'
-        # DecryptHub default — not upstream 3080, so `dsh web` can coexist with DeepSeek Harness.
-        port: !!js ctx.webStartup.port ?? 47391
+        port: !!js ctx.webStartup.port ?? 3080
         tls: !!js ctx.webStartup.tls
         compression: gzip
         compressionLevel: 1
@@ -244,19 +193,18 @@
 
     # Web glue owned by this bundle: resolves the built frontend dist (an
     # assembly fact of dsh-web-app, never user config), mounts the
-    # frontend-static fallback owner, registers the bash runtime variable,
-    # prints the URL line, and opens the canonical URL after the full Loader
-    # tree settles and the required-entry audit passes. Invocation-only values
-    # come from the webStartup provider; the advertised application URL is
+    # frontend-static fallback owner and registers the bash runtime variable.
+    # Providers contribute entry URLs; this row owns printing and browser handoff.
+    # Invocation-only values come from webStartup; the advertised URL is
     # this row's `publicUrl`, otherwise the bind-address URL.
     - id: web-runtime
       name: '@deepseek-ai/dsh-web-app'
       inject: [webStartup]
       config:
-        openBrowser: !!js ctx.webStartup.openBrowser
-        printUrl: true
         publicUrl: !!js ctx.webStartup.publicUrl
         surfaceContext: true
+        openBrowser: !!js ctx.webStartup.openBrowser
+        printUrl: true
 
     # Model context for an agent that inspects or extends the harness serving
     # this GUI: value-free prompt sections plus the current checkout and GUI
@@ -265,7 +213,6 @@
     # also drops the two value lines.
     - id: harness-dev-context
       name: '@deepseek-ai/dsh-harness-dev-context'
-      disabled: true
 
     # The client-plugin reload chain, always mounted: it is idle until a
     # rebuild watcher (pnpm run dev:web) actually rewrites client bundles. It
@@ -296,6 +243,9 @@
         # The listener's bind IP is accepted separately from this list.
         trustedHosts: !!js ctx.webStartup.trustedHosts
 
+    - id: authentication-token
+      name: '@deepseek-ai/dsh-host-authentication-token'
+
     # Raw Blob and ReadableStream uploads run independently of Connection's
     # RPC and generation service.
     - id: file-upload
@@ -309,14 +259,6 @@
 
     - id: ui-theme
       name: '@deepseek-ai/dsh-client-ui-theme'
-      config:
-        preference: system
-        fontSize: 14
-        codeFontSize: 13
-        terminalFontSize: 13
-        textFontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, Microsoft YaHei UI, sans-serif'
-        codeFontFamily: 'Cascadia Code, SFMono-Regular, Consolas, monospace'
-        terminalFontFamily: 'Cascadia Code, SFMono-Regular, Consolas, monospace'
 
     - id: locale
       name: '@deepseek-ai/dsh-client-locale'
@@ -336,6 +278,11 @@
     - id: ui-session
       name: '@deepseek-ai/dsh-client-ui-session'
 
+    # Host reading records (ctx.sessionStatus) and the Session status table behind
+    # ctx.uiSession.sessionStatus and useSessionStatus.
+    - id: ui-session-status
+      name: '@deepseek-ai/dsh-client-ui-session-status'
+
     # Unified resource model: protocol providers behind the useResource hook.
     - id: resources
       name: '@deepseek-ai/dsh-client-resources'
@@ -348,8 +295,27 @@
       name: '@deepseek-ai/dsh-client-ui-sidebar-right'
 
 
-    - id: office-to-pdf
-      name: '@deepseek-ai/dsh-office-to-pdf'
+    - id: office-kit
+      name: '@deepseek-ai/dsh-office-kit'
+      config:
+        outputDirectory: !!js dshHomePath('office-kit', 'outputs')
+
+    # Every profile uses the packaged Office skills. Desktop supplies their Python
+    # environment through the primary runtime named by DSH_PRIMARY_RUNTIME and
+    # selects `workspace-dependencies`. A Desktop profile launched without a
+    # nonempty value disables workspace-dependencies and, like the other
+    # profiles, selects `user` to direct the model to the user's Python.
+    - id: workspace-dependencies
+      name: '@deepseek-ai/dsh-tool-workspace-dependencies'
+      disabled: !!js "ctx.get('profileContext')?.name !== 'desktop' || !process.env.DSH_PRIMARY_RUNTIME"
+      config:
+        source: !!js process.env.DSH_PRIMARY_RUNTIME
+        root: !!js dshHomePath('dsh-runtimes', 'dsh-primary-runtime')
+
+    - id: skill-office
+      name: '@deepseek-ai/dsh-skill-office'
+      config:
+        pythonEnvironment: !!js "ctx.get('profileContext')?.name === 'desktop' && process.env.DSH_PRIMARY_RUNTIME ? 'workspace-dependencies' : 'user'"
 
     # The right Sidebar's document tab: bounded file reads with selectable
     # Markdown, code, HTML, PDF, Office, and plain-text renderers.
@@ -369,17 +335,12 @@
 
     - id: ui-settings
       name: '@deepseek-ai/dsh-client-ui-settings'
-      config:
-        enabled: true
 
     - id: ui-settings-general
       name: '@deepseek-ai/dsh-client-ui-settings-general'
 
     - id: ui-settings-models
       name: '@deepseek-ai/dsh-client-ui-settings-models'
-      config:
-        credentialOnboarding: false
-        welcomeNotice: false
 
     # Plugin management: the sidebar Plugins page installs, enables, disables,
     # and removes the profile's bundles through the `pluginManager` Remote.
@@ -404,13 +365,9 @@
     - id: ui-chat
       name: '@deepseek-ai/dsh-client-ui-chat'
 
-    # Product identity uses the existing brand slots.
+    # Official occupants for the sidebar brand slots and the home whale frame layer.
     - id: ui-brand-official
       name: '@deepseek-ai/dsh-client-ui-brand-official'
-      disabled: true
-
-    - id: ui-brand-decrypthub
-      name: '@deepseek-ai/dsh-client-ui-brand-decrypthub'
 
     - id: ui-attachment
       name: '@deepseek-ai/dsh-client-ui-attachment'
@@ -512,7 +469,6 @@
 
     - id: ui-settings-session-log
       name: '@deepseek-ai/dsh-client-ui-settings-session-log'
-      disabled: true
 
     # The Built-in plugins settings section: the navigation entry and the tab
     # row the inventory tab registers into. The official configuration pages
@@ -600,10 +556,7 @@
 # catalog and loader at all.
 
 - id: skill-filesystem
-  config:
-    includeDefaultRoots: false
-    roots:
-      - !!js dshHomePath('skills')
+  disabled: true
 
 - id: tool-skill
   disabled: true
@@ -672,13 +625,3 @@
       name: '@deepseek-ai/dsh-agent-preset-registry'
       config:
         default: standard
-
-# Product tool: report the running product runtime to the model.
-- insert:
-    - id: tool-product-runtime
-      name: '@deepseek-ai/dsh-product-runtime'
-
-# Product row: tool-product-sessions.
-- insert:
-    - id: tool-product-sessions
-      name: '@deepseek-ai/dsh-tool-product-sessions'

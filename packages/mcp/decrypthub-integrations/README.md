@@ -42,13 +42,19 @@ The Agent owns its child Fiber. Disposing the Agent or this product plugin drain
 <a id="model-experience"></a>
 ## Model Experience
 
-The stable `decrypthub_status` schema lets the model request current service and target observations without changing a device. Its output is logged through the normal tool pipeline. The shared MCP client owns connected analysis tools, results, and server instructions.
+### Device status and connected tools
 
-The result names the configured device endpoints separately from MCP transport state and the observed app inventory. Analysis tools use the selected endpoint; observing an app at another saved address does not authorize or route an analysis call to it.
+#### What the model sees
+
+The stable `decrypthub_status` tool reports observed component services, target inventories and the configured endpoint separately from MCP transport state. Analysis tools use the selected endpoint; an observation at another saved address does not route analysis calls to it. WDH, ADH and IDH supply their connected MCP tool schemas, results and server instructions through the upstream client.
+
+#### Token effect
+
+This plugin registers `decrypthub_status` through the upstream tool registry. Its results are logged through the normal tool pipeline; the shared MCP client owns all connected analysis tool registrations and their instructions. WDH uses one Agent-owned connection for browser operations.
 
 #### KV Cache effect
 
-Tool inventories and server instructions change when their connections or server contributions change, following the upstream MCP client's request assembly.
+The status schema stays stable. Tool results append observations to the session. Connected tool inventories and instructions change when their server contributions change, following the upstream MCP client's request assembly.
 
 ## Known Limitations and Deferred Work
 

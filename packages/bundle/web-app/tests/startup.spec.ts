@@ -62,7 +62,7 @@ export const apply = ctx => globalThis.__webStartupApply(ctx)
     '  config:',
     "    host: !!js ctx.webStartup.host ?? '127.0.0.1'",
     '    openBrowser: !!js ctx.webStartup.openBrowser',
-    '    port: !!js ctx.webStartup.port ?? 47391',
+    '    port: !!js ctx.webStartup.port ?? 3080',
     '    publicUrl: !!js ctx.webStartup.publicUrl',
     '    trustedHosts: !!js ctx.webStartup.trustedHosts',
     '    tls: !!js ctx.webStartup.tls',
@@ -131,7 +131,7 @@ describe('web command-line provider', () => {
     expect(observed.readerConfig).toEqual({
       host: '127.0.0.1',
       openBrowser: true,
-      port: 47391,
+      port: 3080,
       trustedHosts: [],
     })
   })
@@ -168,7 +168,7 @@ describe('web command-line provider', () => {
     expect(observed.readerConfig).toEqual({
       host: '127.0.0.1',
       openBrowser: true,
-      port: 47391,
+      port: 3080,
       publicUrl: 'https://web.example/ui',
       trustedHosts: ['lab.internal'],
     })

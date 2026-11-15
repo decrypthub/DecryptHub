@@ -15,8 +15,8 @@
   en: 127ea90553cb6af7
   zh: 7b1c5aec8558c684
 /decrypthub-desktop/application-overview:
-  en: fd952132b1e618a4
-  zh: 39aa6e1ba34134de
+  en: 14461921839fb9dd
+  zh: bf53c02455514867
 /decrypthub-desktop/terminal-command:
   en: 98d7d0ed95ce2b5f
   zh: e604d41b6689bbc6
@@ -27,8 +27,8 @@
   en: 3724c53da4f7647b
   zh: 76ae549d43c99bb4
 /decrypthub-desktop/key-technical-decisions/bundled-workspace-dependencies:
-  en: 3368ff9b955ada69
-  zh: e9209ef6ad4fd305
+  en: 764bdc09fa8f5701
+  zh: da7897e14434b43c
 /decrypthub-desktop/bundled-command-runtime:
   en: 372297005b57a08b
   zh: 074a635ac17e4362
@@ -51,14 +51,14 @@
   en: 617a89aeb28131b9
   zh: 4d84bd5d86501c86
 /decrypthub-desktop/package:
-  en: ac31ebdd9de54f34
-  zh: 921e534d5c4b3a16
+  en: 7200a35dbed997c3
+  zh: 511d6961530757f1
 /decrypthub-desktop/windows-installer-interface:
-  en: 9b90a2651a6d2b52
-  zh: 86d4d9c4358aad80
+  en: 3a70021830865253
+  zh: 0467be8b505446cb
 /decrypthub-desktop/updates:
-  en: 67bf0a18faa7aa76
-  zh: 782e14ce62bb939f
+  en: 8b0b9efeb83727ef
+  zh: 5ee95de48ceab392
 /decrypthub-desktop/updates/local-desktop-settings:
   en: dbe57394894b7368
   zh: a3bb788c2ce631a4

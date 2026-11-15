@@ -14,11 +14,11 @@ DecryptHub 是兼容 DSH 插件与配置的独立产品分支。全局记忆、�
 
 ## 构建与运行
 
-使用 Node.js 24.9 或更新版本和项目固定的 pnpm 工具链。执行 `pnpm install --frozen-lockfile` 后，按照 [AGENTS.md](AGENTS.md) 使用根目录构建命令。产品插件在本地打包进入 Desktop；发布排除项清单仍需按[上游差异记录](UPSTREAM-CHANGES.zh.md)补齐。
+使用 Node.js 24.9 或更新版本和项目固定的 pnpm 工具链。执行 `pnpm install --frozen-lockfile` 后，按照 [AGENTS.md](AGENTS.md) 使用根目录构建命令。产品插件在本地打包进入 Desktop；13 个产品包均已按[上游差异记录](UPSTREAM-CHANGES.zh.md)排除在上游 npm 发布集合外。
 
 在独立的 `WebDecryptHub-Runtime` 仓库使用其组件构建器构建 WDH。将 `DSH_DESKTOP_WDH_COMPONENT_DIR` 指向组件产物目录，再执行 `pnpm --filter @deepseek-ai/dsh-desktop run package:mac:arm64:dir --unsigned`。应用产物位于 `apps/desktop/.desktop-build/targets/mac-arm64/unsigned-artifacts/mac-arm64/DecryptHub.app`，运行打包产物和内置运行时，不监听源码。
 
-安装包包含 WDH 及其许可证声明，不包含浏览器内核。产品组合选择 CloakBrowser，为每个 Agent 工作区创建独立客户端和用户目录；使用浏览器前需单独安装兼容内核。ADH、IDH 是可选的独立 MCP 命令，需要单独安装，并通过产品插件配置启用。此组合不会附加、提权或重启设备。
+默认通过组件源安装 WDH；显式配置时也可随包附带经过校验的 WDH 与许可证声明。浏览器内核单独安装。产品组合选择 CloakBrowser，为每个 Agent 工作区创建独立客户端和用户目录；使用浏览器前需单独安装兼容内核。ADH、IDH 是可选的独立 MCP 命令，需要单独安装，并通过产品插件配置启用。此组合不会附加、提权或重启设备。
 
 自定义 MCP 在「设置 → 自定义 MCP」中管理。「官方组件」提供独立侧栏与设置入口，管理 WDH / ADH / IDH 版本、校验安装、回滚和连接配置。MCP 连接成功不代表设备可用，内嵌 WDH 工作台仍待迁移。
 

@@ -251,7 +251,7 @@ export async function removeFileCommand(options: FileCommandInstallation, expect
             if ((await readEntry(options.destination)).kind === 'missing') await restoreEntry(options, removed, options.destination, entry.fingerprint)
             else await unlink(removed)
           } catch (restoreError) {
-            throw new AggregateError([error, restoreError], 'The DecryptHub command link is preserved at ' + removed)
+            throw new AggregateError([error, restoreError], 'The Desktop command link is preserved at ' + removed)
           }
         }
         throw error

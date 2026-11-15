@@ -11,7 +11,7 @@ The device editor provides an explicit status check and shows service liveness s
 
 ## Summary
 
-One sidebar and settings entry, "Skills & MCP", with Memory-style pill tabs for MCP and Skills. The MCP tab stacks official components above custom MCP. The Skills tab explains the skills root and can hand off to the agent. Official component cards show status and open a configuration dialog. Imports identify conflicts and unsupported transports before saving. Connection settings use revision checks and credential references. A third settings section, "Import from DSH", copies the conversations of an official Harness home into this app and groups them by their original workspace; only conversations are imported, because they are the one stable interchange unit.
+One sidebar and settings entry, "Skills & MCP", groups official components and custom MCP, with a separate Skills tab. Component cards show observed status and open configuration dialogs. Imports report conflicts and unsupported transports before saving; connection edits use revision checks and credential references. "Import from DSH" copies conversations from a Harness home into this app, grouping them by their original workspace. It imports conversations only.
 
 ## Table of Contents
 

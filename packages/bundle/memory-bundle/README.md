@@ -59,3 +59,8 @@ The layer adds no request content directly; the mounted host packages own cache 
 ## Known Limitations and Deferred Work
 
 - Disabling the bundle removes both memory and role together because the management page is fused; there is no per-surface profile switch.
+
+<a id="dev-note"></a>
+### Dev Note
+
+None.

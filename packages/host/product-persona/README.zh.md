@@ -7,7 +7,7 @@ kind: "package-reference"
 
 [English](README.md) | 中文
 
-## 摘要
+## 概述
 
 把一份角色定义存放在 `product-persona` 设置命名空间中，并以序号 20 注入为系统提示词片段：位于 Harness 身份之后、工作区指引之前。文本为空时不贡献内容；`interpolate: false` 保持原文，因此角色里出现的 `{{变量}}` 不会被改写。该命名空间同时是设置页数据源，用户编辑与部署默认写的是同一字段。
 
@@ -49,7 +49,7 @@ kind: "package-reference"
 - **不做变量插值** — 角色文本按字面处理，不能引用提示词变量。
 
 <a id="dev-note"></a>
-### 开发注记
+### 开发备注
 
 <details>
 <summary>维护者工作上下文 — 点击展开</summary>

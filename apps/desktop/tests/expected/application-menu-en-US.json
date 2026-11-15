@@ -1,6 +1,6 @@
 [
   {
-    "label": "About DecryptHub",
+    "label": "About DeepSeek Harness",
     "role": "about"
   },
   {
@@ -10,7 +10,7 @@
     "label": "Check for Updates…"
   },
   {
-    "label": "Manage DecryptHub command (dsh)…"
+    "label": "Manage dsh Command…"
   },
   {
     "type": "separator"
@@ -24,7 +24,7 @@
   },
   {
     "role": "hide",
-    "label": "Hide DecryptHub"
+    "label": "Hide DeepSeek Harness"
   },
   {
     "role": "hideOthers",
@@ -39,6 +39,6 @@
   },
   {
     "role": "quit",
-    "label": "Quit DecryptHub"
+    "label": "Quit DeepSeek Harness"
   }
 ]

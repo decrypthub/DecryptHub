@@ -1,5 +1,7 @@
 # DecryptHub 桌面端 — 交接单（2026-11-13）
 
+历史快照：下述版本、未提交数量和退出码解释不代表现状。当前入口见 [HANDOFF.zh.md](HANDOFF.zh.md)；验收必须核对真实退出码与完整门禁结果。
+
 给接手的 Agent/工程师。先读这份，再读仓库自带的 `AGENTS.md`、`PRODUCT-DESIGN.md`。
 
 ---
@@ -10,7 +12,7 @@
 
 | 项 | 值 |
 |---|---|
-| 分支 / HEAD | `feat/dsh-rc1` @ `57d0e53552` |
+| 分支 / HEAD | `feat/dsh-rc1`，当时提交主题为「fix: 归一化 volatile 配置值，修复提示词片段读取类型错误」 |
 | 已装版本 | `0.2.2-rc.1.20261113.21`（`%LOCALAPPDATA%\Programs\DecryptHub`） |
 | 包内版本号 | `apps/desktop/package.json` 与根 `package.json` 均为 `0.2.2-rc.1`，构建时用 `--build-version` 追加日期序号 |
 | 未提交 | 402 项（含他人未完成改动，见 §5） |

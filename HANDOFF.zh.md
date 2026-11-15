@@ -1,6 +1,6 @@
 # 跨设备交接
 
-当前产品分支：`feat/dsh-rc1`，远端：`https://github.com/decrypthub/DecryptHub.git`。固定上游基线是 DeepSeek Harness `0.2.2-rc.1`（upstream PR #7873）；保留的产品修改与已核对的上游最新提交见[上游差异记录](UPSTREAM-CHANGES.zh.md)。`main` 是更早的 Tauri 实现，`handoff/ui-alignment-20261104` 是它的 UI 交接快照；两者都只读，不要合并进本分支。
+当前产品分支：`feat/dsh-rc1`，远端：`https://github.com/decrypthub/DecryptHub.git`。固定上游基线是 DeepSeek Harness `0.2.2-rc.3`（upstream PR #8422）；保留的产品修改与已核对的上游最新提交见[上游差异记录](UPSTREAM-CHANGES.zh.md)。`main` 是更早的 Tauri 实现，`handoff/ui-alignment-20261104` 是它的 UI 交接快照；两者都只读，不要合并进本分支。
 
 ## 在另一台电脑接续
 

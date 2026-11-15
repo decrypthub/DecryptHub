@@ -2,7 +2,6 @@
 
 - id: system-prompt
   config:
-    includeHarnessIdentity: false
     personaPrefix: >-
       You are a coding agent powered by the {{model}} model.
 

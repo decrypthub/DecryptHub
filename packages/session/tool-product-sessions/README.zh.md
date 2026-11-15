@@ -7,7 +7,7 @@ kind: "package-reference"
 
 [English](README.md) | 中文
 
-## 摘要
+## 概述
 
 新增两个只读工具：`session_list` 报告调用方工作区中最新创建的会话及其 id、标题、创建时间；`session_read` 返回该工作区内某个会话末尾的用户与助手消息。二者都通过共享的 `ctx.sessionQuery` 服务读取，因此与产品其余部分使用同一份 live-preferred 语料，且不会自己打开会话。
 
@@ -50,7 +50,7 @@ schema 与位置稳定，提示词前缀可持续命中缓存。列会话只追�
 - **只有创建时间** — 存储的 header 只记录创建时间、不记录最后活动时间，因此列表按创建时间倒序，而不是按最近活动倒序。
 
 <a id="dev-note"></a>
-### 开发注记
+### 开发备注
 
 <details>
 <summary>维护者工作上下文 — 点击展开</summary>

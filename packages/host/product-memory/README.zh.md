@@ -7,7 +7,7 @@ kind: "package-reference"
 
 [English](README.md) | 中文
 
-## 摘要
+## 概述
 
 把持久事实存放在本插件的设置命名空间中，作为两条受 `maxSectionChars` 限制的系统提示词片段注入，并向模型提供 `memory_write`、`memory_list`、`memory_delete`。条目带 `user` 或 `project` 作用域与 ISO-8601 时间戳：`user` 条目全局注入，`project` 条目只注入写入它的那个工作区的智能体（条目会记录该工作区）。持久化由设置命名空间负责，重启后仍在，且不额外写入会话事件。
 
@@ -49,7 +49,7 @@ kind: "package-reference"
 - **历史 project 条目** — 没有记录工作区的条目来自工作区标记上线之前。它们会在所有工作区可见而不是被丢弃；在某个工作区用 `memory_write` 以 project 作用域重写后会补记该工作区。设置页对「新建」条目禁用 project 作用域（页面没有可绑定的工作区）；工作区记忆请在对话里让智能体写入。
 
 <a id="dev-note"></a>
-### 开发注记
+### 开发备注
 
 <details>
 <summary>维护者工作上下文 — 点击展开</summary>

@@ -19,4 +19,5 @@ export const OfficialConfigurationReview = z.object({
   idh: deviceConfiguration,
 })
 
+/** Reviewed device and browser settings accepted by the editor. */
 export type OfficialConfigurationReview = z.infer<typeof OfficialConfigurationReview>

@@ -1,6 +1,6 @@
 [
   {
-    "label": "关于 DecryptHub",
+    "label": "关于 DeepSeek Harness",
     "role": "about"
   },
   {
@@ -10,7 +10,7 @@
     "label": "检查更新…"
   },
   {
-    "label": "管理 DecryptHub 命令（dsh）…"
+    "label": "管理 dsh 命令…"
   },
   {
     "type": "separator"
@@ -24,7 +24,7 @@
   },
   {
     "role": "hide",
-    "label": "隐藏 DecryptHub"
+    "label": "隐藏 DeepSeek Harness"
   },
   {
     "role": "hideOthers",
@@ -39,6 +39,6 @@
   },
   {
     "role": "quit",
-    "label": "退出 DecryptHub"
+    "label": "退出 DeepSeek Harness"
   }
 ]

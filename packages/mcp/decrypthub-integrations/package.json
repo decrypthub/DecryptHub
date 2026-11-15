@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-decrypthub-integrations",
   "description": "Session-scoped WDH and optional ADH / IDH MCP integration",
-  "version": "0.2.2-rc.1",
+  "version": "0.2.2-rc.3",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
@@ -22,7 +22,10 @@
   "files": [
     "locale/*.json",
     "lib/index.js",
-    "lib/types/**/*.d.ts"
+    "lib/types/**/*.d.ts",
+    "lib/types/**/*.d.ts.map",
+    "lib/**/*.js.map",
+    "src"
   ],
   "license": "MIT",
   "peerDependencies": {
@@ -62,5 +65,6 @@
     "@deepseek-ai/dsh-system-prompt": {
       "optional": true
     }
-  }
+  },
+  "private": true
 }

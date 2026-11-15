@@ -14,11 +14,11 @@ Community login uses the [native DecryptHub account plugin](packages/client/ui-s
 
 ## Build and run
 
-Use Node.js 24.9 or later and the pinned pnpm toolchain. Install with `pnpm install --frozen-lockfile`, then use the root build commands documented in [AGENTS.md](AGENTS.md). Product plugins are packed locally for Desktop; the publication-exclusion inventory still needs reconciliation as recorded in [the upstream change record](UPSTREAM-CHANGES.md).
+Use Node.js 24.9 or later and the pinned pnpm toolchain. Install with `pnpm install --frozen-lockfile`, then use the root build commands documented in [AGENTS.md](AGENTS.md). Product plugins are packed locally for Desktop; all 13 product packages are excluded from upstream npm publication as recorded in [the upstream change record](UPSTREAM-CHANGES.md).
 
 Build WDH in the independent `WebDecryptHub-Runtime` checkout with its component builder. Set `DSH_DESKTOP_WDH_COMPONENT_DIR` to the resulting component directory, then run `pnpm --filter @deepseek-ai/dsh-desktop run package:mac:arm64:dir --unsigned`. The assembled application is at `apps/desktop/.desktop-build/targets/mac-arm64/unsigned-artifacts/mac-arm64/DecryptHub.app`. It uses bundled artifacts and the packaged runtime without a source watcher.
 
-The package contains WDH and its license notices, but no browser kernel. The product composition selects CloakBrowser and creates a separate client and profile for each Agent workspace; install a compatible kernel separately before using the browser. ADH and IDH remain optional, independently installed MCP commands; enable them through the product plugin's configuration. No device is attached, rooted, or restarted by this composition.
+The default package installs WDH from the component feed; an explicitly configured verified WDH build can be bundled with its license notices. Browser kernels are installed separately. The product composition selects CloakBrowser and creates a separate client and profile for each Agent workspace; install a compatible kernel separately before using the browser. ADH and IDH remain optional, independently installed MCP commands; enable them through the product plugin's configuration. No device is attached, rooted, or restarted by this composition.
 
 Custom MCP is managed under Settings → Custom MCP. Official components has its own sidebar and settings entry for WDH / ADH / IDH versions, verified installation, rollback and connection configuration. Device availability is not inferred from an MCP connection. The embedded WDH workbench remains pending.
 

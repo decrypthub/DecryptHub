@@ -21,11 +21,20 @@
   en: d500df0c57e9fc54
   zh: 6fa82db84e642525
 /deepseek-ai-dsh-decrypthub-integrations/model-experience:
-  en: 4dc4f2aff626b36b
-  zh: 6bb0026e1aad5701
-/deepseek-ai-dsh-decrypthub-integrations/model-experience/kv-cache-effect:
-  en: 3b0ca0f420af8a60
-  zh: 619cfcc157871560
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-decrypthub-integrations/model-experience/device-status-and-connected-tools:
+  en: 50e08ffae76e5137
+  zh: 9778dc39a7f0b8ca
+/deepseek-ai-dsh-decrypthub-integrations/model-experience/device-status-and-connected-tools/what-the-model-sees:
+  en: b0b944e872561ad6
+  zh: 4a6a82035b8638e7
+/deepseek-ai-dsh-decrypthub-integrations/model-experience/device-status-and-connected-tools/token-effect:
+  en: 8ac1539fc8a391fe
+  zh: 2900e979c277302f
+/deepseek-ai-dsh-decrypthub-integrations/model-experience/device-status-and-connected-tools/kv-cache-effect:
+  en: 88170efc9539f4c6
+  zh: 4e3e854779b1310a
 /deepseek-ai-dsh-decrypthub-integrations/known-limitations-and-deferred-work:
   en: 54c2fa5cb5ff30da
   zh: 61474b2ab6549d9e

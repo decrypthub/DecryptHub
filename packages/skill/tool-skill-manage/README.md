@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Gives the model three tools over one writable skill root: `skill_create` writes `<name>/SKILL.md` with frontmatter, `skill_list` reads the stored bundles, and `skill_delete` removes one. The description is a JSON-quoted YAML scalar and must stay on one line, so punctuation cannot silently break the frontmatter the catalog parser reads. The same directory is mounted as a `skill-filesystem` root, so an authored skill reaches the next step's catalog through the upstream watcher instead of a private code path. The tool records the names it created in `.created-by-agent.json` and refuses to overwrite or delete a skill it does not own, so a model cannot destroy a hand-written skill.
+Exposes `skill_create`, `skill_list`, and `skill_delete` over one writable skill root. Created bundles use `<name>/SKILL.md`; descriptions use JSON-quoted, single-line YAML scalars. The upstream `skill-filesystem` provider scans that directory, so newly authored skills enter the next catalog through its watcher. `.created-by-agent.json` records tool-owned names. The tools refuse to overwrite or delete hand-written skills.
 
 ## Table of Contents
 

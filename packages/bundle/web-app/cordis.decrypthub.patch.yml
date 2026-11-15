@@ -1,0 +1,64 @@
+# Product-owned composition, applied after the upstream Web bundle and its presets.
+# Existing Desktop profiles keep the same bundle tuple and user patch precedence.
+- id: session-log-deepseek
+  disabled: true
+- id: session-telemetry-otel
+  disabled: true
+- id: llm-deepseek-account
+  disabled: true
+- id: deepseek-account
+  disabled: true
+- id: desktop-product-telemetry
+  disabled: true
+- id: product-analytics
+  disabled: true
+- id: ui-settings-account
+  disabled: true
+- id: ui-account-notifications
+  disabled: true
+- id: ui-settings-session-log
+  disabled: true
+- id: ui-brand-official
+  disabled: true
+- id: harness-dev-context
+  disabled: true
+- id: ui-settings-models
+  config:
+    credentialOnboarding: false
+
+- insert:
+    - id: ui-brand-decrypthub
+      name: '@deepseek-ai/dsh-client-ui-brand-decrypthub'
+    - id: ui-settings-decrypthub-account
+      name: '@deepseek-ai/dsh-client-ui-settings-decrypthub-account'
+    - id: decrypthub-components
+      name: '@deepseek-ai/dsh-decrypthub-components'
+      config:
+        directory: !!js (ctx.get('profileContext')?.home ?? process.env.DSH_HOME ?? '') + '/components'
+        bundledWdhEntry: !!js process.env.DSH_WDH_ENTRY ?? ''
+        pythonCommand: python3
+        componentFeed: !!js process.env.DSH_COMPONENT_FEED ?? 'http://192.168.200.195:18080/components'
+    - id: decrypthub-integrations
+      name: '@deepseek-ai/dsh-decrypthub-integrations'
+      inject: [decrypthubComponents]
+      config:
+        wdh:
+          enabled: true
+          entry: !!js process.env.DSH_WDH_ENTRY ?? ''
+          dataDirectory: !!js process.env.DSH_WDH_DATA_DIR ?? ''
+          browser: cloak
+        adh:
+          enabled: false
+          command: adh
+          args: [mcp]
+        idh:
+          enabled: false
+          command: idh
+          args: [mcp]
+        startupTimeoutMs: 10000
+        closeTimeoutMs: 5000
+        toolCallTimeoutMs: 60000
+    - id: tool-product-runtime
+      name: '@deepseek-ai/dsh-product-runtime'
+    - id: tool-product-sessions
+      name: '@deepseek-ai/dsh-tool-product-sessions'

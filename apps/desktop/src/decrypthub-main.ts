@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { applyProductIdentity } from './product-identity.ts'
 
 const runtimeHome = applyProductIdentity(app, process.env)
+process.env.DSH_CLIENT_TITLE ??= 'DecryptHub'
+process.env.DSH_DESKTOP_PROTOCOL = 'decrypthub'
 process.env.DSH_DESKTOP_ONBOARDING = 'models'
 process.env.DSH_DESKTOP_ACCOUNT_PROVIDER = 'decrypthub'
 process.env.DSH_TELEMETRY_DISABLED = '1'

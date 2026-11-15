@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-memory-bundle",
   "description": "Default-on product memory and role definition with their management page",
-  "version": "0.2.2-rc.1",
+  "version": "0.2.2-rc.3",
   "icon": "./icon.svg",
   "type": "module",
   "main": "lib/index.js",
@@ -22,7 +22,10 @@
     "docs",
     "lib/index.js",
     "cordis.patch.yml",
-    "lib/types/**/*.d.ts"
+    "lib/types/**/*.d.ts",
+    "lib/types/**/*.d.ts.map",
+    "lib/**/*.js.map",
+    "src"
   ],
   "license": "MIT",
   "dsh": {
@@ -40,5 +43,6 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:~"
-  }
+  },
+  "private": true
 }

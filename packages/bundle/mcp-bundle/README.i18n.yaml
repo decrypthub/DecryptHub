@@ -10,10 +10,10 @@
   zh: f6c30db573b2ce32
 /deepseek-ai-dsh-mcp-bundle/summary:
   en: e3da0d7c33809bb0
-  zh: 9308a5e512150fbf
+  zh: e02eb6c3c8b0798f
 /deepseek-ai-dsh-mcp-bundle/table-of-contents:
   en: b563e4ec4727d0de
-  zh: b563e4ec4727d0de
+  zh: 96743a2cfcba9955
 /deepseek-ai-dsh-mcp-bundle/use-this-package:
   en: f5602dfa98e7602d
   zh: 13742d91556abea3
@@ -30,5 +30,8 @@
   en: 1e55c2f1e35364ef
   zh: 0990251c76e63fc5
 /deepseek-ai-dsh-mcp-bundle/known-limitations-and-deferred-work:
-  en: 32841ee3126a07c9
-  zh: 433b2a771d2a5fd5
+  en: 4a17566ed5c68c75
+  zh: f58b1a01f853a57d
+/deepseek-ai-dsh-mcp-bundle/known-limitations-and-deferred-work/dev-note:
+  en: 0a1253c6f7b5e8b9
+  zh: 9f56528562c7c914
