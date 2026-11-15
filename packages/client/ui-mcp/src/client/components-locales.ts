@@ -1,5 +1,9 @@
 /** Official component copy stays separate from wire identifiers and diagnostics. */
 export const componentsEn = {
+  'official.refreshTargets': 'Check devices', 'official.targetsUnchecked': 'Not checked',
+  'official.targetsFailed': 'Status unavailable; update the component and retry',
+  'official.serviceOnline': 'Service online', 'official.serviceOffline': 'Service offline',
+  'official.onlineTargets': '{count} apps online', 'official.observedAt': 'Observed at {time}',
   'official.endpointPlaceholder': 'http://127.0.0.1:8080',
   'editor.tabs': 'Editor mode', 'editor.form': 'Form', 'editor.json': 'JSON', 'editor.jsonHint': 'Edit the saved configuration as JSON. It is validated before saving.',
   'official.nav': 'Official components', 'official.title': 'DecryptHub components',
@@ -44,6 +48,10 @@ export const componentsEn = {
 } as const
 /** Translations use the exact same keys as the English dictionary. */
 export const componentsZh: Record<keyof typeof componentsEn, string> = {
+  'official.refreshTargets': '检查设备状态', 'official.targetsUnchecked': '尚未检查',
+  'official.targetsFailed': '无法查询状态，请更新组件后重试',
+  'official.serviceOnline': '服务在线', 'official.serviceOffline': '服务离线',
+  'official.onlineTargets': '{count} 个应用在线', 'official.observedAt': '检查时间：{time}',
   'official.endpointPlaceholder': 'http://127.0.0.1:8080',
   'editor.tabs': '编辑方式', 'editor.form': '表单', 'editor.json': 'JSON', 'editor.jsonHint': '以 JSON 编辑保存的配置，保存前会校验。',
   'official.nav': '官方组件', 'official.title': 'DecryptHub 组件',

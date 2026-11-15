@@ -89,6 +89,7 @@ function mount(ctx: Context): void {
     uninstall: id => confirmed(official.uninstall(id)),
     reconnect: id => confirmed(official.reconnect(id)),
     inspectBrowser: () => confirmed(official.inspectBrowser()),
+    inspectTargets: id => confirmed(official.inspectTargets(id)),
     installBrowser: accepted => confirmed(official.installBrowser(accepted)),
     measureTools: id => confirmed(official.measureTools(id)),
     configure: async (id, config) => {

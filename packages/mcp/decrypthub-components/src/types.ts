@@ -4,6 +4,25 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
 /** Code-owned component identifiers. */
 export type ComponentId = 'wdh' | 'adh' | 'idh'
+/** A fresh read from an official CLI; an MCP transport is not evidence that a target is online. */
+export interface ComponentInventory {
+  schemaVersion: 1
+  component: ComponentId
+  version: string | null
+  checkedAt: string
+  error: string | null
+  connections: { endpoint: string; online: boolean; version: string | null; error: string | null }[]
+  targets: {
+    id: string
+    name: string
+    endpoint: string
+    online: boolean
+    pid?: string | number | null | undefined
+    package?: string | null | undefined
+    bundle?: string | undefined
+  }[]
+  browser?: { available: boolean; state: 'not-observed' } | undefined
+}
 /** Verified local component metadata, without commands supplied by a remote catalog. */
 export interface InstalledComponent {
   id: ComponentId
@@ -42,6 +61,8 @@ export interface ComponentView {
 }
 /** One refreshable catalog snapshot. */
 export interface ComponentsSnapshot {
+  /** Last explicit probes, each carrying its observation time; never inferred from installation. */
+  inventories?: Partial<Record<ComponentId, ComponentInventory>>
   components: ComponentView[]
   /** Tools the WDH component last reported while a session had it connected. */
   wdhTools: number | null

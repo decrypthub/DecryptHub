@@ -16,6 +16,7 @@ export interface ComponentsOperations {
   configure(id: ComponentId, config: OfficialConfiguration): Promise<unknown>
   reconnect(id: ComponentId): Promise<unknown>
   inspectBrowser(): Promise<unknown>
+  inspectTargets(id: ComponentId): Promise<unknown>
   installBrowser(accepted: boolean): Promise<unknown>
   measureTools(id: ComponentId): Promise<unknown>
 }

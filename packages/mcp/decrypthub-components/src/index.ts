@@ -20,6 +20,8 @@ import type {} from '@deepseek-ai/dsh-mcp-manager'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import type { BrowserKernelView } from './types.ts'
 import { probeTools } from './tool-probe.ts'
+import { parseInventory } from './inventory.ts'
+import type { ComponentInventory } from './types.ts'
 export type { ComponentId, ComponentOperation, ComponentView, ComponentsSnapshot, InstalledComponent, WdhConnectionView } from './types.ts'
 
 /** Deployment-owned directories; no catalog can choose an executable. */
@@ -70,6 +72,7 @@ export class DecryptHubComponents extends TypertRemoteService {
   private readonly operations = new Map<ComponentId, ComponentOperation>()
   private readonly jobs = new Map<ComponentId, { controller: AbortController; done: Promise<void> }>()
   private readonly wdh = new Map<string, WdhConnectionView>()
+  private readonly inventories = new Map<ComponentId, ComponentInventory>()
   /** Last measured WDH tool count; measured on demand, not tied to a live session. */
   private wdhTools: number | null = null
   private readonly measuring = new Map<ComponentId, Promise<string[] | null>>()
@@ -91,8 +94,13 @@ export class DecryptHubComponents extends TypertRemoteService {
     if (!isAbsolute(config.directory) || (config.bundledWdhEntry && !isAbsolute(config.bundledWdhEntry))) throw new Error('Component directories must be absolute')
     this.feed = config.componentFeed.trim() === '' ? undefined : componentFeedBaseUrl(config.componentFeed.trim())
     this.files = new ComponentFiles(config.directory, config.bundledWdhEntry)
+    ctx.on('decrypthub-components/activated', (id) => { this.inventories.delete(id); this.changed() })
     ctx.on('settings/document-updated', (ns) => {
-      if (ns === 'decrypthub-integrations') { this.browser = { state: 'unchecked', version: null }; this.changed() }
+      if (ns === 'decrypthub-integrations') {
+        this.browser = { state: 'unchecked', version: null }
+        this.inventories.clear()
+        this.changed()
+      }
     })
     ctx.effect(() => async () => {
       this.closed = true
@@ -212,6 +220,7 @@ export class DecryptHubComponents extends TypertRemoteService {
     }))
     return {
       components,
+      inventories: Object.fromEntries(this.inventories),
       wdhTools: this.wdhTools,
       wdh: [...this.wdh.values()],
       browser: this.browser,
@@ -219,6 +228,53 @@ export class DecryptHubComponents extends TypertRemoteService {
         ? { ...configuration.data, revision: namespace.revision, writable: this.ctx.settings.writable }
         : null,
     }
+  }
+
+  /** Query configured services through the verified CLI without changing a target.
+   * @param id - official component to inspect.
+   * @param signal - caller lifetime.
+   * @returns fresh service and target facts, including an explicit query failure.
+   */
+  @Remote
+  async inspectTargets(id: ComponentId, signal: AbortSignal): Promise<ComponentInventory> {
+    this.assertOwner()
+    signal.throwIfAborted()
+    const lifetime = AbortSignal.any([signal, this.lifetime.signal, AbortSignal.timeout(this.config.requestTimeoutMs)])
+    let inventory: ComponentInventory
+    try {
+      const namespace = this.ctx.settings.describe().find(row => row.ns === 'decrypthub-integrations')
+      let text: string
+      if (id === 'wdh') {
+        const config = z.object({ wdh: z.object({ browser: z.enum(['system', 'cloak']) }) }).parse(namespace?.value)
+        text = await this.browserCommand(['status', '--json', '--browser', config.wdh.browser], lifetime)
+      } else {
+        const config = z.object({ command: z.string(), endpoint: z.string().default(''), devices: z.array(z.string()).max(32).default([]) }).parse(
+          z.record(z.string(), z.unknown()).parse(namespace?.value)[id])
+        const endpoints = [...new Set([...config.devices, ...(config.endpoint ? [config.endpoint] : [])])]
+        const args = ['status', '--json', '--timeout', '2', ...(id === 'idh' ? ['--no-saved'] : [])]
+        for (const endpoint of endpoints) args.push('--endpoint', endpoint)
+        const runtime = await this.runtime(id, config.command, args)
+        const handle = this.ctx.subprocess.spawn({
+          argv: [runtime.command, ...runtime.args], env: runtime.env,
+          cwd: runtime.cwd ?? this.config.directory, graceMs: this.config.processGraceMs, signal: lifetime,
+          stdio: { stdin: 'ignore', stdout: { maxBytes: 1_048_576 }, stderr: { maxBytes: 4096 } },
+        })
+        const result = await handle.done
+        if (!await handle.waitForExit(AbortSignal.timeout(this.config.processGraceMs))) throw new Error('Component status cleanup was not confirmed')
+        lifetime.throwIfAborted()
+        if (result.exitCode !== 0) throw new Error('Install a component CLI with status --json support')
+        text = handle.collected.stdout?.readFrom(0).text ?? ''
+      }
+      inventory = parseInventory(text, id)
+    } catch (error) {
+      signal.throwIfAborted()
+      this.lifetime.signal.throwIfAborted()
+      inventory = { schemaVersion: 1, component: id, version: null, checkedAt: new Date().toISOString(),
+        error: error instanceof Error ? error.message : 'Component status query failed', connections: [], targets: [] }
+    }
+    this.inventories.set(id, inventory)
+    this.changed()
+    return inventory
   }
 
   /** Start one installed component once and list its tools without keeping a connection.
@@ -405,7 +461,7 @@ export class DecryptHubComponents extends TypertRemoteService {
     if (id === 'wdh') this.browser = { state: 'unchecked', version: null }
     try {
       const namespace = this.ctx.settings.describe({ redactSecrets: true }).find(row => row.ns === 'decrypthub-integrations')
-      const enabled = z.object({ [id]: z.object({ enabled: z.boolean() }).passthrough() }).passthrough().safeParse(namespace?.value)
+      const enabled = z.object({ [id]: z.object({ enabled: z.boolean() }).loose() }).loose().safeParse(namespace?.value)
       if (namespace && enabled.success && enabled.data[id]?.enabled === true) {
         await this.ctx.settings.mutate('decrypthub-integrations', [{ op: 'set', path: [id, 'enabled'], value: false }], namespace.revision)
       }

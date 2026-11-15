@@ -47,6 +47,10 @@ function confirmationAction(kind: Confirmation['kind'], t: ComponentsPageProps['
   }
 }
 type Selected = { id: ComponentId; config: OfficialConfiguration }
+function sameEndpoint(left: string, right: string): boolean {
+  const normalize = (value: string): string => value.replace(/\/(?:api\/)?mcp\/?$/, '').replace(/\/$/, '')
+  return normalize(left) === normalize(right)
+}
 const pending = (component: ComponentView): boolean => component.operation !== null && ['checking', 'downloading', 'verifying', 'installing'].includes(component.operation.phase)
 
 /** Prefer managed install version, then `cli --version`, never an executable filename. */
@@ -246,7 +250,7 @@ export function ComponentsPage({ useComponents, useMcp, source, mcp, t, embedded
                   return
                 }
                 void action(async () => {
-                  const current = value?.configuration
+                  const current = value.configuration
                   if (!current) return
                   await source.run(ops => ops.configure(id, { ...current, [id]: { ...current[id], enabled: next } }))
                 })
@@ -255,7 +259,7 @@ export function ComponentsPage({ useComponents, useMcp, source, mcp, t, embedded
         </li>
       })}</ul>
     </>}
-    {selected && selectedComponent && config && value && <ComponentEditor
+    {selected && selectedComponent && config && <ComponentEditor
       id={selected.id} component={selectedComponent} initial={selected.config}
       state={state} value={value} busy={disabled} t={t} close={() => { setSelected(undefined) }}
       save={async (next) => { await source.run(ops => ops.configure(selected.id, next)) }}
@@ -271,6 +275,7 @@ export function ComponentsPage({ useComponents, useMcp, source, mcp, t, embedded
       cancelInstall={() => { void action(() => source.run(ops => ops.cancel(selected.id))) }}
       inspectBrowser={() => { void action(() => source.observe(ops => ops.inspectBrowser())) }}
       measure={async target => await source.observe(ops => ops.measureTools(target)) ?? null}
+      inspectTargets={async (target) => { await source.observe(ops => ops.inspectTargets(target)) }}
       closeAfterSave={() => { setSelected(undefined) }} />}
     <Modal className={css.confirmDialog ?? ''} open={confirmation !== undefined} title={confirmation ? confirmationTitle(confirmation.kind, t) : ''}
       closeLabel={t('close')} onClose={() => { if (!state.busy) setConfirmation(undefined) }} footer={<>
@@ -304,7 +309,7 @@ export function ComponentsPage({ useComponents, useMcp, source, mcp, t, embedded
 
 function ComponentEditor({
   id, component, initial, state, value, busy, t, close, save,
-  onConfirm, cancelInstall, inspectBrowser, closeAfterSave, measure,
+  onConfirm, cancelInstall, inspectBrowser, closeAfterSave, measure, inspectTargets,
 }: {
   id: ComponentId
   component: ComponentView
@@ -320,10 +325,11 @@ function ComponentEditor({
   inspectBrowser(this: void): void
   closeAfterSave(this: void): void
   measure(this: void, id: ComponentId): Promise<unknown>
+  inspectTargets(this: void, id: ComponentId): Promise<void>
 }) {
   const [next, setNext] = useState(initial)
   const [args] = useState(JSON.stringify(id === 'wdh' ? [] : initial[id].args))
-  const [error, setError] = useState<'official.invalid' | 'saveError'>()
+  const [error, setError] = useState<'official.invalid' | 'saveError' | 'official.targetsFailed'>()
   const inspected = useRef(false)
   const device = id === 'wdh' ? null : next[id]
   const writable = value.configuration?.writable ?? false
@@ -358,6 +364,14 @@ function ComponentEditor({
   }
   // Configurations written before the device list existed have no array yet.
   const savedDevices = device?.devices ?? []
+  const inventory = value.inventories?.[id]
+  const [checkingTargets, setCheckingTargets] = useState(false)
+  const refreshTargets = async (): Promise<void> => {
+    if (checkingTargets) return
+    setCheckingTargets(true)
+    try { await inspectTargets(id) } catch (_error) { setError('official.targetsFailed') }
+    finally { setCheckingTargets(false) }
+  }
   const [tools, setTools] = useState<string[] | null>(null)
   const [toolsFailed, setToolsFailed] = useState(false)
   const [addingDevice, setAddingDevice] = useState(false)
@@ -535,6 +549,8 @@ function ComponentEditor({
           {device && <section className={css.editorSection} aria-label={t('official.devices')}>
             <div className={css.editorSectionHeader}>
               <h3 className={css.editorSectionTitle}>{t('official.devices')}</h3>
+              <Button size="sm" variant="outline" disabled={checkingTargets}
+                onClick={() => { void refreshTargets() }}>{t('official.refreshTargets')}</Button>
               {!addingDevice && <Button size="sm" variant="outline" className={css.deviceHeaderAction} disabled={busy || !writable}
                 onClick={() => { setAddingDevice(true) }}>{t('official.addDevice')}</Button>}
             </div>
@@ -545,9 +561,22 @@ function ComponentEditor({
                   <input type="radio" name={`${id}-device`} checked={device.endpoint === address} disabled={busy || !writable}
                     onChange={() => { void chooseDevice(address) }} />
                   <code className={css.deviceAddress}>{address}</code>
+                  <span className={css.muted}>{t(inventory === undefined ? 'official.targetsUnchecked'
+                    : inventory.error !== null ? 'official.targetsFailed'
+                      : inventory.connections.some(connection => connection.online && sameEndpoint(connection.endpoint, address))
+                        ? 'official.serviceOnline' : 'official.serviceOffline')}</span>
                 </label>
                 <Button size="sm" variant="ghost" disabled={busy || !writable} onClick={() => { void removeDevice(address) }}>{t('official.removeDevice')}</Button>
               </li>)}</ul>}
+            {inventory && <div className={css.muted} role="status">
+              {inventory.error !== null ? t('official.targetsFailed') : <>
+                {t('official.onlineTargets', { count: String(inventory.targets.filter(target => target.online).length) })}
+                <ul>{inventory.targets.filter(target => target.online).map(target => <li key={`${target.endpoint}:${target.id}`}>
+                  {target.name} · <code>{target.id}</code>{target.pid == null ? '' : ` · PID ${String(target.pid)}`}
+                </li>)}</ul>
+              </>}
+              <small>{t('official.observedAt', { time: new Date(inventory.checkedAt).toLocaleTimeString() })}</small>
+            </div>}
             {addingDevice && <div className={css.deviceAdd}>
               <input value={draft} disabled={busy || !writable} placeholder={t('official.endpointPlaceholder')} autoFocus
                 onChange={(event) => { setDraft(event.target.value) }}

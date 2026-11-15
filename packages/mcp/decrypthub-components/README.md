@@ -7,6 +7,8 @@ kind: "package-reference"
 
 English | [中文](README.zh.md)
 
+`inspectTargets` runs the verified component CLI with `status --json`, a deadline, and bounded stdout. The snapshot retains the observation time and reports unsupported or failed CLIs explicitly. Device status reads never change configuration or target processes.
+
 ## Summary
 
 Inspect WDH, ADH and IDH availability, check official releases, and activate verified component versions. Downloads have size limits and SHA-256 verification; archives reject links and unsafe paths. Failed or cancelled installation retains the previous active version. Device connections use separately configured daemon addresses.

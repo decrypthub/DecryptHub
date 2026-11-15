@@ -62,7 +62,7 @@ it('keeps horizontal status rows compact and opens install or device connect in 
   const source = new ComponentsSource({ async *watch() {}, async *connections() {}, snapshot: async () => state.value!,
     checkUpdates: async () => {}, install: async () => {}, cancel: async () => {}, rollback: async () => {}, uninstall: async () => {},
     configure: async () => {}, reconnect: async () => {},
-    inspectBrowser: async () => {}, installBrowser: async () => {}, measureTools: async () => null,
+    inspectBrowser: async () => {}, inspectTargets: async () => {}, installBrowser: async () => {}, measureTools: async () => null,
   })
   onTestFinished(() => { source.dispose(); mcp.dispose() })
   const store = createSnapshotStore(state)
@@ -113,7 +113,7 @@ it('shows the live tool count for a per-session WDH connection', async () => {
   const source = new ComponentsSource({ async *watch() {}, async *connections() {}, snapshot: async () => state.value!,
     checkUpdates: async () => {}, install: async () => {}, cancel: async () => {}, rollback: async () => {}, uninstall: async () => {},
     configure: async () => {}, reconnect: async () => {},
-    inspectBrowser: async () => {}, installBrowser: async () => {}, measureTools: async () => null,
+    inspectBrowser: async () => {}, inspectTargets: async () => {}, installBrowser: async () => {}, measureTools: async () => null,
   })
   onTestFinished(() => { source.dispose(); mcp.dispose() })
   const store = createSnapshotStore(state)
@@ -135,7 +135,7 @@ it('keeps MCP|Skills pills with official above custom on the MCP tab', async () 
   const components = new ComponentsSource({ async *watch() {}, async *connections() {}, snapshot: async () => state.value!,
     checkUpdates: async () => {}, install: async () => {}, cancel: async () => {}, rollback: async () => {}, uninstall: async () => {},
     configure: async () => {}, reconnect: async () => {},
-    inspectBrowser: async () => {}, installBrowser: async () => {}, measureTools: async () => null,
+    inspectBrowser: async () => {}, inspectTargets: async () => {}, installBrowser: async () => {}, measureTools: async () => null,
   })
   onTestFinished(() => { components.dispose(); mcp.dispose() })
   const store = createSnapshotStore(state)

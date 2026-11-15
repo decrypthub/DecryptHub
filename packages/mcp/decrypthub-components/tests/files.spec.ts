@@ -61,7 +61,7 @@ describe('verified official components', () => {
   it('rejects traversal, symlinks, duplicate case paths and missing checksums', async () => {
     const { root, stage } = await fixture()
     for (const path of ['../a', '/a', 'a\\b', 'a:b', 'a//b', './a']) expect(safeComponentPath(path)).toBe(false)
-    await fs.symlink(tmpdir(), join(root, 'link'))
+    await fs.symlink(tmpdir(), join(root, 'link'), process.platform === 'win32' ? 'junction' : 'dir')
     await expect(componentPath(root, 'link/file')).rejects.toThrow()
     const { manifest } = await stage('1.0.0')
     expect(() => validateComponentManifest({ ...manifest, files: [manifest.files[0], { ...manifest.files[0], path: 'MAIN.py' }] })).toThrow()

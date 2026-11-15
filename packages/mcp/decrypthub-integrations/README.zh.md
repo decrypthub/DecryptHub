@@ -7,6 +7,8 @@ kind: "package-reference"
 
 [English](README.md) | 中文
 
+`decrypthub_status` 供 Agent 在选择目标前读取官方 CLI 的实时状态。组件安装、MCP 连接、服务在线与目标在线分别报告；多个目标匹配时需要用户选择，状态查询不注入也不重启应用。
+
 ## 概述
 
 此 DecryptHub 产品插件组合上游 MCP 客户端和管理器，不重写对话、输入框、自动化或工具卡片界面。WDH 在 Agent 第一步开始时启动；ADH 和 IDH 在配置前保持禁用。
@@ -40,7 +42,7 @@ Agent 拥有其子 Fiber。销毁 Agent 或本产品插件时会等待客户端�
 <a id="model-experience"></a>
 ## 模型体验
 
-通过共享 MCP 客户端间接影响模型，已连接的工具定义、结果和服务说明由该客户端管理。
+固定的 `decrypthub_status` schema 让模型在不改变设备的情况下请求当前服务和目标状态，输出通过标准工具流水线记录。已连接的分析工具、结果和服务说明仍由共享 MCP 客户端管理。
 
 #### KV 缓存影响
 

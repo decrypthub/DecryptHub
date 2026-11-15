@@ -1,5 +1,6 @@
 /** Product MCP composition; the upstream client owns transports and tool execution. @module */
 import type { Context, Fiber } from '@deepseek-ai/cordis'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import * as McpClient from '@deepseek-ai/dsh-mcp-client'
 import type {} from '@deepseek-ai/dsh-mcp-manager'
@@ -92,6 +93,18 @@ interface Binding { cwd: string; entry: string; handle: Fiber; unobserve?: () =>
  * @param config - validated deployment settings.
  */
 export async function apply(ctx: Context, config: Config): Promise<void> {
+  ctx.effect(() => ctx.tools.register(defineTool({
+    name: 'decrypthub_status',
+    description: 'Read current WDH browser availability and Android/iOS service and app status before choosing an analysis target. Installation and an MCP connection alone do not mean a target is online. Use returned target IDs and the connected component tools; if several targets match, ask the user to choose. This read does not start, stop, attach to, or change any app. Inspect WDH pages with the current session browser tools.',
+    parameters: {},
+    output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+    execute: async (_args, exec) => {
+      const components = ctx.get('decrypthubComponents')
+      if (components === undefined) throw new Error('Official component management is unavailable')
+      const statuses = await Promise.all((['wdh', 'adh', 'idh'] as const).map(id => components.inspectTargets(id, exec.signal)))
+      return JSON.stringify({ components: statuses }, null, 2)
+    },
+  })), 'decrypthub: read-only integration status')
   const settings = ctx.get('settings')
   if (settings !== undefined) ctx.effect(() => settings.configure({ auto: false }, ctx.fiber))
   let child: Fiber | undefined

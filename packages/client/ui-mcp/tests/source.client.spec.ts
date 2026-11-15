@@ -64,7 +64,7 @@ describe('official component observations', () => {
       connections: signal => waiting(signal), snapshot: async () => value,
       checkUpdates: async () => {}, install: async () => {}, cancel: async () => {}, rollback: async () => {}, uninstall: async () => {},
       configure: async () => {}, reconnect: async () => {},
-      inspectBrowser: async () => {}, installBrowser: async () => {}, measureTools: async () => null,
+      inspectBrowser: async () => {}, inspectTargets: async () => {}, installBrowser: async () => {}, measureTools: async () => null,
     }
     const source = new ComponentsSource(ops)
     source.load()

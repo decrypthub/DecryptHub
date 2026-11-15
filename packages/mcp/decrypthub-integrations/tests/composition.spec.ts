@@ -15,6 +15,8 @@ import { join } from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { expect, it, onTestFinished } from 'vitest'
 import * as Integration from '../src/index.ts'
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface PrincipalMap { 'test-component-guest': { kind: 'test-component-guest' } }
@@ -66,6 +68,14 @@ it('exposes and persists official connection choices and permits only the owner 
   const owner = caller(ctx, { kind: 'owner' })
   const initial = await owner.decrypthubComponents.snapshot()
   expect(initial.configuration?.wdh.enabled).toBe(false)
+  const status = await executeToolFixture(ctx, { signal: new AbortController().signal,
+    callId: ToolCallId('official-status'), name: 'decrypthub_status', arguments: {} })
+  expect(status.isError).toBeFalsy()
+  const text = status.content.find(block => block.type === 'text')
+  if (text?.type !== 'text') throw new Error('Missing component status result')
+  const report = JSON.parse(text.text) as { components: { component: string; targets: unknown[] }[] }
+  expect(report.components.map(row => row.component)).toEqual(['wdh', 'adh', 'idh'])
+  expect(report.components.every(row => row.targets.length === 0)).toBe(true)
   await owner.decrypthubComponents.configure('wdh', true, '', [], '', 'system', namespace!.revision)
   expect((await owner.decrypthubComponents.snapshot()).configuration?.wdh.enabled).toBe(true)
   expect(await fs.readFile(profile.patchPath, 'utf8')).toContain('enabled: true')

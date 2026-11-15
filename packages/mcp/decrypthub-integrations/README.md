@@ -7,6 +7,8 @@ kind: "package-reference"
 
 English | [中文](README.zh.md)
 
+The model-facing `decrypthub_status` tool queries fresh official CLI observations before target selection. Installation, MCP connectivity, service liveness, and online target identity remain separate. Multiple matching targets require user selection; the read never injects or restarts an app.
+
 ## Summary
 
 This DecryptHub product plugin composes the upstream MCP client and manager. It adds no replacement conversation, input, automation, or tool-card UI. WDH starts on the first Agent step; ADH and IDH remain disabled until configured.
@@ -40,7 +42,7 @@ The Agent owns its child Fiber. Disposing the Agent or this product plugin drain
 <a id="model-experience"></a>
 ## Model Experience
 
-Indirectly, through the shared MCP client, which owns the connected tool schemas, results, and server instructions.
+The stable `decrypthub_status` schema lets the model request current service and target observations without changing a device. Its output is logged through the normal tool pipeline. The shared MCP client owns connected analysis tools, results, and server instructions.
 
 #### KV Cache effect
 
