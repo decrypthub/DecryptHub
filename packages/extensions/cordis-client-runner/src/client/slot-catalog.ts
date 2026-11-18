@@ -1243,6 +1243,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     slotInject: '',
     declaredBy: 'factory \'conversation.content\' (client-ui-conversation), so it exists while that definition is registered',
     occupants: [
+      'client-ui-mcp ChatTargetPicker id \'mobile-target\'',
       'experimental-client-ui-forge WorktreeToggle id \'forge-panel.worktree\'',
     ],
     replaceRisk: 'none',
@@ -2361,6 +2362,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     slotInject: '',
     declaredBy: 'an entry in \'conversation.session.header\' (client-ui-conversation), so it exists while that entry is mounted',
     occupants: [
+      'client-ui-mcp ChatTargetPicker id \'mobile-target\'',
       'client-ui-schedule ScheduleCatalogAction id \'schedule-catalog\'',
       'experimental-client-ui-forge HeaderButton id \'forge-panel\'',
       'experimental-liveshare LiveshareShareAction id \'liveshare-share\'',
