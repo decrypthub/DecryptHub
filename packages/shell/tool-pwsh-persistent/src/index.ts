@@ -189,10 +189,10 @@ function renderCaptured(output: CapturedOutput, maxOutputChars: number): string 
   const withPrefix = output.incomplete && output.text.length > 0
     ? LOST_PREFIX_MESSAGE + rendered
     : rendered
-  const marker = output.exitCode !== undefined && output.exitCode !== 0
-    ? `[exit code: ${output.exitCode}]`
-    : undefined
-  return appendStatusMarker(withPrefix, marker)
+  if (output.exitCode === undefined || output.exitCode === 0) return withPrefix
+  const failure = `Error: PowerShell command failed with exit code ${output.exitCode}.`
+  const body = withPrefix.length === 0 ? failure : `${failure}\n\n${withPrefix}`
+  return appendStatusMarker(body, `[exit code: ${output.exitCode}]`)
 }
 
 function appendStatusMarker(content: string, marker: string | undefined): string {

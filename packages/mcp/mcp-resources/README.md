@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-mcp-resources` lets the model discover and read documents from configured MCP servers. Shipped profiles make its three shared tools available automatically when a server is configured in the caller's scope. Each tool requires an explicit server name and reads content only when called. Resource text enters conversation history; binary payloads remain available to programmatic callers and appear as descriptions to the model.
+`dsh-mcp-resources` lets the model discover and read documents from configured MCP servers. Shipped profiles expose its three shared tools while a connected provider offers resources in the caller's scope. Each tool requires an explicit server name and reads content only when called. Resource text enters conversation history. Binary payloads remain available to programmatic callers and appear as descriptions to the model.
 
 ## Table of Contents
 
@@ -31,11 +31,11 @@ Shipped profiles already mount this package once. Configure only the [MCP client
 
 Use the [client configuration](../mcp-client/README.md#use-this-package) to add a server in the intended scope. This package has no configuration fields.
 
-A caller with no configured MCP server sees no MCP prompt text or resource tools in native or PTC mode. A configured server enables the three shared resource tools, including when another provider mounts its client or the server has no tools or instructions. Connection failures do not remove the shared tools while the client entry remains active; resource calls report the connection error.
+A caller with no configured MCP server sees no MCP prompt text or resource tools in native or PTC mode. A connected provider that offers resources enables the three shared resource tools in its scope. The tools are withdrawn when the last such provider disconnects or is removed. The prompt still reports configured servers and their connection states. Use `mcp_server_status` for a local status check when a server tool is missing or a call fails.
 
 ### Discover and read
 
-When system-prompt assembly is mounted, the prompt lists server names visible to the calling agent. Call `list_mcp_resources` or `list_mcp_resource_templates` with one of those names as `server`. Without a cursor, the MCP SDK collects the server’s pages. An explicit `cursor` requests that page; pass a returned `nextCursor` unchanged. Read a listed URI or an expanded template with `read_mcp_resource`, using the same `server` name and an explicit `uri`.
+When system-prompt assembly is mounted, the prompt shows which caller-visible servers offer resources, which omit that capability, and which are disconnected. Call `list_mcp_resources` or `list_mcp_resource_templates` with one of those names as `server`. Without a cursor, the MCP SDK collects the server’s pages. An explicit `cursor` requests that page; pass a returned `nextCursor` unchanged. Read a listed URI, an expanded listed template, or an exact URI supplied by the user with `read_mcp_resource`. Use the same `server` name and the exact URI.
 
 Every operation resolves the server in the calling agent's scope. A missing server argument or unavailable server fails before dispatch; an unavailable server fails as `ToolArgsError` with `INVALID_ARGS`. The connection owner handles request cancellation, timeouts, and recovery; a failed request remains a failed tool call.
 
@@ -54,7 +54,7 @@ The [base](../../bundle/base/README.md) and standalone [sdk-minimal](../../bundl
   name: '@deepseek-ai/dsh-mcp-resources'
 ```
 
-The first provider in a scope registers its shared tools; removing the last removes those local registrations, while inherited providers and tools remain visible. The resource service owns the shared tool effects independently of the first provider's plugin, so unloading that provider cannot remove tools needed by another server. Provider selection and the server-name prompt use the same scoped registry. Each call resolves its server before dispatch.
+The first resource-capable provider in a scope enables its shared tools. The local registrations end when no provider in that scope offers resources. Inherited providers and their tools remain visible. The resource service owns the shared tool effects independently of the first provider's plugin, so unloading that provider cannot remove tools needed by another server. Provider selection and the server-name prompt use the same scoped registry. Each call resolves its server before dispatch.
 
 Canonical results retain the complete JSON for programmatic callers. The pure text renderer adds server attribution and replaces string-valued `blob` fields with a description of their base64 length; URI, MIME type, and text fields remain in the rendered JSON. The tool pipeline owns recorded results. Server instructions belong to the MCP client and its logged system-prompt section.
 
@@ -87,7 +87,7 @@ These pages cover server configuration, execution, and the decisions behind reso
 
 #### What the model sees
 
-The [generated tool schemas](../../../docs/tool-catalog.md#deepseek-aidsh-mcp-resources) define three tools shared by all caller-visible configured servers. With none, native schemas, PTC declarations and bindings, and the server-name prompt are absent. Connecting, disconnecting, or retrying an active client leaves these shared tool definitions unchanged. When system-prompt assembly is mounted and providers are visible, the `MCP resource servers` section says `Use list_mcp_resources, list_mcp_resource_templates, or read_mcp_resource with one of these names as the server argument: <JSON array>.` The names come from the same scoped registry, including servers with neither tools nor instructions. An empty registry contributes no section.
+The [generated tool schemas](../../../docs/tool-catalog.md#deepseek-aidsh-mcp-resources) define three tools shared by all caller-visible configured servers. `mcp_server_status` is available while a configured provider is visible. It reports connectivity and resource support without sending a server request. With no configured providers, native schemas, PTC declarations and bindings, and the server prompt are absent. The tool definitions appear in a scope while a connected provider offers resources. The scoped `MCP servers` section reports connection and resource availability and directs the model to the current server-qualified tool. The model reports transport failures as such and attributes domain results to their matching tool response. An empty registry contributes no section.
 
 #### Token effect
 
@@ -95,7 +95,7 @@ With no caller-visible configured servers, this package adds no tool or prompt t
 
 #### KV Cache effect
 
-Adding the first caller-visible server or removing the last changes the next tool schema or PTC declaration prefix. Changes to visible names update the server-name section; replacing a provider under the same name leaves that text unchanged. Connection failures alone do not change the shared definitions or names.
+The next tool schema or PTC declaration prefix changes when the caller gains or loses its last connected resource provider. Changes to visible names or resource availability update the server section.
 
 ### Resource results
 

@@ -18,7 +18,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-product-sessions` | `session_list`, `session_read` | `ctx.tools`, `ctx.sessionQuery`, `a calling Agent for workspace authority` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-plugin-manager` | `plugin_manager` | `ctx.tools`, `ctx.pluginManager`, `ctx.sandboxPolicy` | `tool/call`, `tool/result`, `user/message` | - | - |
 | `@deepseek-ai/dsh-plugin-market` | `plugin_market` | `ctx.tools`, `ctx.pluginMarket` | `tool/call`, `tool/result` | - | - |
-| `@deepseek-ai/dsh-mcp-resources` | `list_mcp_resource_templates`, `list_mcp_resources`, `read_mcp_resource` | `ctx.tools`, `ctx.mcpResources` | `tool/call`, `tool/result` | - | - |
+| `@deepseek-ai/dsh-mcp-resources` | `list_mcp_resource_templates`, `list_mcp_resources`, `mcp_server_status`, `read_mcp_resource` | `ctx.tools`, `ctx.mcpResources` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-experimental-browser-use-stagehand-native` | `stagehand_act`, `stagehand_extract`, `stagehand_navigate`, `stagehand_observe`, `stagehand_screenshot`, `stagehand_tabs` | `ctx.browserUse`, `ctx.agents`, `ctx.tools`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-action-cards` | `propose_action` | `ctx.tools`, `ctx.agents`, `ctx.sessionProjections`, `ctx.remoteAccess` | `tool/call`, `tool/result`, `plugin:action-cards/decision`, `user/message` | - | Declared only to an Agent that loaded the skill of a registered card kind; the kind packages register their actions, and the Personalized recommendations bundle supplies the shipped kinds. |
 | `@deepseek-ai/dsh-tool-ask-user` | `ask_user_question` | `ctx.tools`, `ctx.userQuestions` | `tool/call`, `tool/result after an answer or timeout`, `late user/message` | - | ask_user_question keeps the original blocking behavior by default; set `mode: timed` to opt into a foreground timeout and pending result while the question remains answerable. In timed mode, `timeout: -1` keeps that call blocking indefinitely. |
@@ -275,6 +275,27 @@ List resources available from an MCP server.
 ```
 
 Source: [`packages/mcp/mcp-resources/src/tools.ts`](../packages/mcp/mcp-resources/src/tools.ts)
+
+### `mcp_server_status`
+
+Check the connection of a configured MCP server when its tool is missing or a call fails. This check does not run a server tool.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "server": {
+      "type": "string",
+      "description": "Configured MCP server name."
+    }
+  },
+  "required": [
+    "server"
+  ]
+}
+```
+
+Source: [`packages/mcp/mcp-resources/src/index.ts`](../packages/mcp/mcp-resources/src/index.ts)
 
 ### `read_mcp_resource`
 

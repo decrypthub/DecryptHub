@@ -21,7 +21,7 @@ import { assertNever, deepEqualJson, type JsonValue } from '@deepseek-ai/dsh-uti
 import type { ServerContext } from './server-context.ts'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { withDeadline } from './deadline.ts'
-import { McpLocalError, mcpRequestError, McpToolError } from './diagnostic.ts'
+import { disconnectedMcpServer, McpLocalError, mcpRequestError, McpToolError } from './diagnostic.ts'
 import type { McpStatusCell } from './status.ts'
 import type { McpCloseResult } from './types.ts'
 import { McpGeneration } from './generation.ts'
@@ -349,25 +349,34 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
     ready: readiness.promise,
     instructions: () => serverInstructions,
     resources: {
+      availability() {
+        const record = current
+        if (record?.connectedAt === undefined) return 'disconnected'
+        return record.wire.client.getServerCapabilities()?.resources === undefined ? 'no-resources' : 'resources'
+      },
+      onAvailabilityChange: changed => status.onChange(changed),
       async request(request, exec): Promise<JsonValue> {
         const record = current
-        if (record?.connectedAt === undefined) throw new McpToolError(`${label}: server is disconnected`, 'MCP_SERVER_UNAVAILABLE')
+        if (record?.connectedAt === undefined) throw disconnectedMcpServer(label)
+        const supportsResources = record.wire.client.getServerCapabilities()?.resources !== undefined
+        if (!supportsResources && request.method === 'resources/read') {
+          throw new McpToolError(`${label}: server does not advertise resources. No URI was requested. Use an available server tool instead.`,
+            'MCP_REQUEST_FAILED')
+        }
         try {
           return await record.wire.run(async (signal) => {
             const options = { signal: AbortSignal.any([signal, exec.signal]), timeout: config.toolCallTimeoutMs }
             const generation = record.wire.client
-            // The SDK answers an unadvertised capability with the same empty page, but
-            // writes a console.debug line to stdout, which the ACP profile reserves for JSON-RPC.
-            const listable = generation.getServerCapabilities()?.resources !== undefined
+            // The SDK logs a fallback to stdout, which the ACP profile reserves for JSON-RPC.
             switch (request.method) {
               case 'resources/list':
-                return listable
+                return supportsResources
                   ? await generation.listResources(
                     request.cursor === undefined ? undefined : { cursor: request.cursor }, options,
                   ) as JsonValue
                   : { resources: [] }
               case 'resources/templates/list':
-                return listable
+                return supportsResources
                   ? await generation.listResourceTemplates(
                     request.cursor === undefined ? undefined : { cursor: request.cursor }, options,
                   ) as JsonValue

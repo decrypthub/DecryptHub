@@ -50,7 +50,7 @@ export class McpLocalError extends HarnessError {
  * - `MCP_CONNECTION_CLOSED`: the connection closed while the request was in flight; its outcome is unknown.
  * - `MCP_TIMEOUT`: the request exceeded its deadline; its outcome is unknown.
  * - `MCP_SERVER_UNAVAILABLE`: the server was not connected, so the request was not sent.
- * - `MCP_REQUEST_FAILED`: any other protocol or SDK failure; `message` carries the JSON-RPC or SDK code.
+ * - `MCP_REQUEST_FAILED`: a resource read without advertised support, or a protocol or SDK failure.
  */
 export const MCP_TOOL_ERROR_CODES = [
   'MCP_TOOL_ERROR',
@@ -78,6 +78,16 @@ export class McpToolError extends HarnessError {
     this.name = 'McpToolError'
     this.code = code
   }
+}
+
+/**
+ * Report a local refusal before sending an MCP request to a disconnected server.
+ * @param label - server name with its diagnostic prefix.
+ * @returns The caller-visible failure with no upstream result.
+ */
+export function disconnectedMcpServer(label: string): McpToolError {
+  return new McpToolError(`${label}: server is disconnected. The request was not sent and returned no data. Reconnect before trying again.`,
+    'MCP_SERVER_UNAVAILABLE')
 }
 
 /** Codes for SDK-local failures whose consumer action differs from a generic request failure. */
@@ -112,7 +122,10 @@ export function mcpRequestError(
     code = SDK_ERROR_CODES[error.code] ?? code
     detail = `${error.code}: ${error.message}`
   }
-  const message = `MCP ${operation} failed: ${detail}`
+  const recovery = code === 'MCP_TIMEOUT'
+    ? '\nNo tool result was received. If the user requested an independent lookup or fallback, call its tool before reporting its result. An uncalled lookup has no result.'
+    : ''
+  const message = `MCP ${operation} failed: ${detail}${recovery}`
   return redact === undefined
     ? new McpToolError(message, code, { cause: error })
     : new McpToolError(redact(message), code)

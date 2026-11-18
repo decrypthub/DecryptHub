@@ -24,7 +24,7 @@ import type { ToolDefinition, ToolExecution, ToolExecutionResult } from '@deepse
 import { assertSupportedJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { JsonSchemaNode } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
-import { describeError, McpLocalError, mcpRequestError, McpToolError } from './diagnostic.ts'
+import { describeError, disconnectedMcpServer, McpLocalError, mcpRequestError, McpToolError } from './diagnostic.ts'
 
 /** Resolved options relevant to tool bridging. */
 export interface ToolBridgeOptions {
@@ -170,7 +170,7 @@ export async function syncTools(
       call: async (args, execution) => {
         // The generation closed and its tools await re-sync; the SDK would refuse the request unsent.
         if (opts.signal.aborted) {
-          throw new McpToolError(`mcp-client(${opts.serverName}): server is disconnected`, 'MCP_SERVER_UNAVAILABLE')
+          throw disconnectedMcpServer(`mcp-client(${opts.serverName})`)
         }
         if (outputCheck !== undefined && 'compileError' in outputCheck) {
           throw invalidResult(`its output schema cannot be compiled: ${outputCheck.compileError}`)

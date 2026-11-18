@@ -288,6 +288,22 @@
       }
     },
     {
+      "name": "mcp_server_status",
+      "description": "Check the connection of a configured MCP server when its tool is missing or a call fails. This check does not run a server tool.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "server": {
+            "type": "string",
+            "description": "Configured MCP server name."
+          }
+        },
+        "required": [
+          "server"
+        ]
+      }
+    },
+    {
       "name": "read",
       "description": "Read a UTF-8 text file and return line-numbered content.",
       "parameters": {

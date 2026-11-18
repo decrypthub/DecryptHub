@@ -391,7 +391,7 @@ describe('registration', () => {
     })
     expect(schema?.parameters.required).toEqual(['description', 'command'])
     const prompt = renderPrompt(await ctx.systemPrompt.assemble())
-    expect(prompt).toContain('Non-zero exits are reported as `[exit code: N]` markers')
+    expect(prompt).toContain('A non-zero exit is a command failure')
     expect(prompt).toContain('without a signal marker')
   })
 
@@ -529,7 +529,29 @@ describe('execution through the bash seam', () => {
       stdout: { text: 'out\n', truncated: false },
       stderr: { text: 'err\n', truncated: false },
     })
-    expect(text(result)).toBe('out\n[stderr]\nerr\n[exit code: 2]')
+    expect(text(result)).toBe('Error: PowerShell command failed with exit code 2.\n\nout\n[stderr]\nerr\n[exit code: 2]')
+  })
+
+  it('records a native model step failure and preserves its terminal result', async () => {
+    const { ctx, bash } = await setup()
+    const agent = await registerFakeAgent(ctx, 'pwsh-result')
+    const toolSet = await ctx.tools.resolve({ agent, modelSelection: { provider: 'test', model: 'test' }, signal: testToolSignal })
+    const args = { command: 'Write-Output example; exit 7', description: 'Run command with nonzero exit' }
+    bash.handler = () => runResult('example', { exitCode: 7 })
+    try {
+      const result = await executeToolFixture(ctx, {
+        name: 'pwsh', arguments: args, agent, toolSet, callId: brandString<ToolCallId>('native-command-failure'), signal: testToolSignal,
+      })
+      expect(result).toMatchObject({
+        isError: true,
+        error: { info: { name: 'PowerShellCommandError', code: 'PWSH_NONZERO_EXIT' } },
+        meta: { pwshExitFailure: true },
+      })
+      expect(ctx.tools.get('pwsh', agent)?.presentResult?.(args, result))
+        .toEqual({ card: 'terminal', output: 'Error: PowerShell command failed with exit code 7.\n\nexample', exitCode: 7 })
+    } finally {
+      toolSet.dispose()
+    }
   })
 
   it('renders a clean exit without a marker and an empty body as (no output)', async () => {
@@ -550,7 +572,7 @@ describe('execution through the bash seam', () => {
       exitCode: 1,
     })
     const result = await call(ctx, 'pwsh', { command: 'fail', description: 'fail' })
-    expect(text(result)).toBe('[stderr]\nerr\n[exit code: 1]')
+    expect(text(result)).toBe('Error: PowerShell command failed with exit code 1.\n\n[stderr]\nerr\n[exit code: 1]')
   })
 
   it('inserts the separating newline before the stderr section when stdout lacks one', async () => {
@@ -560,7 +582,7 @@ describe('execution through the bash seam', () => {
       exitCode: 1,
     })
     const result = await call(ctx, 'pwsh', { command: 'fail', description: 'fail' })
-    expect(text(result)).toBe('out\n[stderr]\nerr\n[exit code: 1]')
+    expect(text(result)).toBe('Error: PowerShell command failed with exit code 1.\n\nout\n[stderr]\nerr\n[exit code: 1]')
   })
 
   it('renders the truncation notice with the spill path, then markers', async () => {

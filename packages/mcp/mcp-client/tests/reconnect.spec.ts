@@ -219,11 +219,11 @@ describe('reconnect supervisor', () => {
     const handle = startConnection(ctx, config, resolveReconnectPolicy(config.reconnect, 'test'), new McpStatusCell(() => {}))
     try {
       await handle.ready
-      ctx.mcpResources.register('srv', handle.resources)
       const failure = new Error('transport rejected private-token')
       mockCallTool.mockRejectedValue(failure)
       vi.spyOn(instances[0]!, 'listResources').mockRejectedValue(failure)
       vi.spyOn(instances[0]!, 'getServerCapabilities').mockReturnValue({ tools: {}, resources: {} })
+      ctx.mcpResources.register('srv', handle.resources)
       for (const name of ['mcp__srv__remote', 'list_mcp_resources']) {
         const result = await executeToolFixture(ctx, {
           name, arguments: name === 'list_mcp_resources' ? { server: 'srv' } : {},
@@ -262,7 +262,9 @@ describe('reconnect supervisor', () => {
   it.each([
     [new ProtocolError(-32602, 'unknown window'), 'JSON-RPC error -32602: unknown window', 'MCP_REQUEST_FAILED'],
     [new SdkError(SdkErrorCode.ConnectionClosed, 'Connection closed'), 'CONNECTION_CLOSED: Connection closed', 'MCP_CONNECTION_CLOSED'],
-    [new SdkError(SdkErrorCode.RequestTimeout, 'Request timed out'), 'REQUEST_TIMEOUT: Request timed out', 'MCP_TIMEOUT'],
+    [new SdkError(SdkErrorCode.RequestTimeout, 'Request timed out'),
+      'REQUEST_TIMEOUT: Request timed out\nNo tool result was received. If the user requested an independent lookup or fallback, call its tool before reporting its result. An uncalled lookup has no result.',
+      'MCP_TIMEOUT'],
     [new SdkError(SdkErrorCode.NotConnected, 'Not connected'), 'NOT_CONNECTED: Not connected', 'MCP_SERVER_UNAVAILABLE'],
     [new SdkError(SdkErrorCode.InvalidResult, 'bad result'), 'INVALID_RESULT: bad result', 'MCP_INVALID_RESULT'],
     [new SdkError(SdkErrorCode.SendFailed, 'write failed'), 'SEND_FAILED: write failed', 'MCP_REQUEST_FAILED'],
@@ -316,7 +318,7 @@ describe('reconnect supervisor', () => {
       const calls = mockCallTool.mock.calls.length
       const unsent = await executeToolFixture(ctx, { name: 'mcp__srv__remote', arguments: {}, callId: nextCallId(), signal: testToolSignal })
       expect(unsent.error).toEqual({
-        message: 'mcp-client(srv): server is disconnected',
+        message: 'mcp-client(srv): server is disconnected. The request was not sent and returned no data. Reconnect before trying again.',
         info: { name: 'McpToolError', code: 'MCP_SERVER_UNAVAILABLE' },
       })
       expect(mockCallTool).toHaveBeenCalledTimes(calls)
@@ -374,6 +376,7 @@ describe('reconnect supervisor', () => {
 
   it('rejects resource reads while a replacement connection is still negotiating', async () => {
     await ctx.plugin(McpResources)
+    ctx.mcpResources.register('docs', { request: async () => ({ resources: [] }) })
     const config = stdioConfig({ initialDelayMs: 2, maxDelayMs: 8, maxAttempts: 2 })
     const handle = startConnection(ctx, config, resolveReconnectPolicy(config.reconnect, 'reconnect'), new McpStatusCell(() => {}))
     const reconnectGate: PromiseWithResolvers<void> = Promise.withResolvers()

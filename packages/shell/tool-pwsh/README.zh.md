@@ -85,7 +85,7 @@ kind: "package-reference"
 - **`dsh-tool-bash` 的刻意孪生。** 前台与后台执行、受管环境、沙箱升权面以及标记／截断渲染都逐调用镜像 bash 工具，因此其中之一的消费方也能接受另一个的协议形状（[pwsh 工具与 bash 对齐 参考](README.zh.md)）。
 - **PowerShell 方言约定。** 工具约定是 PowerShell：原生路径与 `$env:` 变量，经由 `pwsh -Command` 执行，没有中间 shell。
 - **Windows 沙箱事实写进描述。** ConstrainedLanguage 与命名管道约定是 Windows 受限令牌行为；教授它们的条件是「已挂载任意约束执行器」，之所以安全，是因为每个已发布的配对都是 win32-only。
-- **非零退出只报告、不失败。** 只有基础设施故障（spawn 错误、中止）才会作为工具错误暴露，与 bash 的故事一致。
+- **非零退出保留标准输出和标准错误。** Native 模型步骤对失败的前台命令记录 `PWSH_NONZERO_EXIT`，并保留终端输出和退出码。编程调用与嵌套调用保留进程结果数据。启动错误和调用中止作为工具错误返回。
 
 ### 源码地图
 
@@ -97,7 +97,7 @@ kind: "package-reference"
 
 ### 渲染与退出标记
 
-渲染器共享 bash 工具的结构与来自 `dsh-shell` 的 `parseExitStatus` 标记约定：干净退出（0、无信号）不产生标记；UI 卡片把退出标记消费为退出状态 pill。Windows 强制终止以 exit 1 结算且没有信号，因此 `[killed by signal: …]` 仅适用于 POSIX。`tool:pwsh` 提示词区段（first-party 顺序 1010）教授退出标记约定与「中断后 exit 1」的 Windows 解读。
+渲染器共享 bash 工具的结构与来自 `dsh-shell` 的 `parseExitStatus` 标记约定：普通的非零退出在回执首行写明命令失败和退出码，并保留末尾的退出标记。正常退出（0、无信号）不产生标记；UI 卡片把退出标记消费为退出状态 pill。Windows 强制终止以 exit 1 结算且没有信号，因此 `[killed by signal: …]` 仅适用于 POSIX。`tool:pwsh` 提示词区段（first-party 顺序 1010）教授退出标记约定与「中断后 exit 1」的 Windows 解读。
 
 </details>
 
@@ -131,7 +131,7 @@ kind: "package-reference"
 ##### Pwsh 指引
 
 ```markdown
-Non-zero exits are reported as `[exit code: N]` markers; investigate failures before moving on. On Windows a killed process settles as `[exit code: 1]` without a signal marker; treat a bare exit 1 after an interruption as a termination, not a command failure.
+When asked to run a PowerShell command, call pwsh. Only report execution, output, and status from its actual result. Use the PowerShell process exit code to report command status. A non-zero exit is a command failure even if the tool ran and returned output. Label the command Failed and include the exit code in your reply, including when its failure was expected. For background jobs, a completed job can have a non-zero command exit. If the command was stopped, killed, or timed out, report that interruption. On Windows a killed process can return exit code 1 without a signal marker.
 ```
 
 #### Token 影响

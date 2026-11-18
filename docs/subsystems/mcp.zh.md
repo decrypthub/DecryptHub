@@ -86,6 +86,19 @@ type McpResourceRequest =
 /** One configured server's resource access, owned by its MCP connection plugin. */
 interface McpResourceProvider {
   /**
+   * Describe resource availability for the current connection. Providers
+   * without connection negotiation can omit this and advertise resources directly.
+   * @returns The live resource capability or the reason it is unavailable.
+   */
+  availability?(): ResourceAvailability
+  /**
+   * Subscribe to changes in the negotiated resource capability.
+   * @param changed - Refreshes the tools for this provider's scope.
+   * @returns Disposer for this subscription.
+   */
+  onAvailabilityChange?(changed: () => void): () => void
+
+  /**
    * Run an operation against one live connection generation. The resource tools
    * dispatch in parallel, so one provider may receive several concurrent requests;
    * each must settle independently.
@@ -354,11 +367,11 @@ Source: [`packages/mcp/mcp-manager/src/index.ts`](../../packages/mcp/mcp-manager
 
 ### `ctx.mcpResources` — `McpResourceRuntime`
 
-Scoped resource access plus three tools shared by configured MCP servers.
+Scoped MCP connection status and resource access.
 
 ```ts cordis-catalog
 /**
- * Register one server and expose resource tools while that scope has providers.
+ * Register one server's status and expose resource tools for connected providers that support resources.
  * @param server - configured server name, unique in this scope.
  * @param provider - connection-owned resource operations.
  * @returns the effect disposer for this exact registration.

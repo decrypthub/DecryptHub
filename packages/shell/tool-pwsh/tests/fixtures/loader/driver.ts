@@ -59,7 +59,7 @@ try {
 
   await writeFile('./pwsh-loader-report.json', JSON.stringify({
     schemaHasRunInBackground: Object.hasOwn(schema.parameters.properties as object, 'run_in_background'),
-    promptHasMarkerSection: prompt?.text.includes('Non-zero exits are reported as `[exit code: N]` markers') === true,
+    promptHasMarkerSection: prompt?.text.includes('A non-zero exit is a command failure') === true,
     // Normalize PowerShell's platform line endings (CRLF on Windows, LF elsewhere).
     foregroundText: foregroundText.replace(/\r\n/g, '\n'),
     foregroundCwd: (foreground.value as { cwd: string }).cwd,

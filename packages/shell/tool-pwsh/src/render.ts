@@ -36,6 +36,25 @@ export interface RenderablePwshResult {
 }
 
 /**
+ * Return the failing command exit code. Interruptions and sandbox denials use their own status.
+ * @param result - a foreground run or its canonical tool value.
+ * @returns The non-zero command exit code, if the command failed.
+ */
+export function failedCommandExitCode(result: {
+  exitCode?: unknown
+  signal?: unknown
+  timedOut?: unknown
+  stopped?: unknown
+  sandbox?: unknown
+}): number | undefined {
+  const { exitCode, signal, timedOut, stopped, sandbox } = result
+  if (typeof exitCode !== 'number' || exitCode === 0 || signal !== null || timedOut || stopped !== undefined) return
+  if (sandbox !== null && typeof sandbox === 'object'
+    && (('denied' in sandbox && sandbox.denied === true) || ('runnerFailed' in sandbox && sandbox.runnerFailed === true))) return
+  return exitCode
+}
+
+/**
  * Shape one finished run into the text the model sees: stdout, then a marked
  * stderr section, then exit-status markers, matching the bash tool's story —
  * a clean exit (0, no signal) produces no marker.
@@ -77,6 +96,10 @@ export function renderPwshResult(
   if (result.signal !== null) {
     markers.push(`[killed by signal: ${result.signal}]`)
   } else if (result.exitCode !== 0) {
+    const failedExitCode = failedCommandExitCode(result)
+    if (failedExitCode !== undefined) {
+      body = `Error: PowerShell command failed with exit code ${failedExitCode}.\n\n${body}`
+    }
     markers.push(`[exit code: ${result.exitCode}]`)
   }
   if (markers.length === 0) return body

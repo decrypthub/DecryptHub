@@ -35,9 +35,13 @@ Start independent delegations with `subagent` or `subagent_fork` together in one
 
 Bash, formatters, code generators, and scripts can overwrite concurrent edits without conflict detection; coordinate their changes explicitly. The agent integrating the work must review the final diff and run relevant tests.
 
-## MCP resource servers
+## MCP servers
 
-Use list_mcp_resources, list_mcp_resource_templates, or read_mcp_resource with one of these names as the server argument: ["catalog"].
+Connected resource servers: ["catalog"].
+Connected servers without resources: [].
+Disconnected servers: [].
+
+For an MCP tool request, use the currently available server-qualified tool. Use mcp_server_status to check MCP connection state when a tool is missing. If a configured server is disconnected, report that it is offline and no lookup ran. Stop work that needs its data. Do not substitute web requests, guessed addresses, other tools, or other servers for a disconnected server. After reconnection, use the currently available tool again when asked. Use resource tools only for a connected resource server and read only a listed URI, an expanded listed template, or an exact URI supplied by the user. Never guess or cycle through alternate URIs after a failure. Report what the matching tool response actually returned. A disconnection, timeout, or request error provides no domain result. Report uncalled or unanswered lookups as unchecked. After an error, make a separate tool call for any requested fallback. Never present examples, expected values, or error codes from the user request as tool results.
 
 ### MCP server: catalog
 
@@ -165,6 +169,11 @@ interface ToolArgsMap {
     server: string;
     /** Continuation cursor returned by this server. */
     cursor?: string;
+  } & Record<string, JsonValue>;
+  /** Check the connection of a configured MCP server when its tool is missing or a call fails. This check does not run a server tool. */
+  mcp_server_status: {
+    /** Configured MCP server name. */
+    server: string;
   } & Record<string, JsonValue>;
   /** Read a UTF-8 text file and return line-numbered content. */
   read: {
@@ -457,6 +466,7 @@ interface ToolOutputMap {
   })[];
   list_mcp_resource_templates: JsonValue;
   list_mcp_resources: JsonValue;
+  mcp_server_status: JsonValue;
   read: {
     /** Canonical absolute path in the filesystem execution world. */
     path: string;

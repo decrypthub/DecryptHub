@@ -815,7 +815,7 @@ function verifyMcpResources(log: string, ptc: boolean): void {
   expect(normalizedSystemPrompts(log, contextOf([log])).join('\n'))
     .toContain('MCP_RESOURCE_INSTRUCTION: keep {{braces}} literal.')
   expect(normalizedSystemPrompts(log, contextOf([log])).join('\n'))
-    .toContain('server argument: ["catalog"]')
+    .toContain('Connected resource servers: ["catalog"].')
 }
 
 function verifyMcpTemplateError(log: string, secret: string): void {

@@ -10,7 +10,7 @@ import { McpServer } from '@modelcontextprotocol/server'
 import { serveStdio } from '@modelcontextprotocol/server/stdio'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { ToolCallId } from '@deepseek-ai/dsh-llm/types'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import McpResources from '@deepseek-ai/dsh-mcp-resources'
 import { startConnection, resolveReconnectPolicy } from '../src/connection.ts'
@@ -78,16 +78,24 @@ describe('modern MCP connections', () => {
     expect(ctx.tools.schemas()).toEqual([])
   })
 
-  it('keeps shared resource tools for a configured server without resource capability', async () => {
+  it('omits resource tools for a tools-only server and refuses reads even when another server offers resources', async () => {
     const server = new McpServer({ name: 'tools-only', version: '1' })
     server.registerTool('ping', { inputSchema: z.object({}) }, async () => ({
       content: [{ type: 'text', text: 'pong' }],
     }))
     const ctx = await connect(server, { resources: true })
+    expect(ctx.tools.schemas().map(tool => tool.name).sort()).toEqual(['mcp__fixture__ping', 'mcp_server_status'])
+    ctx.mcpResources.register('docs', { request: async () => ({ resources: [] }) })
     const names = ctx.tools.schemas().map(tool => tool.name)
     expect(names.toSorted()).toEqual([
-      'list_mcp_resource_templates', 'list_mcp_resources', 'mcp__fixture__ping', 'read_mcp_resource',
+      'list_mcp_resource_templates', 'list_mcp_resources', 'mcp__fixture__ping', 'mcp_server_status', 'read_mcp_resource',
     ])
+    const prompt = renderPrompt(await ctx.systemPrompt.assemble())
+    expect(prompt).toContain('Connected servers without resources: ["fixture"].')
+    expect(prompt).toContain('Connected resource servers: ["docs"].')
+    const transport = mockTransport.mock.results.at(-1)
+    if (transport?.type !== 'return') throw new Error('Expected a connected fixture transport')
+    const send = vi.spyOn(transport.value, 'send')
     const debug = vi.spyOn(console, 'debug').mockImplementation(() => {})
     onTestFinished(() => { debug.mockRestore() })
     for (const [name, expected] of [
@@ -107,7 +115,14 @@ describe('modern MCP connections', () => {
       callId: brandString<ToolCallId>('unsupported-resource-read'), signal: new AbortController().signal,
     })
     expect(read.isError).toBe(true)
-    if (read.isError) expect(read.error.message).toContain('Method not found')
+    expect(read).toMatchObject({
+      isError: true,
+      error: {
+        message: 'mcp-client(fixture): server does not advertise resources. No URI was requested. Use an available server tool instead.',
+        info: { name: 'McpToolError', code: 'MCP_REQUEST_FAILED' },
+      },
+    })
+    expect(send).not.toHaveBeenCalled()
     expect(ctx.tools.schemas().map(tool => tool.name)).toEqual(names)
     const ping = await executeToolFixture(ctx, {
       name: 'mcp__fixture__ping', arguments: {},

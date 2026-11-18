@@ -400,7 +400,7 @@ describe('tool-pwsh-persistent', () => {
 
     const result = await call(ctx, owner, 'padded completion')
     expect(result.isError).not.toBe(true)
-    expect(text(result)).toBe('kept  \ndsh> ' + (exitCode === 0 ? '' : `\n[exit code: ${exitCode}]`))
+    expect(text(result)).toBe(exitCode === 0 ? 'kept  \ndsh> ' : `Error: PowerShell command failed with exit code ${exitCode}.\n\nkept  \ndsh> \n[exit code: ${exitCode}]`)
     expect(session.sends).toBe(2)
   })
 
@@ -413,7 +413,7 @@ describe('tool-pwsh-persistent', () => {
     session.statusChunks = [tail.slice(0, split), tail.slice(split)]
     const send = vi.spyOn(session, 'startSend')
 
-    expect(text(await call(ctx, owner, 'split completion'))).toBe('kept  \ndsh> \n[exit code: 7]')
+    expect(text(await call(ctx, owner, 'split completion'))).toBe('Error: PowerShell command failed with exit code 7.\n\nkept  \ndsh> \n[exit code: 7]')
     expect(send).toHaveBeenCalledTimes(2)
     expect(send.mock.calls[1]?.[0]).toMatchObject({ text: '', submit: false })
   })
@@ -489,7 +489,7 @@ describe('tool-pwsh-persistent', () => {
     expect(text(await call(ctx, owner, 'large'))).toContain('<response clipped>')
 
     session.mode = 'nonzero'
-    expect(text(await call(ctx, owner, 'false'))).toBe('[exit code: 7]')
+    expect(text(await call(ctx, owner, 'false'))).toBe('Error: PowerShell command failed with exit code 7.\n[exit code: 7]')
 
     session.mode = 'exit'
     const exited = text(await call(ctx, owner, 'exit'))
@@ -535,7 +535,7 @@ describe('tool-pwsh-persistent', () => {
     stub.sessions[0]!.mode = 'torn-status'
     stub.sessions[0]!.scrollback = ''
 
-    expect(text(await call(ctx, owner, 'torn status'))).toBe('hello from stub\n[exit code: 7]')
+    expect(text(await call(ctx, owner, 'torn status'))).toBe('Error: PowerShell command failed with exit code 7.\n\nhello from stub\n[exit code: 7]')
   })
 
   it('reports a shell exit when the backend has no code or signal', async () => {

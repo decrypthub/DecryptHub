@@ -26,7 +26,7 @@ import { FiberState } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { defineTool, TOOL_ABORTED, ToolArgsError, ToolContextUnavailableError } from '@deepseek-ai/dsh-tools'
-import type { GenericCallView, TerminalCallView, ToolDefinition, ToolExecution, ToolResult, ToolResultView } from '@deepseek-ai/dsh-tools'
+import type { GenericCallView, TerminalCallView, ToolDefinition, ToolExecution, ToolExecutionResult, ToolResult, ToolResultView } from '@deepseek-ai/dsh-tools'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { JobId, JobRegistry, JobView } from '@deepseek-ai/dsh-jobs'
 import type {} from '@deepseek-ai/dsh-shell-env'
@@ -39,7 +39,7 @@ import type { ShellExecRequest, ShellExecSpec, ShellExecution, ShellRunResult } 
 import { parseExitStatus } from '@deepseek-ai/dsh-shell'
 import { processJob, processOutcome, processSources, ringDelta } from './background.ts'
 import type { ProcessJobHooks } from './background.ts'
-import { renderPwshJobRead, renderPwshPromoted, renderPwshResult } from './render.ts'
+import { failedCommandExitCode, renderPwshJobRead, renderPwshPromoted, renderPwshResult } from './render.ts'
 import type { RenderablePwshResult } from './render.ts'
 
 declare module '@deepseek-ai/dsh-jobs' {
@@ -303,8 +303,32 @@ export function apply(ctx: Context, config: Config = {}): void {
   ctx.systemPrompt.section({
     name: 'tool:pwsh',
     order: ctx.systemPrompt.getSectionOrder('TOOL_PWSH'),
-    text: 'Non-zero exits are reported as `[exit code: N]` markers; investigate failures before moving on. '
-      + 'On Windows a killed process settles as `[exit code: 1]` without a signal marker; treat a bare exit 1 after an interruption as a termination, not a command failure.',
+    text: 'When asked to run a PowerShell command, call pwsh. Only report execution, output, and status from its actual result. '
+      + 'Use the PowerShell process exit code to report command status. A non-zero exit is a command failure even if the tool ran and returned output. '
+      + 'Label the command Failed and include the exit code in your reply, including when its failure was expected. '
+      + 'For background jobs, a completed job can have a non-zero command exit. '
+      + 'If the command was stopped, killed, or timed out, report that interruption. '
+      + 'On Windows a killed process can return exit code 1 without a signal marker.',
+  })
+
+  ctx.on('tools/execute', async (exec, next): Promise<ToolExecutionResult> => {
+    const result = await next()
+    // Native chat reports command failure. Programmatic and nested calls keep their canonical exit values.
+    if (exec.name !== 'pwsh' || exec.toolSet === undefined || exec.parent !== undefined || result.isError) return result
+    const { value } = result
+    if (value === null || typeof value !== 'object' || Array.isArray(value)
+      || value.kind !== 'foreground' || typeof value.cwd !== 'string') return result
+    const exitCode = failedCommandExitCode(value)
+    if (exitCode === undefined) return result
+    const block = result.content[0]
+    const status = `Command status: FAILED (exit code ${exitCode}). Use this status when reporting this command.\n\n`
+    return {
+      isError: true,
+      error: { message: `PowerShell command failed with exit code ${exitCode}.`,
+        info: { name: 'PowerShellCommandError', code: 'PWSH_NONZERO_EXIT' } },
+      content: block?.type === 'text' ? [{ type: 'text', text: status + block.text }] : result.content,
+      meta: { cwd: value.cwd, pwshExitFailure: true },
+    }
   })
 
   /**
@@ -625,12 +649,15 @@ export function apply(ctx: Context, config: Config = {}): void {
         const raw = block.text
         const isBackground = typeof args === 'object' && args !== null && (args as { run_in_background?: unknown }).run_in_background === true
         const isPromoted = (result as { value?: { kind?: unknown } }).value?.kind === 'promoted'
-        // Background acknowledgements, promotions, and errors have no terminal exit status.
-        if (isBackground || isPromoted || result.isError) {
+        const meta = result.meta
+        const commandExited = meta !== null && typeof meta === 'object' && !Array.isArray(meta) && meta.pwshExitFailure === true
+        if (isBackground || isPromoted || (result.isError && !commandExited)) {
           return { card: 'generic', content: [{ type: 'text', text: `\`\`\`console\n${raw.replace(/\n+$/, '')}\n\`\`\`` }] }
         }
         // The exit marker becomes the card's exit pill, so it leaves the output body.
-        const { body, ...exit } = parseExitStatus(raw)
+        const statusEnd = commandExited ? raw.indexOf('\n\n') : -1
+        const terminalText = statusEnd < 0 ? raw : raw.slice(statusEnd + 2)
+        const { body, ...exit } = parseExitStatus(terminalText)
         return { card: 'terminal', output: body, ...exit }
       },
       /* jscpd:ignore-end */

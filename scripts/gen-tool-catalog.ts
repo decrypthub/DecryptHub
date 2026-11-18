@@ -251,7 +251,12 @@ const TOOL_PACKAGES: ToolPackage[] = [
   {
     pkg: '@deepseek-ai/dsh-mcp-resources',
     dir: 'mcp-resources',
-    source: 'packages/mcp/mcp-resources/src/tools.ts',
+    source: {
+      list_mcp_resource_templates: 'packages/mcp/mcp-resources/src/tools.ts',
+      list_mcp_resources: 'packages/mcp/mcp-resources/src/tools.ts',
+      mcp_server_status: 'packages/mcp/mcp-resources/src/index.ts',
+      read_mcp_resource: 'packages/mcp/mcp-resources/src/tools.ts',
+    },
     requires: ['ctx.tools', 'ctx.mcpResources'],
     writes: ['tool/call', 'tool/result'],
     async mount(ctx) {

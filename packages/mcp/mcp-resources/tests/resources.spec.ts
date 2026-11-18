@@ -103,7 +103,7 @@ describe('MCP resource tools', () => {
     expect((await call(ctx, 'list_mcp_resources', { server: 'second' })).isError).toBe(false)
     await second.dispose()
     expect(visibleResourceTools(ctx)).toEqual([])
-    expect(renderPrompt(await ctx.systemPrompt.assemble())).not.toContain('MCP resource servers')
+    expect(renderPrompt(await ctx.systemPrompt.assemble())).not.toContain('MCP servers')
 
     const remove = ctx.mcpResources.register('second', { request })
     expect(visibleResourceTools(ctx)).toEqual([...resourceToolNames].sort())
@@ -184,7 +184,7 @@ describe('MCP resource tools', () => {
     for (const agent of [undefined, sibling]) {
       expect(visibleResourceTools(ctx, agent)).toEqual([])
       expect(renderPrompt(await ctx.systemPrompt.assemble(agent === undefined ? {} : { scope: agent })))
-        .not.toContain('MCP resource servers')
+        .not.toContain('MCP servers')
       expect(await call(ctx, 'list_mcp_resources', { server: 'docs' }, agent))
         .toMatchObject({ isError: true, error: { info: { code: 'UNKNOWN_TOOL' } } })
     }
@@ -231,7 +231,7 @@ describe('MCP resource tools', () => {
     ctx.mcpResources.register('docs', { request })
     expect((await call(ctx, 'list_mcp_resources', { server: 'docs' })).isError).toBe(true)
     expect(visibleResourceTools(ctx)).toEqual([...resourceToolNames].sort())
-    expect(renderPrompt(await ctx.systemPrompt.assemble())).toContain('server argument: ["docs"]')
+    expect(renderPrompt(await ctx.systemPrompt.assemble())).toContain('Connected resource servers: ["docs"]')
   })
 
   it.each([false, true])('rolls back a partial shared-tool registration (scoped: %s)', async (scoped) => {
@@ -247,7 +247,7 @@ describe('MCP resource tools', () => {
       .toThrow('already registered')
     expect(ctx.tools.get('list_mcp_resources', scoped ? owner : undefined)).toBeUndefined()
     expect(renderPrompt(await ctx.systemPrompt.assemble(scoped ? { scope: owner } : {})))
-      .not.toContain('MCP resource servers')
+      .not.toContain('MCP servers')
     removeConflict()
     registrationCtx.mcpResources.register('docs', { request: async () => ({ resources: [] }) })
     expect(visibleResourceTools(ctx, scoped ? owner : undefined)).toEqual([...resourceToolNames].sort())
@@ -255,12 +255,12 @@ describe('MCP resource tools', () => {
 
   it('publishes explicit server names without requiring server tools or instructions', async () => {
     const ctx = await setup()
-    expect(renderPrompt(await ctx.systemPrompt.assemble())).not.toContain('MCP resource servers')
+    expect(renderPrompt(await ctx.systemPrompt.assemble())).not.toContain('MCP servers')
     ctx.mcpResources.register('docs{{literal}}', { request: async () => ({ resources: [] }) })
 
     const prompt = renderPrompt(await ctx.systemPrompt.assemble())
-    expect(prompt).toContain('MCP resource servers')
-    expect(prompt).toContain('server argument: ["docs{{literal}}"]')
+    expect(prompt).toContain('MCP servers')
+    expect(prompt).toContain('Connected resource servers: ["docs{{literal}}"]')
   })
 
   it('lists only caller-visible names and withdraws disposed providers from the prompt', async () => {
@@ -276,14 +276,55 @@ describe('MCP resource tools', () => {
     } })
 
     expect(renderPrompt(await ctx.systemPrompt.assemble({ scope: owner })))
-      .toContain('server argument: ["docs","private"]')
+      .toContain('Connected resource servers: ["docs","private"]')
     expect(renderPrompt(await ctx.systemPrompt.assemble({ scope: other })))
-      .toContain('server argument: ["docs"]')
+      .toContain('Connected resource servers: ["docs"]')
     await fiber.dispose()
     expect(renderPrompt(await ctx.systemPrompt.assemble({ scope: owner })))
-      .toContain('server argument: ["docs"]')
+      .toContain('Connected resource servers: ["docs"]')
     disposeGlobal()
-    expect(renderPrompt(await ctx.systemPrompt.assemble())).not.toContain('MCP resource servers')
+    expect(renderPrompt(await ctx.systemPrompt.assemble())).not.toContain('MCP servers')
+  })
+
+  it('updates the prompt as a configured resource server disconnects and reconnects without resources', async () => {
+    const ctx = await setup()
+    let availability: ReturnType<NonNullable<McpResourceProvider['availability']>> = 'resources'
+    let changed: (() => void) | undefined
+    const dispose = ctx.mcpResources.register('warehouse', {
+      availability: () => availability,
+      onAvailabilityChange(listener) {
+        changed = listener
+        return () => { changed = undefined }
+      },
+      request: async () => ({ resources: [] }),
+    })
+
+    expect(renderPrompt(await ctx.systemPrompt.assemble())).toContain('Connected resource servers: ["warehouse"].')
+    expect(visibleResourceTools(ctx)).toEqual([...resourceToolNames].sort())
+    availability = 'disconnected'
+    changed?.()
+    const disconnected = renderPrompt(await ctx.systemPrompt.assemble())
+    expect(disconnected).toContain('Disconnected servers: ["warehouse"].')
+    expect(disconnected).toContain('A disconnection, timeout, or request error provides no domain result.')
+    expect(visibleResourceTools(ctx)).toEqual([])
+    const status = await call(ctx, 'mcp_server_status', { server: 'warehouse' })
+    expect(status).toMatchObject({ isError: false, value: {
+      server: 'warehouse', connected: false, resources: false,
+      message: 'MCP server is disconnected. No lookup was run, and no data was returned. Report the disconnection now and stop until the server is reconnected.',
+    } })
+    availability = 'no-resources'
+    changed?.()
+    const reconnected = renderPrompt(await ctx.systemPrompt.assemble())
+    expect(reconnected).toContain('Connected servers without resources: ["warehouse"].')
+    expect(reconnected).toContain('Never guess or cycle through alternate URIs after a failure.')
+    expect(visibleResourceTools(ctx)).toEqual([])
+    availability = 'resources'
+    changed?.()
+    expect(visibleResourceTools(ctx)).toEqual([...resourceToolNames].sort())
+    dispose()
+    expect(changed).toBeUndefined()
+    expect(visibleResourceTools(ctx)).toEqual([])
+    expect(ctx.tools.get('mcp_server_status')).toBeUndefined()
   })
 
   it('withdraws all shared tools and server-name context when its plugin unloads', async () => {
@@ -294,13 +335,13 @@ describe('MCP resource tools', () => {
     await ctx.plugin(NativeToolExecutor)
     const fiber = await ctx.plugin(McpResources)
     ctx.mcpResources.register('docs', { request: async () => ({ resources: [] }) })
-    expect(renderPrompt(await ctx.systemPrompt.assemble())).toContain('MCP resource servers')
+    expect(renderPrompt(await ctx.systemPrompt.assemble())).toContain('MCP servers')
 
     await fiber.dispose()
     for (const name of ['list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource']) {
       expect(ctx.tools.get(name)).toBeUndefined()
     }
-    expect(renderPrompt(await ctx.systemPrompt.assemble())).not.toContain('MCP resource servers')
+    expect(renderPrompt(await ctx.systemPrompt.assemble())).not.toContain('MCP servers')
   })
 
   it('routes all three operations with the explicit server and opaque parameters', async () => {

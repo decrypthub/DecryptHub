@@ -62,6 +62,9 @@
 | [packages/experimental/liveshare/src/endpoint-classification.ts](packages/experimental/liveshare/src/endpoint-classification.ts) | 组件管理、设备状态与工具探测仅允许所有者；外部提供方可登记权限分类前保留。 |
 | [packages/extensions/cordis-client-runner/src/client/slot-catalog.ts](packages/extensions/cordis-client-runner/src/client/slot-catalog.ts) | 生成的产品 API 或插槽目录；从合并源码重生成，不手工合并生成差异。 |
 | [packages/extensions/tool-cordis/src/api-catalog.ts](packages/extensions/tool-cordis/src/api-catalog.ts) | 生成的产品 API 或插槽目录；从合并源码重生成，不手工合并生成差异。 |
+| [packages/mcp/mcp-client/src/connection.ts](packages/mcp/mcp-client/src/connection.ts), [diagnostic.ts](packages/mcp/mcp-client/src/diagnostic.ts), and [tools.ts](packages/mcp/mcp-client/src/tools.ts) | 发布协商后的资源能力，在传输前拒绝不支持的读取，并在断线时说明请求未发送。上游实现等效行为后迁出。 |
+| [packages/mcp/mcp-resources/src/index.ts](packages/mcp/mcp-resources/src/index.ts) | 按作用域向模型提供 MCP 可用性和结果报告规则。上游采用实时能力和连接状态后迁出。 |
+| [packages/shell/tool-pwsh/src/index.ts](packages/shell/tool-pwsh/src/index.ts), [render.ts](packages/shell/tool-pwsh/src/render.ts), and [persistent pwsh](packages/shell/tool-pwsh-persistent/src/index.ts) | 在模型看到的文本中把非零退出标为命令失败。上游提供等效的退出结果报告后迁出。 |
 | [packages/util/official-bundles/src/bundles.ts](packages/util/official-bundles/src/bundles.ts) | 默认产品功能 bundle 与管理可见性；上游提供外部安装 bundle 目录后迁出。 |
 | [packages/util/official-bundles/src/plugin-manager.ts](packages/util/official-bundles/src/plugin-manager.ts) | 默认产品功能 bundle 与管理可见性；上游提供外部安装 bundle 目录后迁出。 |
 

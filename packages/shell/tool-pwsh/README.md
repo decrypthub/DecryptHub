@@ -85,7 +85,7 @@ This section explains the design decisions behind the tool and points at the cod
 - **A deliberate twin of `dsh-tool-bash`.** Foreground and background execution, the managed environment, the sandbox escalation surface, and the marker/truncation rendering mirror the bash tool call-for-call, so consumers of one accept the other's wire shape ([pwsh tool bash parity reference](README.md)).
 - **PowerShell-dialect contract.** The tool contract is PowerShell: native paths and `$env:` variables, executed via `pwsh -Command` with no intermediate shell.
 - **Windows sandbox facts taught in the description.** The ConstrainedLanguage and named-pipe contracts are Windows-restricted-token behavior; the gate for teaching them is "any confining executor is mounted", which is safe because every shipped pairing is win32-only.
-- **Non-zero exits are reported, not errored.** Only infrastructure failures (spawn errors, aborts) surface as tool errors, matching the bash story.
+- **Non-zero command exits retain stdout and stderr.** Native model steps record `PWSH_NONZERO_EXIT` for a failed foreground command and keep its terminal output and exit code. Programmatic and nested calls retain the canonical process value. Spawn errors and aborted calls surface as tool errors.
 
 ### Source map
 
@@ -97,7 +97,7 @@ This section explains the design decisions behind the tool and points at the cod
 
 ### Rendering and exit markers
 
-The renderer shares the bash tool's structure and the `parseExitStatus` marker contract from `dsh-shell`: a clean exit (0, no signal) produces no marker; the UI card consumes the exit marker as its exit-status pill. Windows forced termination settles as exit 1 without a signal, so `[killed by signal: …]` is POSIX-only there. The `tool:pwsh` prompt section (first-party order 1010) teaches the exit-marker convention and the Windows exit-1-after-interruption reading.
+The renderer shares the bash tool's structure and the `parseExitStatus` marker contract from `dsh-shell`: an ordinary non-zero exit starts the result with an explicit failure message and retains the final exit-code marker, and a clean exit (0, no signal) produces no marker; the UI card consumes the exit marker as its exit-status pill. Windows forced termination settles as exit 1 without a signal, so `[killed by signal: …]` is POSIX-only there. The `tool:pwsh` prompt section (first-party order 1010) teaches the exit-marker convention and the Windows exit-1-after-interruption reading.
 
 </details>
 
@@ -131,7 +131,7 @@ Every request in this plugin's registration scope contains the pwsh guidance bel
 ##### Pwsh guidance
 
 ```markdown
-Non-zero exits are reported as `[exit code: N]` markers; investigate failures before moving on. On Windows a killed process settles as `[exit code: 1]` without a signal marker; treat a bare exit 1 after an interruption as a termination, not a command failure.
+When asked to run a PowerShell command, call pwsh. Only report execution, output, and status from its actual result. Use the PowerShell process exit code to report command status. A non-zero exit is a command failure even if the tool ran and returned output. Label the command Failed and include the exit code in your reply, including when its failure was expected. For background jobs, a completed job can have a non-zero command exit. If the command was stopped, killed, or timed out, report that interruption. On Windows a killed process can return exit code 1 without a signal marker.
 ```
 
 #### Token effect

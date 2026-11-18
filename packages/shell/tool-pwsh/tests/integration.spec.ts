@@ -97,7 +97,7 @@ describe.skipIf(!hasPwsh)('pwsh tool over the real pwsh executor', () => {
       description: 'fail loudly',
     }, agent())
     expect(result.isError).toBe(false)
-    expect(lf(text(result))).toBe('[stderr]\nboom\n[exit code: 3]')
+    expect(lf(text(result))).toBe('Error: PowerShell command failed with exit code 3.\n\n[stderr]\nboom\n[exit code: 3]')
   })
 
   it('resolves relative paths in the session workspace', async () => {

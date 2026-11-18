@@ -2458,12 +2458,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
   },
   {
     key: 'mcpResources',
-    summary: 'Scoped resource access plus three tools shared by configured MCP servers.',
-    description: 'Scoped resource access plus three tools shared by configured MCP servers.',
+    summary: 'Scoped MCP connection status and resource access.',
+    description: 'Scoped MCP connection status and resource access.',
     methods: [
       {
         signature: 'register(server: string, provider: McpResourceProvider): () => void',
-        description: 'Register one server and expose resource tools while that scope has providers.',
+        description: 'Register one server\'s status and expose resource tools for connected providers that support resources.',
         parameters: [{ name: 'server', description: 'configured server name, unique in this scope.' }, { name: 'provider', description: 'connection-owned resource operations.' }],
         returns: 'the effect disposer for this exact registration.',
       },
@@ -8019,7 +8019,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'McpResourceProvider',
-    declaration: 'export interface McpResourceProvider {\n    request(request: McpResourceRequest, exec: ToolExecution): Promise<JsonValue>;\n}',
+    declaration: 'export interface McpResourceProvider {\n    availability?(): ResourceAvailability;\n    onAvailabilityChange?(changed: () => void): () => void;\n    request(request: McpResourceRequest, exec: ToolExecution): Promise<JsonValue>;\n}',
   },
   {
     name: 'McpResourceRequest',
