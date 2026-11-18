@@ -599,10 +599,23 @@ function webSnapshotGate(needs: string[], after?: string[]): Gate {
   })
 }
 
+function windowsSessionReplayGate(build: string): Gate {
+  const scenario = 'pwsh-tool-turn'
+  return pnpmExec('windows-session-replay', [
+    'vitest', 'run', '--config', 'vitest.snapshot.config.ts',
+    'snapshots/session/headless.snapshot.ts', '-t', `replays ${scenario}`,
+  ], {
+    label: 'Windows headless session replay',
+    env: { DSH_EXAMPLE_MODE: 'lib', DSH_SNAPSHOT: 'replay', DSH_REQUIRED_HEADLESS_REPLAY: scenario },
+    needs: [build],
+  })
+}
+
 function ciWindowsBlockingGates(): Gate[] {
   return [
     ciBuildGate('windows-build', { label: 'build' }),
     pnpmScript('windows-site', 'docs:build', { label: 'production site' }),
+    windowsSessionReplayGate('windows-build'),
   ]
 }
 
@@ -627,6 +640,7 @@ function ciWindowsCompleteGates(): Gate[] {
   return [
     ciBuildGate(),
     pnpmScript('windows-site', 'docs:build', { label: 'production site' }),
+    windowsSessionReplayGate('build'),
     ...coverage,
     ...observational,
   ]
@@ -657,7 +671,7 @@ function ciWindowsObservationalGates(): Gate[] {
   const predecessors = [
     ...ciStaticGates({ ownsBuild: true }),
     electronInstallGate(),
-    // Linux owns required lint and snapshots; Windows omits those duplicates.
+    // Linux owns required lint and full snapshot replay.
     pnpmScript('duplication', 'duplication'),
     pnpmScript('publint', 'publint', { needs: ['build'] }),
     pnpmScript('node-next-types', 'verify-node-next-types', {

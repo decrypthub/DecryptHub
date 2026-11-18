@@ -160,10 +160,14 @@ function replaceCwdSpelling(value: string, spelling: string, replacement: string
   return out
 }
 
-/** Replace every known cwd spelling with one stable token. */
+/** Replace known cwd spellings and their complete JSON-quoted forms with one stable token. */
 function replaceCwd(value: string, ctx: NormalizeContext, replacement: string): string {
   let out = value
-  for (const spelling of cwdSpellings(ctx)) out = replaceCwdSpelling(out, spelling, replacement)
+  for (const spelling of cwdSpellings(ctx)) {
+    out = replaceCwdSpelling(out, spelling, replacement)
+    const quoted = JSON.stringify(spelling)
+    if (quoted !== `"${spelling}"`) out = out.replaceAll(quoted, JSON.stringify(replacement))
+  }
   return out
 }
 

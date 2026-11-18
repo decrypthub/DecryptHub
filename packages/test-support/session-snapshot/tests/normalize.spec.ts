@@ -338,6 +338,32 @@ describe('normalizeSessionLog', () => {
     expect(out).not.toContain(ctx.cwd)
   })
 
+  it('normalizes JSON-quoted Windows working directories and preserves changed results', () => {
+    const replay = (cwd: string, result: string): string => {
+      const text = `Current working directory: ${JSON.stringify(cwd)}.`
+      return normalizeSessionLog([
+        header({ cwd }),
+        event({
+          type: 'user/message',
+          data: {
+            content: [{ type: 'text', text }],
+            source: { kind: 'runtime-context', sections: [{ name: 'working-directory:current', text }] },
+          },
+        }),
+        event({ type: 'tool/result', data: { result } }),
+      ].join('\n'), { ...ctx, cwd })
+    }
+    const first = String.raw`C:\Temp\Replay A\workspace`
+    const second = String.raw`D:\CI\Replay B\workspace`
+    const outside = String.raw`C:\Temp\Replay A\workspace-other`
+    const result = `Read ${JSON.stringify(outside)}`
+    const normalized = replay(first, result)
+    expect(normalized.split(JSON.stringify('Current working directory: "{{cwd}}".'))).toHaveLength(3)
+    expect(normalized).toContain(JSON.stringify(result))
+    expect(replay(second, result)).toBe(normalized)
+    expect(replay(second, 'Wrong result')).not.toBe(normalized)
+  })
+
   it('scrubs cwd at file URI and chained-punctuation boundaries in event data', () => {
     const ev = JSON.stringify({
       type: 'tool/result',

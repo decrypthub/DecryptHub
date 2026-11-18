@@ -573,7 +573,7 @@ describe('gate graph validation', () => {
 
     expect(scripts['check:ci:windows-observational-ready']).toBe('tsx scripts/run-gates.ts ci-windows-observational-ready')
     expect(scripts).not.toHaveProperty('check:ci:windows-observational')
-    const completeOnly = new Set(['build', 'windows-site', 'native-system', 'coverage', 'coverage-exempt-heavy'])
+    const completeOnly = new Set(['build', 'windows-site', 'windows-session-replay', 'native-system', 'coverage', 'coverage-exempt-heavy'])
     const shared = complete.filter(gate => !completeOnly.has(gate.id))
     expect(ready.map(gate => gate.id).sort()).toEqual([...shared.map(gate => gate.id), 'docs-site-build'].sort())
     expect(ready.some(gate => gate.id === 'build')).toBe(false)
@@ -659,6 +659,27 @@ describe('gate graph validation', () => {
       }
     },
   )
+
+  it.each([
+    ['ci-windows-blocking', 'windows-build'],
+    ['ci-windows-complete', 'build'],
+  ] as const)('requires built, keyless Windows headless replay in %s', (mode, build) => {
+    const gates = withPnpmEntrypoint(() => gatesForMode(mode))
+    const replay = gates.find(gate => gate.id === 'windows-session-replay')
+    expect(replay).toMatchObject({
+      args: [
+        '/private/pnpm.cjs', 'exec', 'vitest', 'run', '--config', 'vitest.snapshot.config.ts',
+        'snapshots/session/headless.snapshot.ts', '-t', 'replays pwsh-tool-turn',
+      ],
+      env: {
+        DSH_EXAMPLE_MODE: 'lib',
+        DSH_SNAPSHOT: 'replay',
+        DSH_REQUIRED_HEADLESS_REPLAY: 'pwsh-tool-turn',
+      },
+      needs: [build],
+    })
+    expect(replay?.allowFailure).not.toBe(true)
+  })
 
   it.each(['ci-coverage', 'ci-artifacts', 'ci-windows-blocking'] as const)(
     'only provisions Electron for native Windows coverage in %s', (mode) => {

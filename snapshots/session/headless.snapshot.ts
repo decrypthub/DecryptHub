@@ -1349,6 +1349,10 @@ describe('headless recorded-session snapshots', () => {
     ...mode === 'replay' && scenario.name === 'tool-call-turn'
       ? [{ scenario, retainedToolInput: 'session.v3.jsonl' }] : [],
   ])
+  const requiredReplay = process.env.DSH_REQUIRED_HEADLESS_REPLAY
+  if (requiredReplay !== undefined && (mode !== 'replay' || !runs.some(({ scenario }) => scenario.name === requiredReplay))) {
+    throw new Error(`required headless replay is unavailable: ${requiredReplay}`)
+  }
   for (const { scenario, retainedToolInput } of runs) {
     const skipped = scenario.manifest.platform === 'posix' && process.platform === 'win32'
       || scenario.manifest.platform === 'pwsh' && !hasPwsh
@@ -1356,9 +1360,14 @@ describe('headless recorded-session snapshots', () => {
       || scenario.manifest.workspace?.setup === 'readonly-patch-directory' && process.getuid?.() === 0
       || mode === 'record' && scenario.manifest.recording === 'authored'
       || mode === 'record' && scenario.manifest.sessionFormat !== undefined
+    const required = scenario.name === requiredReplay
+    if (required && skipped) throw new Error(`required headless replay is skipped: ${scenario.name}`)
     const scenarioTest = skipped ? it.skip : mode === 'replay' ? it.concurrent : it
     const inputLabel = retainedToolInput === undefined ? '' : ' from retained V3 input'
-    scenarioTest(`${mode}s ${scenario.name}${inputLabel} through dsh --profile headless`, async () => {
+    scenarioTest(`${mode}s ${scenario.name}${inputLabel} through dsh --profile headless`, {
+      timeout: scenario.name === 'provider-cwd' ? 3 * LOADER_SMOKE_TEST_TIMEOUT_MS : LOADER_SMOKE_TEST_TIMEOUT_MS,
+      repeats: required ? 1 : 0,
+    }, async () => {
       let fixtureFiles = retainedToolInput === undefined
         ? recordingFixtureNames(await readdir(scenario.dir), mode) : [retainedToolInput]
       let fixtures = await fixtureSessions(scenario, fixtureFiles)
@@ -1641,6 +1650,6 @@ describe('headless recorded-session snapshots', () => {
       } else {
         expect(finalWorkspace, `${scenario.name}: a changed workspace requires workspace.final`).toEqual(initialWorkspace)
       }
-    }, scenario.name === 'provider-cwd' ? 3 * LOADER_SMOKE_TEST_TIMEOUT_MS : LOADER_SMOKE_TEST_TIMEOUT_MS)
+    })
   }
 })
