@@ -325,6 +325,8 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   ImportKind: 'mcp.md',
   ImportResult: 'mcp.md',
   ComponentInventory: 'mcp.md',
+  ChatTargetChoice: 'mcp.md',
+  ChatTargetView: 'mcp.md',
   ComponentId: 'mcp.md',
   ComponentsSnapshot: 'mcp.md',
   ComponentRuntime: 'mcp.md',

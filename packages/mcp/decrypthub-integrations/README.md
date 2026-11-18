@@ -46,7 +46,7 @@ The Agent owns its child Fiber. Disposing the Agent or this product plugin drain
 
 #### What the model sees
 
-The stable `decrypthub_status` tool reports observed component services, target inventories and the configured endpoint separately from MCP transport state. Analysis tools use the selected endpoint; an observation at another saved address does not route analysis calls to it. WDH, ADH and IDH supply their connected MCP tool schemas, results and server instructions through the upstream client.
+When a chat has a selected device and App, `decrypthub_status` reports only that selection and whether the original process is still valid. Direct official ADH and IDH MCP calls are denied in a bound chat. An unbound chat gets the component inventory and the configured endpoints. WDH continues to use the current Agent's browser connection.
 
 #### Token effect
 

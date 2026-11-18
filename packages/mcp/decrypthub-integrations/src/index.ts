@@ -95,12 +95,16 @@ interface Binding { cwd: string; entry: string; handle: Fiber; unobserve?: () =>
 export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'decrypthub_status',
-    description: 'Read WDH browser availability and Android/iOS service and app status before choosing an analysis target. Installation and MCP connectivity do not prove a target is online. Device tools operate on configuredEndpoints; apps observed at other addresses require selecting that device in component settings before analysis. Use current target IDs, and ask the user if several targets match. This read does not start, stop, attach to, or change apps. Inspect WDH pages with the current session browser tools.',
+    description: 'Read the current chat’s selected mobile App and verify that its original process is still online. If the chat has no target, report WDH availability and the configured Android/iOS services and Apps. If the selected process is stale, ask the user to select it again in the chat. This tool only reads status.',
     parameters: {},
     output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
     execute: async (_args, exec) => {
       const components = ctx.get('decrypthubComponents')
       if (components === undefined) throw new Error('Official component management is unavailable')
+      if (exec.agent !== undefined && components.hasChatTarget(exec.agent.id)) {
+        const target = await components.chatTarget(exec.agent.id, exec.signal)
+        return JSON.stringify({ target, scope: 'chat', access: 'status-only' }, null, 2)
+      }
       const statuses = await Promise.all((['wdh', 'adh', 'idh'] as const).map(id => components.inspectTargets(id, exec.signal)))
       const selected = config.get()
       const mcp = ctx.mcpManager.list().filter(server => server.name === 'adh' || server.name === 'idh')
@@ -109,6 +113,18 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         configuredEndpoints: { adh: selected.adh.endpoint, idh: selected.idh.endpoint } }, null, 2)
     },
   })), 'decrypthub: read-only integration status')
+  ctx.tools.guard((exec) => {
+    const server = typeof exec.arguments === 'object' && exec.arguments !== null && 'server' in exec.arguments
+      ? exec.arguments.server : undefined
+    const resourceCall = ['list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource'].includes(exec.name)
+      && (server === 'adh' || server === 'idh' || server === undefined)
+    if (!/^mcp__(adh|idh)__/.test(exec.name) && !resourceCall) return undefined
+    if (exec.agent === undefined || !ctx.get('decrypthubComponents')?.hasChatTarget(exec.agent.id)) return undefined
+    return {
+      reason: 'This chat is bound to a device for status queries. Use decrypthub_status for the selected App.',
+      info: { name: 'ChatTargetScopeError', code: 'CHAT_TARGET_STATUS_ONLY' },
+    }
+  })
   const settings = ctx.get('settings')
   if (settings !== undefined) ctx.effect(() => settings.configure({ auto: false }, ctx.fiber))
   let child: Fiber | undefined

@@ -19,6 +19,7 @@ import { McpSource } from './source.ts'
 import { ComponentsSource } from './components-source.ts'
 import { ComponentsIcon } from './ComponentsPage.tsx'
 import { WdhStatusPill } from './WdhStatusPill.tsx'
+import { ChatTargetPicker, type ChatTargetInjected } from './ChatTargetPicker.tsx'
 import { SkillsMcpMainPage, SkillsMcpPage } from './SkillsMcpPage.tsx'
 import { ImportPage } from './ImportPage.tsx'
 import { en, zh, type McpKey } from './locales.ts'
@@ -181,6 +182,23 @@ function mount(ctx: Context): void {
       retry: () => { void components.run(ops => ops.reconnect('wdh')).catch(() => {}) },
     }),
   }, WdhStatusPill))
+  const targetActions = {
+    hooks: { components: components.store },
+    readTarget: (sessionId, signal) => confirmed(official.chatTarget(sessionId, signal)),
+    discover: (id, signal) => confirmed(official.inspectTargets(id, signal)),
+    writeTarget: (sessionId, choice, signal) => confirmed(official.setChatTarget(sessionId, choice, signal)),
+  } satisfies ChatTargetInjected
+  ctx.remoteAccess.whenAccess('decrypthubComponents/chatTarget', function* () {
+    components.load()
+    yield ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
+      name: 'conversation.session.header.utilities', id: 'mobile-target', order: 18, locale: 'settings.mcp',
+      inject: () => targetActions,
+    }, ChatTargetPicker))
+    yield ctx.slots.inject('conversation.hero.options', () => ctx.slots.register({
+      name: 'conversation.hero.options', id: 'mobile-target', order: 18, locale: 'settings.mcp',
+      inject: () => targetActions,
+    }, ChatTargetPicker))
+  })
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
     name: 'sidebar.panellist', id: panel, order: 14, locale: 'settings.mcp', label: () => t('product.nav'),
   }, ComponentsIcon))

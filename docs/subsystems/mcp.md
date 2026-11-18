@@ -157,6 +157,27 @@ One owner of official installations; the MCP client remains the transport owner.
  */
 @Remote async inspectTargets(id: ComponentId, signal: AbortSignal): Promise<ComponentInventory>
 
+/** Whether a chat has an explicit scope, including a binding that needs reselection.
+ * @param sessionId - owning chat.
+ * @returns true while a binding exists.
+ */
+hasChatTarget(sessionId: SessionId): boolean
+
+/** Read only this chat's chosen device and verify the original process identity.
+ * @param sessionId - owning chat.
+ * @param signal - caller lifetime.
+ * @returns fresh scoped status, or null for an unbound chat.
+ */
+@Remote async chatTarget(sessionId: SessionId, signal: AbortSignal): Promise<ChatTargetView | null>
+
+/** Bind a chat to a process from an explicitly configured device, or clear the binding.
+ * @param sessionId - owning chat.
+ * @param choice - exact device and App observation, or null to clear it.
+ * @param signal - caller lifetime.
+ * @returns confirmed binding or null after clearing.
+ */
+@Remote async setChatTarget(sessionId: SessionId, choice: ChatTargetChoice | null, signal: AbortSignal): Promise<ChatTargetView | null>
+
 /** Start one installed component once and list its tools without keeping a connection.
  * @param id - component whose runtime is started.
  * @returns the advertised raw tool names, or null when the component cannot start.

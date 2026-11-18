@@ -33,6 +33,8 @@ The DecryptHub Web composition mounts this owner-only Remote service with an abs
 
 DSH MCP clients own connection lifetimes and Settings checks write revisions. Presentation uses observed facts. Cancellation, disposal and reconnect release the corresponding subscriptions or processes.
 
+The owner can select an online Android or iOS App from a configured device in the chat. A binding is kept by chat ID for the lifetime of the Host. Reopening the chat keeps its selection while the Host runs. Each status read checks the chosen address and original process identity. An unreachable service leaves the binding unverified. A changed process requires the owner to select the App again.
+
 <a id="model-experience"></a>
 ## Model Experience
 

@@ -4,6 +4,19 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
 /** Code-owned component identifiers. */
 export type ComponentId = 'wdh' | 'adh' | 'idh'
+/** A mobile App selected by the user from a read-only inventory. */
+export interface ChatTargetChoice {
+  component: 'adh' | 'idh'
+  endpoint: string
+  id: string
+  pid: string
+  appId: string
+}
+/** Current observation of one chat's selected process. */
+export interface ChatTargetView extends ChatTargetChoice {
+  name: string
+  state: 'bound' | 'stale' | 'unavailable'
+}
 /** A fresh read from an official CLI; an MCP transport is not evidence that a target is online. */
 export interface ComponentInventory {
   schemaVersion: 1

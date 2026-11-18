@@ -1,6 +1,6 @@
 /** Official component catalog, verified installation and connection observations. */
 import { Context } from '@deepseek-ai/cordis'
-import { Remote, TypertRemoteService, principalOf } from '@deepseek-ai/dsh-typert-protocol'
+import { Remote, RemoteError, TypertRemoteService, principalOf } from '@deepseek-ai/dsh-typert-protocol'
 import Schema from '@deepseek-ai/schemastery'
 import { promises as fs } from 'node:fs'
 import { dirname, isAbsolute, join } from 'node:path'
@@ -21,7 +21,7 @@ import type {} from '@deepseek-ai/dsh-subprocess'
 import type { BrowserKernelView } from './types.ts'
 import { probeTools } from './tool-probe.ts'
 import { parseInventory } from './inventory.ts'
-import type { ComponentInventory } from './types.ts'
+import type { ChatTargetChoice, ChatTargetView, ComponentInventory } from './types.ts'
 export type { ComponentId, ComponentOperation, ComponentView, ComponentsSnapshot, InstalledComponent, WdhConnectionView } from './types.ts'
 
 /** Deployment-owned directories; no catalog can choose an executable. */
@@ -57,6 +57,34 @@ export interface ComponentRuntime {
   cwd?: string
 }
 
+interface ChatTargetBinding {
+  view: ChatTargetView
+  address: string
+  generation: string
+}
+
+const idhIdentity = z.object({
+  isError: z.literal(false).optional(),
+  structuredContent: z.object({
+    processGeneration: z.string().min(1),
+    process: z.object({ pid: z.union([z.number(), z.string()]), bundleId: z.string().min(1) }),
+  }),
+})
+
+function endpointKey(component: ChatTargetChoice['component'], value: string): string | undefined {
+  const url = URL.parse(value)
+  if (url === null || !['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) return undefined
+  // The CLI defaults differ, and URL.port drops an explicitly supplied port 80 or 443.
+  const authority = value.match(/^https?:\/\/([^/]+)/i)?.[1]
+  const port = Number(authority?.match(/:(\d+)$/)?.[1] ?? (component === 'adh' ? 8088 : 80))
+  const path = url.pathname.replace(/\/(?:api\/)?mcp\/?$/, '').replace(/\/$/, '')
+  return `${url.protocol}//${url.hostname}:${port}${path}`
+}
+
+function appId(target: ComponentInventory['targets'][number]): string {
+  return target.bundle ?? target.package ?? target.name
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context { decrypthubComponents: DecryptHubComponents }
 }
@@ -73,6 +101,8 @@ export class DecryptHubComponents extends TypertRemoteService {
   private readonly jobs = new Map<ComponentId, { controller: AbortController; done: Promise<void> }>()
   private readonly wdh = new Map<string, WdhConnectionView>()
   private readonly inventories = new Map<ComponentId, ComponentInventory>()
+  /** Chat identities outlive the Session handles reclaimed while switching tabs. */
+  private readonly chatTargets = new Map<SessionId, ChatTargetBinding>()
   /** Last measured WDH tool count; measured on demand, not tied to a live session. */
   private wdhTools: number | null = null
   private readonly measuring = new Map<ComponentId, Promise<string[] | null>>()
@@ -248,22 +278,8 @@ export class DecryptHubComponents extends TypertRemoteService {
         const config = z.object({ wdh: z.object({ browser: z.enum(['system', 'cloak']) }) }).parse(namespace?.value)
         text = await this.browserCommand(['status', '--json', '--browser', config.wdh.browser], lifetime)
       } else {
-        const config = z.object({ command: z.string(), endpoint: z.string().default(''), devices: z.array(z.string()).max(32).default([]) }).parse(
-          z.record(z.string(), z.unknown()).parse(namespace?.value)[id])
-        const endpoints = [...new Set([...config.devices, ...(config.endpoint ? [config.endpoint] : [])])]
-        const args = ['status', '--json', '--timeout', '2', ...(id === 'idh' ? ['--no-saved'] : [])]
-        for (const endpoint of endpoints) args.push('--endpoint', endpoint)
-        const runtime = await this.runtime(id, config.command, args)
-        const handle = this.ctx.subprocess.spawn({
-          argv: [runtime.command, ...runtime.args], env: runtime.env,
-          cwd: runtime.cwd ?? this.config.directory, graceMs: this.config.processGraceMs, signal: lifetime,
-          stdio: { stdin: 'ignore', stdout: { maxBytes: 1_048_576 }, stderr: { maxBytes: 4096 } },
-        })
-        const result = await handle.done
-        if (!await handle.waitForExit(AbortSignal.timeout(this.config.processGraceMs))) throw new Error('Component status cleanup was not confirmed')
-        lifetime.throwIfAborted()
-        if (result.exitCode !== 0) throw new Error('Install a component CLI with status --json support')
-        text = handle.collected.stdout?.readFrom(0).text ?? ''
+        const { command, addresses } = this.deviceConfiguration(id)
+        text = await this.readDeviceInventory(id, command, addresses, lifetime)
       }
       inventory = parseInventory(text, id)
     } catch (error) {
@@ -275,6 +291,135 @@ export class DecryptHubComponents extends TypertRemoteService {
     this.inventories.set(id, inventory)
     this.changed()
     return inventory
+  }
+
+  private deviceConfiguration(id: 'adh' | 'idh'): { command: string; addresses: string[] } {
+    const namespace = this.ctx.settings.describe().find(row => row.ns === 'decrypthub-integrations')
+    const entry = z.record(z.string(), z.unknown()).parse(namespace?.value)[id]
+    const config = z.object({
+      command: z.string(),
+      endpoint: z.string().default(''),
+      devices: z.array(z.string()).max(32).default([]),
+    }).parse(entry)
+    return { command: config.command, addresses: [...new Set([...config.devices, config.endpoint].filter(Boolean))] }
+  }
+
+  private async readDeviceCommand(id: 'adh' | 'idh', command: string, args: string[], signal: AbortSignal): Promise<string> {
+    const runtime = await this.runtime(id, command, args)
+    const handle = this.ctx.subprocess.spawn({
+      argv: [runtime.command, ...runtime.args], env: runtime.env,
+      cwd: runtime.cwd ?? this.config.directory, graceMs: this.config.processGraceMs, signal,
+      stdio: { stdin: 'ignore', stdout: { maxBytes: 1_048_576 }, stderr: { maxBytes: 4096 } },
+    })
+    const result = await handle.done
+    if (!await handle.waitForExit(AbortSignal.timeout(this.config.processGraceMs))) throw new Error('Component status cleanup was not confirmed')
+    signal.throwIfAborted()
+    if (result.exitCode !== 0) throw new Error('Device status command failed. Check the component version and connection.')
+    return handle.collected.stdout?.readFrom(0).text ?? ''
+  }
+
+  private readDeviceInventory(id: 'adh' | 'idh', command: string, addresses: readonly string[], signal: AbortSignal): Promise<string> {
+    const args = ['status', '--json', '--timeout', '2', ...(id === 'idh' ? ['--no-saved'] : [])]
+    for (const address of addresses) args.push('--endpoint', address)
+    return this.readDeviceCommand(id, command, args, signal)
+  }
+
+  private async observeChatTarget(choice: ChatTargetChoice, address: string, signal: AbortSignal): Promise<ChatTargetBinding | 'stale' | 'unavailable'> {
+    const { component, endpoint, id, pid } = choice
+    const lifetime = AbortSignal.any([signal, this.lifetime.signal, AbortSignal.timeout(this.config.requestTimeoutMs)])
+    const config = this.deviceConfiguration(component)
+    if (!config.addresses.includes(address)) return 'stale'
+    const raw = await this.readDeviceInventory(component, config.command, [address], lifetime)
+    const inventory = parseInventory(raw, component)
+    const service = endpointKey(component, endpoint)
+    if (!inventory.connections.some(row => row.online && endpointKey(component, row.endpoint) === service)) return 'unavailable'
+    const target = inventory.targets.find(row =>
+      row.online && row.id === id && row.endpoint === endpoint && row.pid != null
+      && String(row.pid) === pid && appId(row) === choice.appId)
+    if (target === undefined) return 'stale'
+    let generation = target.id
+    if (component === 'idh') {
+      // Only this fixed metadata operation is used. The selected App or the model cannot supply a tool name.
+      const result = await this.readDeviceCommand('idh', config.command,
+        ['call', '--json', '--no-saved', '--endpoint', address, '--', id, 'get_capabilities'], lifetime)
+      const identity = idhIdentity.safeParse(JSON.parse(result))
+      if (!identity.success) return 'unavailable'
+      const { process, processGeneration } = identity.data.structuredContent
+      if (String(process.pid) !== pid || process.bundleId !== target.bundle) return 'stale'
+      generation = processGeneration
+    }
+    return { view: { component, endpoint, id, pid, appId: choice.appId, name: target.name, state: 'bound' }, address, generation }
+  }
+
+  /** Whether a chat has an explicit scope, including a binding that needs reselection.
+   * @param sessionId - owning chat.
+   * @returns true while a binding exists.
+   */
+  hasChatTarget(sessionId: SessionId): boolean { return this.chatTargets.has(sessionId) }
+
+  /** Read only this chat's chosen device and verify the original process identity.
+   * @param sessionId - owning chat.
+   * @param signal - caller lifetime.
+   * @returns fresh scoped status, or null for an unbound chat.
+   */
+  @Remote
+  async chatTarget(sessionId: SessionId, signal: AbortSignal): Promise<ChatTargetView | null> {
+    this.assertOwner()
+    const binding = this.chatTargets.get(sessionId)
+    if (binding === undefined) return null
+    if (binding.view.state === 'stale') return binding.view
+    const observed = await this.observeChatTarget(binding.view, binding.address, signal).catch(() => {
+      signal.throwIfAborted()
+      this.lifetime.signal.throwIfAborted()
+      return 'unavailable' as const
+    })
+    signal.throwIfAborted()
+    // A response for the old selection must never be delivered as a response for the new one.
+    if (this.chatTargets.get(sessionId) !== binding) return { ...binding.view, state: 'unavailable' }
+    if (observed === 'unavailable') return { ...binding.view, state: 'unavailable' }
+    if (observed === 'stale' || observed.generation !== binding.generation) {
+      binding.view = { ...binding.view, state: 'stale' }
+    }
+    return binding.view
+  }
+
+  /** Bind a chat to a process from an explicitly configured device, or clear the binding.
+   * @param sessionId - owning chat.
+   * @param choice - exact device and App observation, or null to clear it.
+   * @param signal - caller lifetime.
+   * @returns confirmed binding or null after clearing.
+   */
+  @Remote
+  async setChatTarget(sessionId: SessionId, choice: ChatTargetChoice | null, signal: AbortSignal): Promise<ChatTargetView | null> {
+    this.assertOwner()
+    signal.throwIfAborted()
+    const agent = this.ctx.agents.get(sessionId)
+    if (agent === undefined || agent.status === 'running') {
+      throw new RemoteError('gateway/bad-request', 'Open an idle chat before changing its device target.', {})
+    }
+    if (choice === null) {
+      this.chatTargets.delete(sessionId)
+      return null
+    }
+    const before = this.chatTargets.get(sessionId)
+    const { addresses } = this.deviceConfiguration(choice.component)
+    const selection = endpointKey(choice.component, choice.endpoint)
+    const address = selection === undefined ? undefined : addresses.find(value => endpointKey(choice.component, value) === selection)
+    if (address === undefined) throw new RemoteError('gateway/bad-request', 'Choose an App on a configured device.', {})
+    const observed = await this.observeChatTarget(choice, address, signal)
+    signal.throwIfAborted()
+    if (typeof observed === 'string') {
+      throw new RemoteError('gateway/bad-request', 'The selected process cannot be verified. Refresh the App list.', {})
+    }
+    if (this.ctx.agents.get(sessionId) !== agent || this.chatTargets.get(sessionId) !== before
+      || this.ctx.agents.get(sessionId)?.status === 'running') {
+      throw new RemoteError('gateway/bad-request', 'The chat changed. Refresh the App list.', {})
+    }
+    if (!this.deviceConfiguration(choice.component).addresses.includes(address)) {
+      throw new RemoteError('gateway/bad-request', 'The selected device was removed.', {})
+    }
+    this.chatTargets.set(sessionId, observed)
+    return observed.view
   }
 
   /** Start one installed component once and list its tools without keeping a connection.

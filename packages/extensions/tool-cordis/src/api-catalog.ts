@@ -1026,6 +1026,24 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'fresh service and target facts, including an explicit query failure.',
       },
       {
+        signature: 'hasChatTarget(sessionId: SessionId): boolean',
+        description: 'Whether a chat has an explicit scope, including a binding that needs reselection.',
+        parameters: [{ name: 'sessionId', description: 'owning chat.' }],
+        returns: 'true while a binding exists.',
+      },
+      {
+        signature: '@Remote async chatTarget(sessionId: SessionId, signal: AbortSignal): Promise<ChatTargetView | null>',
+        description: 'Read only this chat\'s chosen device and verify the original process identity.',
+        parameters: [{ name: 'sessionId', description: 'owning chat.' }, { name: 'signal', description: 'caller lifetime.' }],
+        returns: 'fresh scoped status, or null for an unbound chat.',
+      },
+      {
+        signature: '@Remote async setChatTarget(sessionId: SessionId, choice: ChatTargetChoice | null, signal: AbortSignal): Promise<ChatTargetView | null>',
+        description: 'Bind a chat to a process from an explicitly configured device, or clear the binding.',
+        parameters: [{ name: 'sessionId', description: 'owning chat.' }, { name: 'choice', description: 'exact device and App observation, or null to clear it.' }, { name: 'signal', description: 'caller lifetime.' }],
+        returns: 'confirmed binding or null after clearing.',
+      },
+      {
         signature: '@Remote async measureTools(id: ComponentId): Promise<string[] | null>',
         description: 'Start one installed component once and list its tools without keeping a connection.',
         parameters: [{ name: 'id', description: 'component whose runtime is started.' }],
@@ -6442,6 +6460,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ChangeResult',
     declaration: 'export interface ChangeResult {\n    changed: boolean;\n    application: \'applied\' | \'restart-required\' | \'overridden\' | \'failed\' | \'cancelled\';\n    restartReason?: RestartReason;\n    stage: \'install\' | \'enable\' | \'remove\';\n    target: string;\n    enabled?: boolean;\n    error?: ManagementError;\n    warnings?: string[];\n    packageResult?: PackageResult;\n    bundle?: string;\n    version?: string;\n    pendingBuilds?: string[];\n    approvedBuilds?: string[];\n    registries?: Registry[];\n    failedAt?: \'registry\' | \'spec-host\';\n}',
+  },
+  {
+    name: 'ChatTargetChoice',
+    declaration: 'export interface ChatTargetChoice {\n    component: \'adh\' | \'idh\';\n    endpoint: string;\n    id: string;\n    pid: string;\n    appId: string;\n}',
+  },
+  {
+    name: 'ChatTargetView',
+    declaration: 'export interface ChatTargetView extends ChatTargetChoice {\n    name: string;\n    state: \'bound\' | \'stale\' | \'unavailable\';\n}',
   },
   {
     name: 'ChecksRollup',

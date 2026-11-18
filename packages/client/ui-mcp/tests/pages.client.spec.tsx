@@ -7,12 +7,14 @@ import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type {} from '../src/client/index.ts'
 import { McpPage } from '../src/client/Page.tsx'
 import { ComponentsPage } from '../src/client/ComponentsPage.tsx'
+import { ChatTargetPicker } from '../src/client/ChatTargetPicker.tsx'
 import { SkillsMcpPage } from '../src/client/SkillsMcpPage.tsx'
 import { en, zh } from '../src/client/locales.ts'
 import { McpSource } from '../src/client/source.ts'
 import { ComponentsSource } from '../src/client/components-source.ts'
 import type { ComponentsState } from '../src/client/components-source.ts'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { ChatTargetChoice, ChatTargetView, ComponentInventory } from '@deepseek-ai/dsh-decrypthub-components/types'
 
 async function runtime() {
   const runtime = await SlotTestRuntime.create()
@@ -22,9 +24,66 @@ async function runtime() {
   runtime.ctx.provide('locale', locale)
   runtime.slots.installLocale(locale)
   locale.register('settings.mcp', { en, zh })
-  await runtime.declare({ 'settings.section': { kind: 'list', scope: 'root' } })
+  await runtime.declare({
+    'settings.section': { kind: 'list', scope: 'root' },
+    'conversation.session.header.utilities': { kind: 'list', scope: 'session' },
+  })
   return runtime
 }
+
+it('selects a device and App in the chat header and retains its selection when switching chats', async () => {
+  const r = await runtime()
+  const firstId = await r.sessions.add({ id: 'fixture-first-chat' })
+  const secondId = await r.sessions.add({ id: 'fixture-second-chat' })
+  const first = r.sessions.retain(firstId)
+  const second = r.sessions.retain(secondId)
+  onTestFinished(async () => {
+    await r.dispose()
+    first[Symbol.dispose]()
+    second[Symbol.dispose]()
+  })
+  await Promise.all([first.ready, second.ready])
+  const base = 'http://127.0.0.1:32000'
+  const endpoint = base + '/api/mcp'
+  const device = { enabled: true, command: 'idh', args: [], endpoint: base, devices: [base] }
+  const components = createSnapshotStore<ComponentsState>({
+    busy: false, failed: false, connectionFailed: false, connections: [],
+    value: { components: [], wdhTools: null, wdh: [], browser: { state: 'unchecked', version: null },
+      configuration: { revision: 1, writable: true, wdh: { enabled: false, browser: 'system' },
+        adh: { ...device, endpoint: '', devices: [] }, idh: device },
+    },
+  })
+  const targets = new Map<SessionId, ChatTargetView>()
+  const discover = vi.fn(async (component: 'adh' | 'idh'): Promise<ComponentInventory> => ({
+    schemaVersion: 1, component, version: '1', error: null, checkedAt: new Date().toISOString(),
+    connections: [], targets: [{ online: true, name: 'Fixture App', id: 'fixture-app', endpoint, pid: 42 }],
+  }))
+  const writeTarget = vi.fn(async (session: SessionId, choice: ChatTargetChoice | null): Promise<ChatTargetView | null> => {
+    if (choice === null) {
+      targets.delete(session)
+      return null
+    }
+    const view = { ...choice, name: 'Fixture App', state: 'bound' as const }
+    targets.set(session, view)
+    return view
+  })
+  r.slots.register({ name: 'conversation.session.header.utilities', id: 'fixture-target', locale: 'settings.mcp',
+    inject: () => ({ hooks: { components },
+      readTarget: async (session: SessionId) => targets.get(session) ?? null, discover, writeTarget }),
+  }, ChatTargetPicker)
+  const slot = r.renderSlot('conversation.session.header.utilities', {}, { session: first })
+  fireEvent.click(slot.view.getByRole('button', { name: '设备目标' }))
+  const dialog = within(screen.getByRole('dialog'))
+  await dialog.findByRole('option', { name: /Fixture App.*PID 42/ })
+  fireEvent.change(dialog.getByLabelText('设备与 App'), { target: { value: '0' } })
+  fireEvent.click(dialog.getByRole('button', { name: '绑定到当前聊天' }))
+  expect(await slot.view.findByRole('button', { name: 'IDH · Fixture App' })).toBeTruthy()
+  expect(writeTarget).toHaveBeenCalledWith(firstId, { component: 'idh', endpoint, id: 'fixture-app', pid: '42', appId: 'Fixture App' }, expect.any(AbortSignal))
+  slot.update({}, { session: second })
+  expect(slot.view.getByRole('button', { name: '设备目标' })).toBeTruthy()
+  slot.update({}, { session: first })
+  expect(await slot.view.findByRole('button', { name: 'IDH · Fixture App' })).toBeTruthy()
+})
 function mcpSource() {
   const namespace = { ns: 'mcp-manager', autoGenerate: false, schema: {}, value: { servers: {} }, applies: 'live' as const, secrets: [], revision: 4 }
   return new McpSource({ describe: async () => ({ writable: true, hasDocument: true, namespaces: [namespace] }),

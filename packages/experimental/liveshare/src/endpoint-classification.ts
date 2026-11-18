@@ -212,6 +212,7 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'goals/resume': 'owner-only', // owner resumes a goal
   'pluginInventory/list': 'owner-only', // owner plugin inventory
   'decrypthubComponents/cancelInstall': 'owner-only', // owner official component management
+  'decrypthubComponents/chatTarget': 'owner-only', // owner reads the chat's device status
   'decrypthubComponents/checkUpdates': 'owner-only', // owner official component management
   'decrypthubComponents/configure': 'owner-only', // owner official component management
   'decrypthubComponents/importPreview': 'owner-only', // owner copies Harness home data into this product
@@ -223,6 +224,7 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'decrypthubComponents/measureTools': 'owner-only', // owner probes configured component tools
   'decrypthubComponents/reconnect': 'owner-only', // owner official component management
   'decrypthubComponents/rollback': 'owner-only', // owner official component management
+  'decrypthubComponents/setChatTarget': 'owner-only', // owner selects the chat's device and App
   'decrypthubComponents/snapshot': 'owner-only', // owner official component management
   'decrypthubComponents/uninstall': 'owner-only', // owner official component management
   'decrypthubComponents/watch': 'owner-only', // owner official component management
