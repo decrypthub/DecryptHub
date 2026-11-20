@@ -21,7 +21,7 @@ kind: "package-reference"
 
 ## 使用本包
 
-在提供 `sessionQuery` 的组合中挂载本插件。`maxSessions` 限定单次调用最多返回多少会话；工具参数 `limit` 可进一步收窄，但不能超过该上限。两个工具都按调用智能体的工作区过滤，并拒绝读取另一个工作区下的会话。
+在提供 `sessionQuery` 和工作区注册表的组合中挂载本插件。两个工具都要求调用会话归属已注册的工作区，并依据该工作区记录的会话归属列出和读取历史。`maxSessions` 限定返回上限，`limit` 可请求更少的会话。
 
 <a id="model-experience"></a>
 

@@ -12,6 +12,8 @@ export interface MemoryEntryView {
   scope: string
   /** Workspace a project entry belongs to; preserved when the page rewrites it. */
   workspace?: string
+  /** Stable identity retained when the settings page edits a project entry. */
+  workspaceId?: string
   /** ISO-8601 creation stamp owned by the namespace; preserved on rewrite. */
   createdAt?: string
   /** ISO-8601 last-write stamp owned by the namespace. */
@@ -79,7 +81,8 @@ export class MemorySource {
   async put(text: string, scope: string, id?: string): Promise<void> {
     const now = new Date().toISOString()
     const key = id ?? randomUUID()
-    const existing = this.store.getSnapshot().entries[key]
+    const snapshot = this.store.getSnapshot()
+    const existing = snapshot.entries[key]
     await this.operations.write([{
       op: 'set',
       path: ['entries', key],
@@ -89,8 +92,9 @@ export class MemorySource {
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
         ...existing?.workspace === undefined ? {} : { workspace: existing.workspace },
+        ...existing?.workspaceId === undefined ? {} : { workspaceId: existing.workspaceId },
       },
-    }], this.store.getSnapshot().revision)
+    }], snapshot.revision)
     await this.load()
   }
 

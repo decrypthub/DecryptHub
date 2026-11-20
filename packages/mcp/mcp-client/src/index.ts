@@ -23,7 +23,7 @@ export { resolveReconnectPolicy } from './connection.ts'
 import type { ReconnectConfig } from './connection.ts'
 import { registerServerContext } from './server-context.ts'
 import { connectionStatusIn, registerStatusCell } from './status.ts'
-import type { McpConnectionStatusHandle } from './status.ts'
+import type { McpConnectionStatusHandle, McpConnectionToolCaller } from './status.ts'
 // Side-effect type import: declaration-merges `ctx.tools` onto Context.
 import type {} from '@deepseek-ai/dsh-tools'
 
@@ -68,6 +68,14 @@ const activeServerNames = new WeakMap<object, Set<string>>()
  */
 export function connectionStatusOf(fiber: Fiber): McpConnectionStatusHandle | undefined {
   return connectionStatusIn(fiber)
+}
+
+/** Get the raw caller used by Host integrations for their own fixed operations.
+ * @param fiber - the specific MCP instance providing the transport.
+ * @returns a caller owned by that supervisor, or undefined before it mounts.
+ */
+export function connectionToolCallerOf(fiber: Fiber): McpConnectionToolCaller | undefined {
+  return connectionStatusIn(fiber)?.callTool
 }
 
 // ---- Config ----
@@ -241,6 +249,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     throw new Error(`mcp-client(${config.serverName}): previous connection cleanup is incomplete; restart the Host`)
   }
   const connection = startConnection(ctx, config, reconnect, status)
+  ctx.effect(() => {
+    status.callTool = connection.callTool
+    return () => { if (status.callTool === connection.callTool) status.callTool = undefined }
+  }, 'mcp-client.host-caller')
   let stopping: Promise<void> | undefined
   const dispose = (): Promise<void> => stopping ??= connection.dispose()
   // Cordis announces unload before awaiting an unfinished apply(). Closing

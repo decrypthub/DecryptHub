@@ -19,6 +19,7 @@
 
 | 工具包 | 模型可见名称 | 依赖 | 写入／影响 | 随产品发布的别名 | 部署说明 |
 | --- | --- | --- | --- | --- | --- |
+| `@deepseek-ai/dsh-decrypthub-integrations` | `mcp_add` | `ctx.tools`, `ctx.settings`, `ctx.userQuestions`, `ctx.mcpManager` | `tool/call`, `tool/result`, `Desktop profile settings` | - | Desktop 在配置可编辑且支持用户提问时开放 mcp_add。确认后启动配置的连接，并在为下一步提供工具的实例上完成发现。 |
 | `@deepseek-ai/dsh-tool-product-sessions` | `session_list`, `session_read` | `ctx.tools`, `ctx.sessionQuery`, `a calling Agent for workspace authority` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-plugin-manager` | `plugin_manager` | `ctx.tools`, `ctx.pluginManager`, `ctx.sandboxPolicy` | `tool/call`, `tool/result`, `user/message` | - | - |
 | `@deepseek-ai/dsh-plugin-market` | `plugin_market` | `ctx.tools`, `ctx.pluginMarket` | `tool/call`, `tool/result` | - | - |
@@ -60,6 +61,102 @@
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`、`web_search` | `ctx.tools`、`ctx.web`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | web_search 和 web_fetch 将提供方选择置于 ctx.web 之后，使模型可见 schema 在更换后端时保持稳定。 |
 
 <a id="deepseek-aidsh-plugin-manager"></a>
+
+<a id="deepseek-aidsh-decrypthub-integrations"></a>
+
+## `@deepseek-ai/dsh-decrypthub-integrations`
+
+### `mcp_add`
+
+Add and enable one custom MCP server when the user asks, with an approval card showing the exact connection configuration. For a GitHub repository or documentation link, use web_fetch to read its setup instructions first, then use the documented Streamable HTTP endpoint or executable and argument list. A repository page is not an MCP endpoint. For pasted MCP JSON, translate the chosen server entry into config. Do not invent a command or run setup scripts yourself. Keep secrets out of tool arguments and use stored credential references. Approval saves the server for all chats in this profile. The tool waits for the live connection to discover its tools. On success, continue the user’s task with the new tools in the next step of this chat.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Unique server name using 1–32 ASCII letters, digits, underscores or hyphens."
+    },
+    "source": {
+      "type": "string",
+      "description": "Repository, package or documentation source shown to the user, if known."
+    },
+    "config": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "transport": {
+              "type": "string",
+              "const": "streamable-http"
+            },
+            "url": {
+              "type": "string",
+              "description": "Actual Streamable HTTP MCP URL."
+            },
+            "headers": {
+              "type": "object",
+              "description": "Optional string headers. Example authorization value: Bearer ${credential:MY_TOKEN}.",
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "transport",
+            "url"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "transport": {
+              "type": "string",
+              "const": "stdio"
+            },
+            "command": {
+              "type": "string",
+              "description": "Executable only, such as npx or uvx. Put each argument in args."
+            },
+            "args": {
+              "type": "array",
+              "description": "Documented launch arguments as separate strings.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "cwd": {
+              "type": "string",
+              "description": "Optional absolute working directory required by the command."
+            },
+            "env": {
+              "type": "object",
+              "description": "Optional string environment variables. Use credential references for tokens and passwords.",
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "transport",
+            "command"
+          ]
+        }
+      ],
+      "description": "One server’s connection settings. Use credential references such as ${credential:MY_TOKEN} for secrets."
+    }
+  },
+  "required": [
+    "name",
+    "config"
+  ]
+}
+```
+
+Source: [`packages/mcp/decrypthub-integrations/src/custom-mcp.ts`](../packages/mcp/decrypthub-integrations/src/custom-mcp.ts)
+
+Desktop 在配置可编辑且支持用户提问时开放 mcp_add。确认后启动配置的连接，并在为下一步提供工具的实例上完成发现。
+
+<a id="deepseek-aidsh-tool-product-sessions"></a>
 
 ## `@deepseek-ai/dsh-tool-product-sessions`
 

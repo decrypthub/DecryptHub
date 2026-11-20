@@ -8,8 +8,11 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-query'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { defineTool, ToolArgsError, ToolContextUnavailableError } from '@deepseek-ai/dsh-tools'
+import type {} from '@deepseek-ai/dsh-workspace'
+import type { Workspace, WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import z from '@deepseek-ai/schemastery'
 
 /** Cordis plugin name. */
@@ -38,30 +41,22 @@ interface SessionSummary {
   createdAt: string
 }
 
-/** Canonical form of a workspace directory for comparison across stored spellings. */
-function normalizeWorkspace(value: string): string {
-  const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '')
-  return process.platform === 'win32' ? normalized.toLowerCase() : normalized
-}
-
-/**
- * Compare two workspace directories the way the host filesystem does.
- * @param left - one session's stored cwd, when it has one.
- * @param right - the calling agent's cwd, when it has one.
- * @returns whether the sessions belong to the same workspace scope.
- */
-function sameWorkspace(left: string | undefined, right: string | undefined): boolean {
-  if (left === undefined || right === undefined) return true
-  return normalizeWorkspace(left) === normalizeWorkspace(right)
-}
-
 /**
  * Register the session listing and reading tools.
  * @param ctx - context providing the tool registry and session query.
  * @param config - validated plugin configuration.
  */
 export function apply(ctx: Context, config: Config): void {
-  ctx.tools.register(defineTool({
+  function requireWorkspace(sessionId: SessionId | undefined, expected?: WorkspaceId): Workspace {
+    const workspace = sessionId === undefined ? undefined : ctx.get('workspaceRegistry')?.list()
+      .find(candidate => candidate.sessionIds.includes(sessionId))
+    if (workspace === undefined || (expected !== undefined && workspace.id !== expected)) {
+      throw new ToolContextUnavailableError('Open a conversation in the intended workspace to read its history.')
+    }
+    return workspace
+  }
+
+  ctx.effect(() => ctx.tools.register(defineTool({
     name: 'session_list',
     description: 'List the most recently created sessions in this workspace with their ids, titles, and creation times. Use it when the user refers to earlier work and you need to find which session holds it.',
     parameters: {
@@ -96,30 +91,32 @@ export function apply(ctx: Context, config: Config): void {
       }],
     },
     async execute(args, exec) {
-      const cwd = exec.agent?.session.header.cwd
-      const records = (await ctx.sessionQuery.listSessions(exec.signal))
-        .filter(record => sameWorkspace(record.header.cwd, cwd))
-      const titles = await ctx.sessionQuery.readTitleSnapshots(records.map(record => record.header.id), exec.signal)
+      const caller = exec.agent?.id
+      const { id: workspaceId } = requireWorkspace(caller)
+      const records = await ctx.sessionQuery.listSessions(exec.signal)
+      const owned = new Set(requireWorkspace(caller, workspaceId).sessionIds)
+      const limit = args.limit === undefined ? config.maxSessions : Math.max(1, Math.min(config.maxSessions, args.limit))
+      const headers = records.map(record => record.header).filter(header => owned.has(header.id))
+        .sort((left, right) => right.createdAt - left.createdAt).slice(0, limit)
+      const titles = await ctx.sessionQuery.readTitleSnapshots(headers.map(header => header.id), exec.signal)
+      const stillOwned = new Set(requireWorkspace(caller, workspaceId).sessionIds)
       const titleById = new Map(titles.flatMap((entry) => {
         if (entry.status !== 'fulfilled') return []
         const raw: unknown = entry.value.title
         const text = typeof raw === 'string' ? raw : (raw as { text?: string } | undefined)?.text ?? ''
         return [[String(entry.sessionId), text] as const]
       }))
-      const limit = args.limit === undefined ? config.maxSessions : Math.max(1, Math.min(config.maxSessions, args.limit))
-      const sessions: SessionSummary[] = records
-        .map(record => ({
-          id: String(record.header.id),
-          title: titleById.get(String(record.header.id)) ?? '',
-          createdAt: new Date(record.header.createdAt).toISOString(),
+      const sessions: SessionSummary[] = headers.filter(header => stillOwned.has(header.id))
+        .map(header => ({
+          id: String(header.id),
+          title: titleById.get(String(header.id)) ?? '',
+          createdAt: new Date(header.createdAt).toISOString(),
         }))
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-        .slice(0, limit)
       return { sessions }
     },
-  }))
+  })))
 
-  ctx.tools.register(defineTool({
+  ctx.effect(() => ctx.tools.register(defineTool({
     name: 'session_read',
     description: 'Read the last few user and assistant messages of one session in this workspace by id. Use it after session_list when the user asks what an earlier conversation concluded; tool calls and results are omitted.',
     parameters: {
@@ -154,12 +151,16 @@ export function apply(ctx: Context, config: Config): void {
       }],
     },
     async execute(args, exec) {
-      const id = args.id as Parameters<typeof ctx.sessionQuery.readSurface>[0]
-      const surface = await ctx.sessionQuery.readSurface(id)
-      const cwd = exec.agent?.session.header.cwd
-      if (!sameWorkspace(surface.session.cwd, cwd)) {
-        throw new Error(`session_read: session "${args.id}" belongs to another workspace`)
+      const caller = exec.agent?.id
+      const workspace = requireWorkspace(caller)
+      const id = SessionId(args.id)
+      const requireMember = (current: Workspace): void => {
+        if (!current.sessionIds.includes(id)) throw new ToolArgsError(['Choose a session listed in the current workspace.'])
       }
+      requireMember(workspace)
+      const surface = await ctx.sessionQuery.readSurface(id)
+      exec.signal.throwIfAborted()
+      requireMember(requireWorkspace(caller, workspace.id))
       const limit = args.limit === undefined ? 10 : Math.max(1, Math.min(50, args.limit))
       const messages: { role: string; content: readonly ContentBlock[] }[] = []
       for (const event of surface.events) {
@@ -177,5 +178,5 @@ export function apply(ctx: Context, config: Config): void {
       })).filter(message => message.text.length > 0)
       return { messages: rendered.slice(-limit) }
     },
-  }))
+  })))
 }

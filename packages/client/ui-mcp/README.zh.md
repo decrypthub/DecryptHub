@@ -26,10 +26,14 @@ kind: "package-reference"
 
 DecryptHub Web 组合挂载此插件。打开「技能与 MCP」，默认在 MCP Tab：上方官方组件横向状态行（点开后安装、选内核或连接设备），下方自定义 MCP。切到技能 Tab 管理技能目录。下载浏览器内核前确认许可条款。
 
+在已连接 WDH 的聊天中打开 **浏览器已连接 · 抓包**。选中一条请求即可查看响应和 WDH 记录的 JavaScript 发起栈。刷新可读取新请求或重新选择已失效的记录。
+
 <a id="understand-the-implementation"></a>
 ## 理解实现
 
 连接生命周期由 DSH MCP 客户端管理，配置通过 Settings 服务检查版本。界面仅展示观测到的事实；取消、卸载和重新连接会释放对应订阅或进程。
+
+桌面端对话使用共享确认卡展示待添加的 MCP 配置。「添加并连接」只确认本次请求，「取消」不修改配置。
 
 <a id="model-experience"></a>
 ## Model Experience
@@ -46,7 +50,6 @@ DecryptHub Web 组合挂载此插件。打开「技能与 MCP」，默认在 MCP
 
 - 导入暂不支持 SSE，冲突名称需要先解决再导入。
 - Harness 导入只复制对话记录：自动化任务、模型密钥与插件有意不导入；技能目录按最新对话解析，没有对话时显示说明性空状态。
-- 当前管理 WDH 工具和浏览器文件，内嵌浏览器、抓包和调试工作台尚未迁移。
 - MCP 握手成功不代表 Android 或 iOS 设备已连接。
 
 <a id="dev-note"></a>

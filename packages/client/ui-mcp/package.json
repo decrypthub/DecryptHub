@@ -72,7 +72,9 @@
     "@deepseek-ai/dsh-client-ui-workspace": "workspace:*",
     "@deepseek-ai/dsh-util-crypto": "workspace:*",
     "@deepseek-ai/dsh-api-remote-access": "workspace:*",
-    "@deepseek-ai/dsh-client-ui-conversation": "workspace:*"
+    "@deepseek-ai/dsh-client-ui-conversation": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-approval": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-user-questions": "workspace:*"
   },
   "files": [
     "locale/*.json",

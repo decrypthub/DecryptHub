@@ -18,7 +18,19 @@
       "path": "../../core/agent"
     },
     {
+      "path": "../../boot/app-boot"
+    },
+    {
       "path": "../../core/tools"
+    },
+    {
+      "path": "../../interaction/user-questions"
+    },
+    {
+      "path": "../../settings/settings"
+    },
+    {
+      "path": "../../util/error"
     },
     {
       "path": "../../session/working-directory"

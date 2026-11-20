@@ -7,9 +7,13 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import { defineTool } from '@deepseek-ai/dsh-tools'
-import type {} from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/dsh-agent'
+import { HarnessError } from '@deepseek-ai/dsh-error'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import { SettingsConflictError, type SettingsPathOp } from '@deepseek-ai/dsh-settings'
+import { defineTool, ToolArgsError, ToolContextUnavailableError } from '@deepseek-ai/dsh-tools'
+import type {} from '@deepseek-ai/dsh-workspace'
+import type { Workspace } from '@deepseek-ai/dsh-workspace/types'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import { isVolatile } from '@deepseek-ai/cosmokit'
 import z from '@deepseek-ai/schemastery'
@@ -18,16 +22,18 @@ import { randomUUID } from 'node:crypto'
 /** Cordis plugin name; also the settings namespace the product page edits. */
 export const name = 'product-memory'
 /** Services this plugin contributes to. */
-export const inject = ['systemPrompt', 'tools', 'settings', 'agents']
+export const inject = ['systemPrompt', 'tools', 'settings']
 
 /** One stored memory entry. */
 export interface MemoryEntry {
   /** The remembered fact, one sentence. */
   text: string
   /** `user` applies across projects; `project` applies to one workspace. */
-  scope: string
-  /** Absolute workspace directory a `project` entry belongs to. */
+  scope: 'user' | 'project'
+  /** Original directory for entries written before workspace ids were stored. */
   workspace?: string
+  /** Durable workspace identity for a project-scoped entry. */
+  workspaceId?: string
   /** ISO-8601 creation stamp. */
   createdAt: string
   /** ISO-8601 last-write stamp. */
@@ -48,8 +54,8 @@ export const Config = z.object({
   entries: z.dict(z.object({
     text: z.string().role('textarea'),
     scope: z.union([z.const('user'), z.const('project')]).default('user'),
-    // Legacy entries carry no workspace; they stay visible everywhere until rewritten.
     workspace: z.string(),
+    workspaceId: z.string(),
     createdAt: z.string(),
     updatedAt: z.string(),
   })).default({}).volatile(),
@@ -63,24 +69,13 @@ function plainValue<T>(value: T | { get(): T }): T {
 /** Section order: after workspace guidance and before the skill catalog. */
 const SECTION_ORDER = 150
 
-/** Canonical form of a workspace directory for comparison across stored spellings. */
-function normalizeWorkspace(value: string): string {
-  const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '')
-  return process.platform === 'win32' ? normalized.toLowerCase() : normalized
-}
-
-/** Compare two workspace directories the way the host filesystem does. */
-function sameWorkspace(left: string | undefined, right: string | undefined): boolean {
-  if (left === undefined || right === undefined) return left === right
-  return normalizeWorkspace(left) === normalizeWorkspace(right)
-}
-
 /** Whether one entry belongs in the caller's view. */
-function visible(entry: MemoryEntry, scope: 'user' | 'project', workspace: string | undefined): boolean {
-  if (entry.scope !== scope) return false
-  if (scope === 'user') return true
-  // Legacy entries carry no workspace; keep them visible instead of dropping data.
-  return entry.workspace === undefined || sameWorkspace(entry.workspace, workspace)
+function visible(entry: MemoryEntry, workspace: Workspace | undefined): boolean {
+  if (entry.scope === 'user') return true
+  if (workspace === undefined) return false
+  if (entry.workspaceId !== undefined) return entry.workspaceId === workspace.id
+  // A registration created later for the same directory cannot inherit the old record.
+  return entry.workspace === workspace.path && Date.parse(entry.createdAt) >= Date.parse(workspace.createdAt)
 }
 
 /**
@@ -91,11 +86,11 @@ function visible(entry: MemoryEntry, scope: 'user' | 'project', workspace: strin
  * @param workspace - the workspace whose project entries are rendered.
  * @returns the section text, or an empty string when nothing fits.
  */
-function renderSection(entries: Record<string, MemoryEntry>, budget: number, scope: 'user' | 'project', workspace?: string): string {
+function renderSection(entries: Record<string, MemoryEntry>, budget: number, scope: 'user' | 'project', workspace?: Workspace): string {
   const lines: string[] = []
   let used = 0
   for (const [id, entry] of Object.entries(entries)) {
-    if (!visible(entry, scope, workspace)) continue
+    if (entry.scope !== scope || !visible(entry, workspace)) continue
     const line = `- (${entry.scope}) ${entry.text} [id: ${id}]`
     if (used + line.length > budget) break
     lines.push(line)
@@ -114,12 +109,12 @@ function renderSection(entries: Record<string, MemoryEntry>, budget: number, sco
 export function apply(ctx: Context, config: Config): void {
   let live = config
 
-  /** Re-read this namespace after the settings page or another writer changed it. */
-  const refresh = (): void => {
+  const namespace = () => {
     const row = ctx.settings.describe({ redactSecrets: true }).find(candidate => candidate.ns === name)
-    if (row === undefined || typeof row.value !== 'object' || row.value === null) return
-    live = row.value as Config
+    if (row === undefined || typeof row.value !== 'object' || row.value === null) return undefined
+    return { config: row.value as Config, revision: row.revision }
   }
+  const refresh = (): void => { live = namespace()?.config ?? config }
   ctx.on('loader/volatile-update', refresh)
 
   // Let the settings surface render this namespace from its schema.
@@ -134,43 +129,41 @@ export function apply(ctx: Context, config: Config): void {
     text: () => renderSection(plainValue(live.entries), plainValue(live.maxSectionChars), 'user'),
   }), 'product-memory.section')
 
-  // Workspace entries are registered in the agent's own prompt scope, so an
-  // agent only ever sees the memories of its own workspace.
-  const installWorkspaceSection = (agent: Agent): void => {
-    agent.ctx.inject(['systemPrompt'], (scope) => {
-      scope.systemPrompt.section({
-        name: 'product-memory:workspace',
-        order: SECTION_ORDER,
-        interpolate: false,
-        text: () => renderSection(plainValue(live.entries), plainValue(live.maxSectionChars), 'project', agent.session.header.cwd),
-      })
-    })
+  function workspaceOf(sessionId: SessionId | undefined): Workspace | undefined {
+    return sessionId === undefined ? undefined : ctx.get('workspaceRegistry')?.list()
+      .find(candidate => candidate.sessionIds.includes(sessionId))
   }
-  for (const agent of ctx.agents.list()) installWorkspaceSection(agent)
-  ctx.on('agent/created', ({ agent }) => { installWorkspaceSection(agent) })
+  ctx.effect(() => ctx.systemPrompt.section({
+    name: 'product-memory:workspace',
+    order: SECTION_ORDER,
+    interpolate: false,
+    text: ({ agent }) => renderSection(plainValue(live.entries), plainValue(live.maxSectionChars), 'project', workspaceOf(agent?.id)),
+  }), 'product-memory.workspace-section')
 
-  /**
-   * Write one entry through the settings namespace so the page and the model
-   * share one durable source and one revision check.
-   * @param id - entry id.
-   * @param entry - entry value.
-   */
-  async function put(id: string, entry: MemoryEntry): Promise<void> {
-    await ctx.settings.mutate(name, [{ op: 'set', path: ['entries', id], value: entry }])
+  function editSnapshot() {
+    const snapshot = namespace()
+    if (snapshot === undefined) throw new ToolContextUnavailableError('Memory settings are unavailable.')
+    return { entries: plainValue(snapshot.config.entries), revision: snapshot.revision }
+  }
+
+  async function mutate(op: SettingsPathOp, revision: number): Promise<void> {
+    try {
+      await ctx.settings.mutate(name, [op], revision)
+    } catch (cause) {
+      if (cause instanceof SettingsConflictError) {
+        throw new HarnessError('Memory changed while this edit was being saved. List the current memories and retry.', 'MEMORY_SETTINGS_CONFLICT', { cause })
+      }
+      throw cause
+    }
     refresh()
   }
 
-  /** The visible entries for one caller, in storage order. */
-  function visibleEntries(workspace: string | undefined): [string, MemoryEntry][] {
-    return Object.entries(live.entries).filter(([, entry]) => visible(entry, 'user', undefined) || visible(entry, 'project', workspace))
-  }
-
-  ctx.tools.register(defineTool({
+  ctx.effect(() => ctx.tools.register(defineTool({
     name: 'memory_write',
-    description: 'Store one durable fact worth remembering across sessions, such as a user preference or a project constraint. Keep it one sentence. Omit id to create a new entry; pass an existing id to replace it. Project entries are only injected in the current workspace.',
+    description: 'Store one durable fact worth remembering across sessions, such as a user preference or a project constraint. Keep it one sentence. Omit id to create an entry. To update a visible entry, pass its id and keep its scope.',
     parameters: {
       text: { type: 'string', required: true, description: 'The fact to remember, one sentence, in the user language.' },
-      scope: { type: 'string', description: 'user for cross-project preferences, project for this workspace only. Defaults to user.' },
+      scope: { type: 'string', enum: ['user', 'project'], description: 'user for cross-project preferences, project for this workspace only. Defaults to user on creation and to the existing scope on update.' },
       id: { type: 'string', description: 'Existing entry id to replace. Omit to create a new entry.' },
     },
     output: {
@@ -185,25 +178,34 @@ export function apply(ctx: Context, config: Config): void {
       render: (_args, value) => [{ type: 'text', text: `memory ${value.id} saved (${value.scope})` }],
     },
     async execute(args, exec) {
-      const scope = args.scope === 'project' ? 'project' : 'user'
-      const cwd = exec.agent?.session.header.cwd
-      if (scope === 'project' && cwd === undefined) throw new Error('memory_write: project scope requires a workspace')
+      const workspace = workspaceOf(exec.agent?.id)
+      const { entries, revision } = editSnapshot()
+      const existing = args.id !== undefined && Object.hasOwn(entries, args.id) ? entries[args.id] : undefined
+      if (args.id !== undefined && (existing === undefined || !visible(existing, workspace))) {
+        throw new ToolArgsError(['Choose an existing memory visible in this workspace.'])
+      }
+      const scope = args.scope ?? existing?.scope ?? 'user'
+      if (existing !== undefined && scope !== existing.scope) {
+        throw new ToolArgsError(['Keep the existing memory scope when updating an entry.'])
+      }
+      if (scope === 'project' && workspace === undefined) {
+        throw new ToolContextUnavailableError('Open a conversation in the intended workspace to save project memory.')
+      }
       const now = new Date().toISOString()
       const id = args.id ?? randomUUID()
-      const existing = live.entries[id]
       const entry: MemoryEntry = {
         text: args.text,
         scope,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
+        ...scope === 'project' && workspace !== undefined ? { workspace: workspace.path, workspaceId: workspace.id } : {},
       }
-      if (cwd !== undefined && scope === 'project') entry.workspace = cwd
-      await put(id, entry)
+      await mutate({ op: 'set', path: ['entries', id], value: entry }, revision)
       return { id, scope }
     },
-  }))
+  })))
 
-  ctx.tools.register(defineTool({
+  ctx.effect(() => ctx.tools.register(defineTool({
     name: 'memory_list',
     description: 'List stored product memories visible in this workspace with their ids, scopes, and text. Use it before writing to avoid duplicates.',
     parameters: {},
@@ -236,14 +238,15 @@ export function apply(ctx: Context, config: Config): void {
       }],
     },
     execute(_args, exec) {
-      const workspace = exec.agent?.session.header.cwd
+      const workspace = workspaceOf(exec.agent?.id)
       return Promise.resolve({
-        entries: visibleEntries(workspace).map(([id, entry]) => ({ id, scope: entry.scope, text: entry.text })),
+        entries: Object.entries(plainValue(live.entries)).filter(([, entry]) => visible(entry, workspace))
+          .map(([id, entry]) => ({ id, scope: entry.scope, text: entry.text })),
       })
     },
-  }))
+  })))
 
-  ctx.tools.register(defineTool({
+  ctx.effect(() => ctx.tools.register(defineTool({
     name: 'memory_delete',
     description: 'Delete one stored product memory by id. Use it when the user asks to forget a fact or the entry is obsolete. Entries outside this workspace cannot be removed from here.',
     parameters: {
@@ -258,14 +261,14 @@ export function apply(ctx: Context, config: Config): void {
       render: (_args, value) => [{ type: 'text', text: value.removed ? 'memory removed' : 'no such memory' }],
     },
     async execute(args, exec) {
-      const workspace = exec.agent?.session.header.cwd
-      const existing = live.entries[args.id]
-      const removed = existing !== undefined && (visible(existing, 'user', undefined) || visible(existing, 'project', workspace))
+      const workspace = workspaceOf(exec.agent?.id)
+      const { entries, revision } = editSnapshot()
+      const existing = Object.hasOwn(entries, args.id) ? entries[args.id] : undefined
+      const removed = existing !== undefined && visible(existing, workspace)
       if (removed) {
-        await ctx.settings.mutate(name, [{ op: 'unset', path: ['entries', args.id] }])
-        refresh()
+        await mutate({ op: 'unset', path: ['entries', args.id] }, revision)
       }
       return { removed }
     },
-  }))
+  })))
 }

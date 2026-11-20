@@ -1,5 +1,5 @@
 /** Official component catalog, verified installation and connection observations. */
-import { Context } from '@deepseek-ai/cordis'
+import { Service, type Context } from '@deepseek-ai/cordis'
 import { Remote, RemoteError, TypertRemoteService, principalOf } from '@deepseek-ai/dsh-typert-protocol'
 import Schema from '@deepseek-ai/schemastery'
 import { promises as fs } from 'node:fs'
@@ -14,6 +14,7 @@ import { extractComponentZip } from './zip.ts'
 import type { ComponentId, ComponentOperation, ComponentsSnapshot, ImportItem, ImportKind, ImportResult, InstalledComponent, WdhConnectionView } from './types.ts'
 import type { McpConnectionStatus } from '@deepseek-ai/dsh-mcp-client/types'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-mcp-manager'
@@ -22,6 +23,9 @@ import type { BrowserKernelView } from './types.ts'
 import { probeTools } from './tool-probe.ts'
 import { parseInventory } from './inventory.ts'
 import type { ChatTargetChoice, ChatTargetView, ComponentInventory } from './types.ts'
+import { chatTargetDomain, type ChatTargetBinding } from './chat-targets.ts'
+import { readWdhCaptureDetail, readWdhCaptureList } from './wdh-capture.ts'
+import type { WdhCaptureDetail, WdhCaptureList, WdhCaptureSelection } from './types.ts'
 export type { ComponentId, ComponentOperation, ComponentView, ComponentsSnapshot, InstalledComponent, WdhConnectionView } from './types.ts'
 
 /** Deployment-owned directories; no catalog can choose an executable. */
@@ -57,12 +61,6 @@ export interface ComponentRuntime {
   cwd?: string
 }
 
-interface ChatTargetBinding {
-  view: ChatTargetView
-  address: string
-  generation: string
-}
-
 const idhIdentity = z.object({
   isError: z.literal(false).optional(),
   structuredContent: z.object({
@@ -89,20 +87,23 @@ declare module '@deepseek-ai/cordis' {
   interface Context { decrypthubComponents: DecryptHubComponents }
 }
 
+type WdhCaptureReader = (selection: WdhCaptureSelection | null, signal: AbortSignal) => Promise<unknown>
+type ObservedWdh = { view: WdhConnectionView; readCapture: WdhCaptureReader | undefined }
+
 /** One owner of official installations; the MCP client remains the transport owner. */
 export class DecryptHubComponents extends TypertRemoteService {
   static Config = Config
-  static inject = ['settings', 'agents', 'mcpManager', 'subprocess']
+  static inject = ['settings', 'agents', 'mcpManager', 'subprocess', 'storageDomain']
   private readonly files: ComponentFiles
   private readonly feed: URL | undefined
   private readonly catalog = new Map<ComponentId, ComponentRelease | null>()
   private readonly catalogErrors = new Map<ComponentId, string>()
   private readonly operations = new Map<ComponentId, ComponentOperation>()
   private readonly jobs = new Map<ComponentId, { controller: AbortController; done: Promise<void> }>()
-  private readonly wdh = new Map<string, WdhConnectionView>()
+  private readonly wdh = new Map<SessionId, ObservedWdh>()
   private readonly inventories = new Map<ComponentId, ComponentInventory>()
-  /** Chat identities outlive the Session handles reclaimed while switching tabs. */
-  private readonly chatTargets = new Map<SessionId, ChatTargetBinding>()
+  private chatTargets?: KvTable<SessionId, ChatTargetBinding>
+  private readonly targetWrites = new Set<SessionId>()
   /** Last measured WDH tool count; measured on demand, not tied to a live session. */
   private wdhTools: number | null = null
   private readonly measuring = new Map<ComponentId, Promise<string[] | null>>()
@@ -141,11 +142,41 @@ export class DecryptHubComponents extends TypertRemoteService {
     })
   }
 
+  /** Open verified selections before exposing the component service. */
+  protected async [Service.init](): Promise<void> {
+    const domain = await this.ctx.storageDomain.open(chatTargetDomain)
+    this.chatTargets = domain.table('targets')
+    this.ctx.effect(() => () => domain.close(), 'decrypthub.chatTargets')
+  }
+
+  private targetTable(): KvTable<SessionId, ChatTargetBinding> {
+    if (this.chatTargets === undefined) throw new RemoteError('gateway/bad-request', 'Chat target storage is unavailable.', {})
+    return this.chatTargets
+  }
+
+  private async writeTarget<T>(sessionId: SessionId, write: () => Promise<T>): Promise<T> {
+    if (this.targetWrites.has(sessionId)) throw new RemoteError('gateway/bad-request', 'Wait for the chat target change to finish.', {})
+    this.targetWrites.add(sessionId)
+    try {
+      return await write()
+    } finally {
+      this.targetWrites.delete(sessionId)
+    }
+  }
+
   private assertOwner(): void {
     if (principalOf(this.ctx.invocation) !== undefined) throw new Error('Official component management is available only to the Host owner')
   }
 
   private changed(): void { this.revision++; for (const listener of this.listeners) listener() }
+
+  private async notifyActivation(id: ComponentId): Promise<void> {
+    try {
+      await this.ctx.parallel('decrypthub-components/activated', id)
+    } catch (error) {
+      this.ctx.logger.error('Component activation committed, but a connection observer failed', error)
+    }
+  }
 
   /** Describe official Harness data that can be copied into this product home.
    * @param source - harness home; empty uses `~/.dsh`.
@@ -252,7 +283,7 @@ export class DecryptHubComponents extends TypertRemoteService {
       components,
       inventories: Object.fromEntries(this.inventories),
       wdhTools: this.wdhTools,
-      wdh: [...this.wdh.values()],
+      wdh: [...this.wdh.values()].map(connection => connection.view),
       browser: this.browser,
       configuration: namespace && configuration.success
         ? { ...configuration.data, revision: namespace.revision, writable: this.ctx.settings.writable }
@@ -351,11 +382,13 @@ export class DecryptHubComponents extends TypertRemoteService {
     return { view: { component, endpoint, id, pid, appId: choice.appId, name: target.name, state: 'bound' }, address, generation }
   }
 
-  /** Whether a chat has an explicit scope, including a binding that needs reselection.
+  /** Whether a chat has an explicit scope, including a pending change or a selection that needs to be renewed.
    * @param sessionId - owning chat.
-   * @returns true while a binding exists.
+   * @returns true while a selection exists or a change is in progress.
    */
-  hasChatTarget(sessionId: SessionId): boolean { return this.chatTargets.has(sessionId) }
+  hasChatTarget(sessionId: SessionId): boolean {
+    return this.targetWrites.has(sessionId) || this.targetTable().get(sessionId) !== undefined
+  }
 
   /** Read only this chat's chosen device and verify the original process identity.
    * @param sessionId - owning chat.
@@ -365,8 +398,11 @@ export class DecryptHubComponents extends TypertRemoteService {
   @Remote
   async chatTarget(sessionId: SessionId, signal: AbortSignal): Promise<ChatTargetView | null> {
     this.assertOwner()
-    const binding = this.chatTargets.get(sessionId)
+    signal.throwIfAborted()
+    const table = this.targetTable()
+    const binding = table.get(sessionId)
     if (binding === undefined) return null
+    if (this.targetWrites.has(sessionId)) return { ...binding.view, state: 'unavailable' }
     if (binding.view.state === 'stale') return binding.view
     const observed = await this.observeChatTarget(binding.view, binding.address, signal).catch(() => {
       signal.throwIfAborted()
@@ -375,10 +411,12 @@ export class DecryptHubComponents extends TypertRemoteService {
     })
     signal.throwIfAborted()
     // A response for the old selection must never be delivered as a response for the new one.
-    if (this.chatTargets.get(sessionId) !== binding) return { ...binding.view, state: 'unavailable' }
+    if (this.targetWrites.has(sessionId) || table.get(sessionId) !== binding) return { ...binding.view, state: 'unavailable' }
     if (observed === 'unavailable') return { ...binding.view, state: 'unavailable' }
     if (observed === 'stale' || observed.generation !== binding.generation) {
-      binding.view = { ...binding.view, state: 'stale' }
+      const stale: ChatTargetBinding = { ...binding, view: { ...binding.view, state: 'stale' } }
+      await this.writeTarget(sessionId, () => table.put(sessionId, stale))
+      return stale.view
     }
     return binding.view
   }
@@ -387,7 +425,7 @@ export class DecryptHubComponents extends TypertRemoteService {
    * @param sessionId - owning chat.
    * @param choice - exact device and App observation, or null to clear it.
    * @param signal - caller lifetime.
-   * @returns confirmed binding or null after clearing.
+   * @returns the selection or null for a clear, after the durable write.
    */
   @Remote
   async setChatTarget(sessionId: SessionId, choice: ChatTargetChoice | null, signal: AbortSignal): Promise<ChatTargetView | null> {
@@ -397,29 +435,31 @@ export class DecryptHubComponents extends TypertRemoteService {
     if (agent === undefined || agent.status === 'running') {
       throw new RemoteError('gateway/bad-request', 'Open an idle chat before changing its device target.', {})
     }
-    if (choice === null) {
-      this.chatTargets.delete(sessionId)
-      return null
-    }
-    const before = this.chatTargets.get(sessionId)
-    const { addresses } = this.deviceConfiguration(choice.component)
-    const selection = endpointKey(choice.component, choice.endpoint)
-    const address = selection === undefined ? undefined : addresses.find(value => endpointKey(choice.component, value) === selection)
-    if (address === undefined) throw new RemoteError('gateway/bad-request', 'Choose an App on a configured device.', {})
-    const observed = await this.observeChatTarget(choice, address, signal)
-    signal.throwIfAborted()
-    if (typeof observed === 'string') {
-      throw new RemoteError('gateway/bad-request', 'The selected process cannot be verified. Refresh the App list.', {})
-    }
-    if (this.ctx.agents.get(sessionId) !== agent || this.chatTargets.get(sessionId) !== before
-      || this.ctx.agents.get(sessionId)?.status === 'running') {
-      throw new RemoteError('gateway/bad-request', 'The chat changed. Refresh the App list.', {})
-    }
-    if (!this.deviceConfiguration(choice.component).addresses.includes(address)) {
-      throw new RemoteError('gateway/bad-request', 'The selected device was removed.', {})
-    }
-    this.chatTargets.set(sessionId, observed)
-    return observed.view
+    const table = this.targetTable()
+    return this.writeTarget(sessionId, async () => {
+      if (choice === null) {
+        await table.delete(sessionId)
+        return null
+      }
+      const { addresses } = this.deviceConfiguration(choice.component)
+      const selection = endpointKey(choice.component, choice.endpoint)
+      const address = selection === undefined ? undefined : addresses.find(value => endpointKey(choice.component, value) === selection)
+      if (address === undefined) throw new RemoteError('gateway/bad-request', 'Choose an App on a configured device.', {})
+      const observed = await this.observeChatTarget(choice, address, signal)
+      signal.throwIfAborted()
+      if (typeof observed === 'string') {
+        throw new RemoteError('gateway/bad-request', 'The selected process cannot be verified. Refresh the App list.', {})
+      }
+      const active = this.ctx.agents.get(sessionId)
+      if (active !== agent || active.status === 'running') {
+        throw new RemoteError('gateway/bad-request', 'The chat changed. Refresh the App list.', {})
+      }
+      if (!this.deviceConfiguration(choice.component).addresses.includes(address)) {
+        throw new RemoteError('gateway/bad-request', 'The selected device was removed.', {})
+      }
+      await table.put(sessionId, observed)
+      return observed.view
+    })
   }
 
   /** Start one installed component once and list its tools without keeping a connection.
@@ -547,7 +587,7 @@ export class DecryptHubComponents extends TypertRemoteService {
       progress({ phase: 'installing' })
       await this.files.install(extracted, id, verified.version, bounded)
       this.catalog.set(id, verified)
-      this.ctx.emit('decrypthub-components/activated', id)
+      await this.notifyActivation(id)
       // Drop the progress row immediately; a sticky `installed` phase left the dialog looking unfinished.
       this.operations.delete(id)
       this.changed()
@@ -587,7 +627,7 @@ export class DecryptHubComponents extends TypertRemoteService {
     this.assertOwner()
     if (this.jobs.size) throw new Error('A component installation is still running')
     await this.files.rollback(id)
-    this.ctx.emit('decrypthub-components/activated', id)
+    await this.notifyActivation(id)
     this.changed()
     return this.snapshot()
   }
@@ -613,7 +653,7 @@ export class DecryptHubComponents extends TypertRemoteService {
     } catch (_error) {
       // Settings may be unavailable; the installation pointer is already cleared.
     }
-    this.ctx.emit('decrypthub-components/activated', id)
+    await this.notifyActivation(id)
     this.changed()
     return this.snapshot()
   }
@@ -661,20 +701,64 @@ export class DecryptHubComponents extends TypertRemoteService {
    * @param agentId - owning Agent identity.
  * @param workspace - current working directory.
    * @param read - live connection state.
- * @param subscribe - underlying MCP observation.
+   * @param subscribe - underlying MCP observation.
+   * @param readCapture - optional capture reader owned by this exact connection.
    * @returns connection-observation disposer.
    */
   observeWdh(agentId: SessionId, workspace: string, read: () => McpConnectionStatus,
-    subscribe: (listener: () => void) => () => void): () => void {
+    subscribe: (listener: () => void) => () => void, readCapture?: WdhCaptureReader): () => void {
+    const connection = { view: { agentId, workspace, status: read() }, readCapture }
     const update = (): void => {
       const status = read()
       if (status.state === 'connected' && status.toolCount > 0) this.wdhTools = status.toolCount
-      this.wdh.set(agentId, { agentId, workspace, status })
+      connection.view = { agentId, workspace, status }
       this.changed()
     }
+    this.wdh.set(agentId, connection)
     const stop = subscribe(update)
     update()
-    return () => { stop(); this.wdh.delete(agentId); this.changed() }
+    return () => {
+      stop()
+      if (this.wdh.get(agentId) !== connection) return
+      this.wdh.delete(agentId)
+      this.changed()
+    }
+  }
+
+  private async wdhCaptureResult(sessionId: SessionId, selection: WdhCaptureSelection | null, signal: AbortSignal): Promise<unknown> {
+    this.assertOwner()
+    const connection = this.wdh.get(sessionId)
+    if (connection?.view.status.state !== 'connected' || connection.readCapture === undefined) {
+      throw new RemoteError('gateway/bad-request', 'This chat has no live WDH connection. Reconnect WDH and retry.', {})
+    }
+    const lifetime = AbortSignal.any([signal, this.lifetime.signal, AbortSignal.timeout(this.config.requestTimeoutMs)])
+    const result = await connection.readCapture(selection, lifetime)
+    lifetime.throwIfAborted()
+    if (this.wdh.get(sessionId) !== connection || connection.view.status.state !== 'connected') {
+      throw new RemoteError('gateway/bad-request', 'The WDH connection changed. Refresh the capture list.', {})
+    }
+    return result
+  }
+
+  /** List recent requests from the browser already bound to the chat.
+   * @param sessionId - chat owning the WDH connection.
+   * @param signal - caller lifetime.
+   * @returns a capture list scoped to the connection.
+   */
+  @Remote({ resources: { session: sessionId => sessionId } })
+  async wdhCaptureList(sessionId: SessionId, signal: AbortSignal): Promise<WdhCaptureList> {
+    return readWdhCaptureList(await this.wdhCaptureResult(sessionId, null, signal))
+  }
+
+  /** Read the selected capture's response and initiating stack together.
+   * @param sessionId - chat owning the WDH connection.
+   * @param selection - identifier and connection generation from the list.
+   * @param signal - caller lifetime.
+   * @returns selected details, or null if the capture expired.
+   */
+  @Remote({ resources: { session: sessionId => sessionId } })
+  async wdhCaptureDetail(sessionId: SessionId, selection: WdhCaptureSelection, signal: AbortSignal): Promise<WdhCaptureDetail | null> {
+    return readWdhCaptureDetail(await this.wdhCaptureResult(sessionId, selection, signal), selection.id)
   }
 
   /** Bind the integration's actual connection replacement operation.

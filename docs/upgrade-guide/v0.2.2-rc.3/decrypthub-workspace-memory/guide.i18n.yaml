@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.2-rc.3/decrypthub-workspace-memory/guide.md
+/:
+  en: e4fdc245fa0a308c
+  zh: 1961bcfdfdc24a3e
+/decrypthub-project-history-and-memory-require-workspace-membership:
+  en: 90ded46805b06181
+  zh: 34f5392091782f0f
+/decrypthub-project-history-and-memory-require-workspace-membership/change:
+  en: cb7e5005abd2d21d
+  zh: f81a63986da77057
+/decrypthub-project-history-and-memory-require-workspace-membership/migration:
+  en: f245713cf67e217e
+  zh: eaa50381462bca31

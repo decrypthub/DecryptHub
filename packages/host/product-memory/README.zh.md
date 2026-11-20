@@ -21,7 +21,7 @@ kind: "package-reference"
 
 ## 使用本包
 
-在带设置服务的 profile 组合中挂载本插件。它注册序号 150 的全局 `product-memory` 片段与每智能体的 `product-memory:workspace` 片段，并向模型注册三个工具；`maxSectionChars` 分别限定两段注入长度。`project` 写入会记录调用智能体的工作区，因此同名条目不会跨工作区泄漏。
+在带设置服务的 profile 中挂载本插件。项目记忆按工作区注册表中的会话归属授权。项目条目保存工作区 ID。`maxSectionChars` 分别限定两段系统提示词的长度。
 
 <a id="model-experience"></a>
 
@@ -31,7 +31,7 @@ kind: "package-reference"
 
 #### What the model sees
 
-全局片段按 `(user) text [id]` 逐行列出跨项目条目；每智能体片段列出该工作区的 `project` 条目。两段均受 `maxSectionChars` 限制，另加 `memory_write`、`memory_list`、`memory_delete` 三个 schema。片段带 id，模型可直接更新或删除某条而无需先读取；`memory_list` 与 `memory_delete` 只能看到调用方工作区可见的条目。
+模型按 `(user) text [id]` 收到全局条目，另有一段列出当前会话所属工作区的条目。`memory_list`、`memory_write` 更新和 `memory_delete` 与提示词组装使用同一套可见性检查。按 ID 更新保留原作用域。
 
 #### Token effect
 
@@ -46,7 +46,7 @@ kind: "package-reference"
 <a id="known-limitations-and-deferred-work"></a>
 
 - **生成页未验证** — 单测组合中 `settings.describe()` 能带 `autoGenerate: true` 暴露该命名空间，但在打包后的桌面端里渲染尚未端到端验证；手工检查时设置面只显示账号分区。若生成式表单无法表达条目字典，改用产品自有 `ui-decrypthub-settings` 页。
-- **历史 project 条目** — 没有记录工作区的条目来自工作区标记上线之前。它们会在所有工作区可见而不是被丢弃；在某个工作区用 `memory_write` 以 project 作用域重写后会补记该工作区。设置页对「新建」条目禁用 project 作用域（页面没有可绑定的工作区）；工作区记忆请在对话里让智能体写入。
+- **旧项目条目。** 只记录目录的条目仍对匹配工作区的成员可见，前提是该工作区在条目创建时已注册。更新时会补记工作区 ID。设置保留归属无法确认的条目。可在设置中核对内容，再从目标工作区的对话保存项目记忆。
 
 <a id="dev-note"></a>
 ### 开发备注

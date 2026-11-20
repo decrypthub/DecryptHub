@@ -18,7 +18,7 @@ const namespace = {
     maxSectionChars: 2000,
     entries: {
       a: { text: '旧事实', scope: 'user', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
-      b: { text: '项目约定', scope: 'project', createdAt: '2026-02-01T00:00:00.000Z', updatedAt: '2026-02-01T00:00:00.000Z' },
+      b: { text: '项目约定', scope: 'project', workspaceId: 'workspace-b', createdAt: '2026-02-01T00:00:00.000Z', updatedAt: '2026-02-01T00:00:00.000Z' },
     },
   },
   applies: 'live' as const,
@@ -79,6 +79,17 @@ it('filters by scope and search text', async () => {
   fireEvent.change(view.getByPlaceholderText(zh['search.placeholder']), { target: { value: '项目' } })
   expect(view.queryByText('旧事实')).toBeNull()
   expect(view.getByText('项目约定')).toBeTruthy()
+})
+
+it('preserves workspace ownership when the user edits a project entry', async () => {
+  const { runtime, write } = await fixture()
+  const { view } = runtime.renderSlot('settings.section', { close: vi.fn() })
+  fireEvent.click(await view.findByRole('button', { name: '项目约定' }))
+  fireEvent.change(view.getByRole('textbox', { name: zh['detail.textLabel'] }), { target: { value: '新项目约定' } })
+  fireEvent.click(view.getByRole('button', { name: zh['detail.save'] }))
+  await waitFor(() => { expect(write).toHaveBeenCalledWith([expect.objectContaining({
+    path: ['entries', 'b'], value: expect.objectContaining({ text: '新项目约定', workspaceId: 'workspace-b', scope: 'project' }),
+  })], namespace.revision) })
 })
 
 it('opens a row for viewing and removes it through the unset path op', async () => {

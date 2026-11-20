@@ -8,13 +8,14 @@ import type {} from '../src/client/index.ts'
 import { McpPage } from '../src/client/Page.tsx'
 import { ComponentsPage } from '../src/client/ComponentsPage.tsx'
 import { ChatTargetPicker } from '../src/client/ChatTargetPicker.tsx'
+import { WdhStatusPill } from '../src/client/WdhStatusPill.tsx'
 import { SkillsMcpPage } from '../src/client/SkillsMcpPage.tsx'
 import { en, zh } from '../src/client/locales.ts'
 import { McpSource } from '../src/client/source.ts'
 import { ComponentsSource } from '../src/client/components-source.ts'
 import type { ComponentsState } from '../src/client/components-source.ts'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { ChatTargetChoice, ChatTargetView, ComponentInventory } from '@deepseek-ai/dsh-decrypthub-components/types'
+import type { ChatTargetChoice, ChatTargetView, ComponentInventory, WdhCaptureDetail, WdhCaptureSelection } from '@deepseek-ai/dsh-decrypthub-components/types'
 
 async function runtime() {
   const runtime = await SlotTestRuntime.create()
@@ -27,9 +28,64 @@ async function runtime() {
   await runtime.declare({
     'settings.section': { kind: 'list', scope: 'root' },
     'conversation.session.header.utilities': { kind: 'list', scope: 'session' },
+    'conversation.composer.dock': { kind: 'list', scope: 'session' },
   })
   return runtime
 }
+
+it('opens the chat capture list and reads both sections with the selected request identity', async () => {
+  const r = await runtime()
+  const id = await r.sessions.add({ id: 'chat-with-browser-capture' })
+  const session = r.sessions.retain(id)
+  onTestFinished(async () => {
+    await r.dispose()
+    session[Symbol.dispose]()
+  })
+  await session.ready
+  const components = createSnapshotStore<ComponentsState>({
+    busy: false, failed: false, connectionFailed: false, connections: [],
+    value: { components: [], wdhTools: 27,
+      wdh: [{ agentId: id, workspace: '/fixture/workspace', status: { state: 'connected', toolCount: 27, connectedAt: 12 } }],
+      browser: { state: 'unchecked', version: null }, configuration: null },
+  })
+  const generation = '82041cf7-1e9a-4d52-b24c-3e246d88e8db'
+  const first = Promise.withResolvers<WdhCaptureDetail>()
+  const evidence = (requestId: string, text: string, functionName: string): WdhCaptureDetail => ({
+    id: requestId, headers: 'content-type: text/plain', headersTruncated: false,
+    body: { text, encoding: null, truncated: false },
+    frames: [{ functionName, url: 'https://fixture.test/page.js', line: 7, column: 3 }],
+  })
+  const capture = {
+    list: vi.fn(async () => ({
+      generation, requests: [
+        { id: 'r7', url: 'https://fixture.test/first', method: 'GET', status: 200 },
+        { id: 'r8', url: 'https://fixture.test/second', method: 'GET', status: 201 },
+      ],
+    })),
+    detail: vi.fn(async (_session: SessionId, selection: WdhCaptureSelection, _signal: AbortSignal) =>
+      selection.id === 'r7' ? first.promise : evidence('r8', 'second response', 'secondInitiator')),
+  }
+  r.slots.register({ name: 'conversation.composer.dock', id: 'fixture-capture', locale: 'settings.mcp',
+    inject: () => ({ hooks: { components }, retry: () => {}, capture }),
+  }, WdhStatusPill)
+  const slot = r.renderSlot('conversation.composer.dock', {}, { session })
+  fireEvent.click(slot.view.getByRole('button', { name: '浏览器已连接 · 抓包' }))
+  const dialog = within(screen.getByRole('dialog', { name: '浏览器抓包' }))
+  fireEvent.click(await dialog.findByRole('button', { name: /fixture.test\/first/ }))
+  const firstCall = capture.detail.mock.calls[0]
+  fireEvent.click(dialog.getByRole('button', { name: /fixture.test\/second/ }))
+  expect(await dialog.findByText('second response')).toBeTruthy()
+  expect(dialog.getByText('secondInitiator')).toBeTruthy()
+  expect(dialog.getByText('https://fixture.test/page.js:7:3')).toBeTruthy()
+  expect(capture.list).toHaveBeenCalledWith(id, expect.any(AbortSignal))
+  expect(capture.detail).toHaveBeenLastCalledWith(id, { generation, id: 'r8' }, expect.any(AbortSignal))
+  expect(firstCall?.[2].aborted).toBe(true)
+  first.resolve(evidence('r7', 'first response', 'firstInitiator'))
+  await first.promise
+  expect(dialog.queryByText('first response')).toBeNull()
+  fireEvent.click(dialog.getByRole('button', { name: zh.close }))
+  expect(screen.queryByRole('dialog', { name: '浏览器抓包' })).toBeNull()
+})
 
 it('selects a device and App in the chat header and retains its selection when switching chats', async () => {
   const r = await runtime()
@@ -160,12 +216,12 @@ it('keeps horizontal status rows compact and opens install or device connect in 
   expect(license.getByRole('button', { name: '安装' }).hasAttribute('disabled')).toBe(false)
 })
 
-it('shows the live tool count for a per-session WDH connection', async () => {
+it.each([true, false])('reports actual WDH connectivity (live: %s)', async (live) => {
   const r = await runtime(), mcp = mcpSource()
   const state: ComponentsState = { busy: false, failed: false, connectionFailed: false, connections: [], value: {
     components: [
       { id: 'wdh', installed: { id: 'wdh', version: '0.1.1', source: 'managed', entry: '/fixture/cli.mjs', runtime: 'node' }, localCommand: null, localVersion: null, previousVersion: null, latestVersion: null, catalogError: null, localError: null, operation: null },
-    ], wdhTools: null, wdh: [{ agentId: 'session-1' as SessionId, workspace: '/fixture/workspace', status: { state: 'connected', toolCount: 25, connectedAt: 0 } }],
+    ], wdhTools: 25, wdh: live ? [{ agentId: 'session-1' as SessionId, workspace: '/fixture/workspace', status: { state: 'connected', toolCount: 25, connectedAt: 0 } }] : [],
     browser: { state: 'missing', version: null }, configuration: { revision: 1, writable: true,
       wdh: { enabled: true, browser: 'cloak' }, adh: { enabled: false, command: 'adh', args: ['mcp'], endpoint: '', devices: [] }, idh: { enabled: false, command: 'idh', args: ['mcp'], endpoint: '', devices: [] } },
   } }
@@ -179,8 +235,8 @@ it('shows the live tool count for a per-session WDH connection', async () => {
   r.slots.register({ name: 'settings.section', id: 'components-count', label: () => zh['official.nav'], locale: 'settings.mcp',
     inject: () => ({ hooks: { components: store, mcp: mcp.store }, source, mcp }) }, ComponentsPage)
   const { view } = r.renderSlot('settings.section', { close: vi.fn() })
-  expect(view.getByText('25 个工具可用')).toBeTruthy()
-  expect(view.queryByText('0.1.1')).toBeNull()
+  expect(view.getByText(live ? '25 个工具可用' : '0.1.1').getAttribute('data-state')).toBe(live ? 'connected' : 'idle')
+  expect(view.queryByText(live ? '0.1.1' : '25 个工具可用')).toBeNull()
 })
 
 it('keeps MCP|Skills pills with official above custom on the MCP tab', async () => {

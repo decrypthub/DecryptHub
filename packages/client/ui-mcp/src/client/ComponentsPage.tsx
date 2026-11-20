@@ -105,14 +105,6 @@ function usable(component: ComponentView): boolean {
   return component.installed !== null || component.localCommand !== null
 }
 
-/** Tools the WDH component reported the last time a session connected it. */
-function wdhKnownTools(state: ComponentsState): number | null {
-  const value = state.value
-  if (value === null) return null
-  const live = Math.max(0, ...value.wdh.map(row => row.status.state === 'connected' ? row.status.toolCount : 0))
-  return live > 0 ? live : value.wdhTools
-}
-
 /** Devices are enabled by picking an address, so a configured device counts as usable. */
 function deviceConfigured(state: ComponentsState, id: ComponentId): boolean {
   const configuration = state.value?.configuration
@@ -175,13 +167,6 @@ export function ComponentsPage({ useComponents, useMcp, source, mcp, t, embedded
     checked.current = true
     void source.run(ops => ops.checkUpdates()).catch(() => { setError(true) })
   }, [source, state.value, state.busy])
-  // The card needs a real tool count even before any session connects WDH, so measure once on load.
-  useEffect(() => {
-    const wdh = state.value?.components.find(row => row.id === 'wdh')
-    if (state.busy || wdh?.installed === null || wdh === undefined) return
-    if (state.value?.wdhTools !== null) return
-    void source.observe(ops => ops.measureTools('wdh')).catch(() => {})
-  }, [source, state.busy, state.value])
   const action = async (operation: () => Promise<unknown>): Promise<void> => {
     setError(false)
     try { await operation() } catch (_error) { setError(true) }
@@ -219,22 +204,20 @@ export function ComponentsPage({ useComponents, useMcp, source, mcp, t, embedded
                 <span className={css.pluginDesc}>{t(`official.${id}`)}</span>
               </span>
               <span className={css.pluginEnd}>
-                <span className={css.cardRuntime} data-state={componentConnected(state, mcpState, id) || managedConnected(state, id) || (id === 'wdh' && enabled && wdhKnownTools(state) !== null) ? 'connected' : 'idle'}>
+                <span className={css.cardRuntime} data-state={componentConnected(state, mcpState, id) || managedConnected(state, id) ? 'connected' : 'idle'}>
                   <span className={css.cardDot} aria-hidden="true" />
                   {componentConnected(state, mcpState, id)
                     ? t('official.tools', { count: String(componentToolCount(state, mcpState, id)) })
                     : managedConnected(state, id)
                       ? t('official.tools', { count: String(managedToolCount(state, id)) })
-                      : id === 'wdh' && component.installed !== null && enabled && wdhKnownTools(state) !== null
-                        ? t('official.tools', { count: String(wdhKnownTools(state)) })
-                        : (() => {
-                          const server = managedServer(state, id)
-                          return server !== undefined
-                            ? t(`state.${server.status.state}`)
-                            : component.installed || component.localCommand || deviceConfigured(state, id)
-                              ? componentVersionLabel(component, t('official.missing'))
-                              : t('official.missing')
-                        })()}
+                      : (() => {
+                        const server = managedServer(state, id)
+                        return server !== undefined
+                          ? t(`state.${server.status.state}`)
+                          : component.installed || component.localCommand || deviceConfigured(state, id)
+                            ? componentVersionLabel(component, t('official.missing'))
+                            : t('official.missing')
+                      })()}
                 </span>
                 {component.operation && pending(component) && <span className={css.muted} role="status">{t(`official.progress.${component.operation.phase}`)}</span>}
               </span>

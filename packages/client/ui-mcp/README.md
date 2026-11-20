@@ -26,10 +26,14 @@ One sidebar and settings entry, "Skills & MCP", groups official components and c
 
 The DecryptHub Web bundle mounts this plugin. Open Skills & MCP; the MCP tab lists official WDH / ADH / IDH status rows above custom MCP. Opening a row configures install, browser kernel, or device connect. Add a local command or Streamable HTTP server, or import mcpServers JSON after review. Switch to the Skills tab to manage skills. Browser downloads require explicit license consent.
 
+In a chat with WDH connected, open **Browser connected · Capture**. Selecting a recent request shows its response and the JavaScript initiator frames recorded by WDH. Refresh to see new requests or to recover an expired selection.
+
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 
 DSH MCP clients own connection lifetimes and Settings checks write revisions. Presentation uses observed facts. Cancellation, disposal and reconnect release the corresponding subscriptions or processes.
+
+Desktop chat renders the proposed MCP configuration through the shared approval card. Add and connect answers the current request once, and Cancel leaves configuration untouched.
 
 <a id="model-experience"></a>
 ## Model Experience
@@ -46,7 +50,6 @@ Indirectly, reconnecting may change tool definitions.
 
 - SSE imports are reported as unsupported. Conflicting names must be resolved before importing.
 - The Harness import copies conversations only: tasks, model keys and plugins are intentionally not imported, and the skills catalog resolves from the newest conversation, so a home without conversations shows an explanatory empty state.
-- This build manages WDH tools and browser files; the integrated browser, capture and debugging workbench remains deferred.
 - MCP negotiation does not verify a connected Android or iOS target.
 
 <a id="dev-note"></a>

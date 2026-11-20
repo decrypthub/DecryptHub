@@ -21,7 +21,7 @@ Stores durable facts in this plugin's settings namespace, injects them as two sy
 
 ## Use this package
 
-Mount the plugin in a profile composition that provides the settings service. It registers the global `product-memory` section and a per-agent `product-memory:workspace` section at order 150, plus the three tools; `maxSectionChars` bounds each section's injected text. A `project` write stamps the calling agent's workspace, so the same name in two workspaces cannot leak across them.
+Mount the plugin in a profile with settings. The workspace registry supplies the session membership needed for project memory. Project entries store the workspace ID. `maxSectionChars` bounds each of the two system-prompt sections.
 
 <a id="model-experience"></a>
 
@@ -31,7 +31,7 @@ Mount the plugin in a profile composition that provides the settings service. It
 
 #### What the model sees
 
-The global section lists `(user) text [id]` per cross-project entry; a per-agent section lists the `project` entries of that agent's workspace. Both are bounded by `maxSectionChars` and are followed by three tool schemas: `memory_write`, `memory_list`, `memory_delete`. Ids appear in the sections so the model can update or delete an entry without reading first; `memory_list` and `memory_delete` only see the entries visible in the caller's workspace.
+The model receives `(user) text [id]` for global entries and a separate section for entries in its session's workspace. `memory_list`, `memory_write` updates, and `memory_delete` use the same visibility checks as prompt assembly. Updating a memory by ID preserves its scope.
 
 #### Token effect
 
@@ -46,7 +46,7 @@ The section text changes whenever an entry changes, which invalidates the cache 
 <a id="known-limitations-and-deferred-work"></a>
 
 - **Generated page unverified** — `settings.describe()` exposes the namespace with `autoGenerate: true` in unit composition, but rendering inside the packaged Desktop app is not verified end to end; manual checks showed only the account section. A product-owned `ui-decrypthub-settings` page is the fallback if the generated form cannot express the entry dictionary.
-- **Legacy project entries** — an entry without a stored workspace predates workspace stamping. It stays visible in every workspace instead of being dropped; rewriting it through `memory_write` on a project scope stamps the workspace. The settings page disables the project scope for a new entry, because it has no workspace to bind; the agent writes workspace memories inside a conversation.
+- **Legacy project entries.** A directory-only entry remains visible to members of the matching workspace if that registration already existed when the entry was created. An update records the workspace ID. Settings retains entries whose ownership cannot be confirmed. Review them there and save project facts from a chat in the intended workspace.
 
 <a id="dev-note"></a>
 ### Dev Note

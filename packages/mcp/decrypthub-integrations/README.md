@@ -11,7 +11,7 @@ The model-facing `decrypthub_status` tool queries fresh official CLI observation
 
 ## Summary
 
-This DecryptHub product plugin composes the upstream MCP client and manager. It adds no replacement conversation, input, automation, or tool-card UI. WDH starts on the first Agent step; ADH and IDH remain disabled until configured.
+The plugin uses the shared MCP client and manager. Installing WDH prepares tools for open chats, and opening a new chat prepares its connection before the first model request. ADH and IDH remain disabled until configured.
 
 ## Table of Contents
 
@@ -26,9 +26,11 @@ This DecryptHub product plugin composes the upstream MCP client and manager. It 
 
 The product Web bundle mounts this plugin. Packaged Desktop supplies the installed WDH entry and its private data directory. Standalone Web deployments set `DSH_WDH_ENTRY` and `DSH_WDH_DATA_DIR` to absolute paths. The product bundle selects `wdh.browser: cloak`; install that kernel independently before browser use. The standalone plugin schema defaults to `system` for other compositions.
 
+In Desktop chat, ask the Agent to add an MCP server from a repository link with documented setup instructions, a Streamable HTTP endpoint, a local command, or an MCP JSON entry. The confirmation shows the proposed configuration. Approving saves and enables it for the Desktop profile, then waits for tool discovery on the live connection. An unconfirmed connection stays visible in Skills & MCP with its actual status. Pre-existing names cannot be overwritten from chat.
+
 The plugin settings expose `adh` and `idh` with `enabled`, `command`, and `args` fields. Their defaults are disabled, executable names `adh` / `idh`, and arguments `[mcp]`. Enabling one registers it with the upstream MCP manager, which owns connection status, restart, tool discovery, credential scrubbing, and process cleanup. This package never reads a device credential or attaches to a device itself.
 
-`startupTimeoutMs`, `closeTimeoutMs`, and `toolCallTimeoutMs` default to 10000, 5000, and 60000 milliseconds. WDH requires absolute `entry` and `dataDirectory` paths when enabled; invalid paths reject plugin activation. Missing executables and unavailable servers follow the upstream MCP failure reporting.
+`startupTimeoutMs`, `closeTimeoutMs`, and `toolCallTimeoutMs` default to 10000, 5000, and 60000 milliseconds. A managed WDH installation supplies its entry path, or an operator may set an absolute `entry`. WDH stores data in the configured absolute `dataDirectory` or under `DSH_HOME`. The plugin waits for an installed entry before connecting.
 
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
@@ -46,15 +48,15 @@ The Agent owns its child Fiber. Disposing the Agent or this product plugin drain
 
 #### What the model sees
 
-When a chat has a selected device and App, `decrypthub_status` reports only that selection and whether the original process is still valid. Direct official ADH and IDH MCP calls are denied in a bound chat. An unbound chat gets the component inventory and the configured endpoints. WDH continues to use the current Agent's browser connection.
+When a chat has a selected device and app, `decrypthub_status` reports the selection and the original process's validity. The selection remains read-only after restart and while awaiting reselection. An unbound chat gets the component inventory and the configured endpoints. WDH uses the current Agent's browser connection.
 
 #### Token effect
 
-This plugin registers `decrypthub_status` through the upstream tool registry. Its results are logged through the normal tool pipeline; the shared MCP client owns all connected analysis tool registrations and their instructions. WDH uses one Agent-owned connection for browser operations.
+This plugin registers `decrypthub_status` and, on Desktop with editable settings and user questions, `mcp_add`. The tools use the normal transcript pipeline. `mcp_add` returns the live tool count, and the next step receives the newly registered schemas. Credentials are supplied as references to stored values. The shared MCP client owns connected tool registrations and instructions. WDH uses one Agent-owned connection for browser operations.
 
 #### KV Cache effect
 
-The status schema stays stable. Tool results append observations to the session. Connected tool inventories and instructions change when their server contributions change, following the upstream MCP client's request assembly.
+The management schemas stay stable. Tool results append observations to the session. Connected tool inventories and instructions change when their server contributions change, following the upstream MCP client's request assembly.
 
 ## Known Limitations and Deferred Work
 

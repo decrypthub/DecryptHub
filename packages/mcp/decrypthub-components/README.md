@@ -26,6 +26,8 @@ Inspect WDH, ADH and IDH availability, check official releases, and activate ver
 
 The DecryptHub Web composition mounts this owner-only Remote service with an absolute component directory. Optional bundledWdhEntry points to the packaged WDH CLI. The official components page requests snapshots, reviewed installs, cancellation, rollback, browser inspection and revision-checked connection settings. No catalog request occurs until the user checks for updates.
 
+The capture panel reads only the connection already owned by its chat. A capture list carries the WDH process identity alongside each request ID. The detail read presents the selected response and initiating frames together, or returns an expired selection when the owning process changed or removed the record.
+
 `importPreview` and `importRun` copy the conversations of a selected official Harness home into this product home, and nothing else. Conversations are the only stable interchange unit: the session JSONL format is versioned with an explicit migration contract. Sessions are copied one `<projectKey>/<sessionId>` directory at a time, only memberships whose stored log exists are adopted, and sessions whose physical compression differs from the destination root are skipped with a count. The projection cache is copied for the imported sessions so their titles survive; the JSON workspace fallback is rewritten through a temporary file. Tasks, model credentials and plugins are intentionally not imported: they are internal versioned files whose version skew would break the destination, and a plugin bundle needs a real installation path rather than a file copy.
 
 <a id="understand-the-implementation"></a>
@@ -33,7 +35,7 @@ The DecryptHub Web composition mounts this owner-only Remote service with an abs
 
 DSH MCP clients own connection lifetimes and Settings checks write revisions. Presentation uses observed facts. Cancellation, disposal and reconnect release the corresponding subscriptions or processes.
 
-The owner can select an online Android or iOS App from a configured device in the chat. A binding is kept by chat ID for the lifetime of the Host. Reopening the chat keeps its selection while the Host runs. Each status read checks the chosen address and original process identity. An unreachable service leaves the binding unverified. A changed process requires the owner to select the App again.
+The owner can select an online Android or iOS app from a configured device in the chat. The Host stores the selected address and original process identity by session ID through the configured storage domain. Saving or clearing a selection survives a restart. Status reads verify the original process. An unreachable service leaves the selection unverified, and a changed process requires reselection.
 
 <a id="model-experience"></a>
 ## Model Experience

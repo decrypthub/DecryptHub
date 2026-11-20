@@ -199,6 +199,10 @@
 
 .wdhPill, .chatTargetPill { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; background: var(--dsw-alias-bg-l2); color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
 .wdhPill[data-state='connected'] { color: var(--dsw-alias-state-success-primary); }
+.wdhPill[aria-haspopup='dialog'] { border: 0; cursor: pointer; }
+@media (hover: hover) {
+  .wdhPill[aria-haspopup='dialog']:hover { background: var(--dsw-alias-interactive-bg-hover); }
+}
 .wdhPill[data-state='failed'], .chatTargetPill[data-state='failed'] { color: var(--dsw-alias-state-error-primary); }
 .chatTargetPill { display: block; max-inline-size: min(180px, 34vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

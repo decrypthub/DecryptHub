@@ -22,7 +22,7 @@ import type { ServerContext } from './server-context.ts'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { withDeadline } from './deadline.ts'
 import { disconnectedMcpServer, McpLocalError, mcpRequestError, McpToolError } from './diagnostic.ts'
-import type { McpStatusCell } from './status.ts'
+import type { McpConnectionToolCaller, McpStatusCell } from './status.ts'
 import type { McpCloseResult } from './types.ts'
 import { McpGeneration } from './generation.ts'
 import { McpTemplateBinding } from './credentials.ts'
@@ -102,6 +102,8 @@ export interface ConnectionOutcome {
 
 /** Handle for one plugin instance's supervised connection. */
 export interface ConnectionHandle extends ServerContext {
+  /** Send a Host-owned tool request and cancel it on disconnect. */
+  callTool: McpConnectionToolCaller
   /**
    * Settles when the first connection attempt completes or the instance is disposed.
    * The supervisor applies its retry or credential-wait policy; the caller
@@ -348,6 +350,21 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
   return {
     ready: readiness.promise,
     instructions: () => serverInstructions,
+    async callTool(name, args, signal) {
+      const record = current
+      if (record?.connectedAt === undefined) throw disconnectedMcpServer(label)
+      try {
+        return await record.wire.run(async (lifetime) => {
+          const request = AbortSignal.any([lifetime, signal])
+          request.throwIfAborted()
+          return await record.wire.client.callTool({ name, arguments: args },
+            { signal: request, timeout: config.toolCallTimeoutMs }) as JsonValue
+        })
+      } catch (error) {
+        signal.throwIfAborted()
+        throw mcpRequestError(error, 'Host tool request', config.expandTemplates ? text => binding.redact(text) : undefined)
+      }
+    },
     resources: {
       availability() {
         const record = current

@@ -21,7 +21,7 @@ Adds two read-only tools: `session_list` reports the newest-created sessions of 
 
 ## Use this package
 
-Mount the plugin in a composition that provides `sessionQuery`. `maxSessions` caps how many sessions one call may return; the tool's `limit` argument narrows that further but cannot exceed it. Both tools filter by the calling agent's workspace and refuse to read a session stored under another workspace.
+Mount the plugin with `sessionQuery` and the workspace registry. Both tools require the caller's session to belong to a registered workspace. Lists and transcript reads use that workspace's recorded session membership. `maxSessions` caps the result, and `limit` can request fewer sessions.
 
 <a id="model-experience"></a>
 

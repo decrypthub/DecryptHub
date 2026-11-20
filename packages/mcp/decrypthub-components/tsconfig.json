@@ -30,6 +30,9 @@
       "path": "../../core/session"
     },
     {
+      "path": "../../storage/storage-domain"
+    },
+    {
       "path": "../mcp-manager"
     },
     {

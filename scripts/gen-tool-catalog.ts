@@ -71,6 +71,7 @@ import Lsp from '@deepseek-ai/dsh-lsp'
 import * as ToolLsp from '@deepseek-ai/dsh-tool-lsp'
 import * as ToolSkill from '@deepseek-ai/dsh-tool-skill'
 import * as ProductSkillManage from '@deepseek-ai/dsh-tool-skill-manage'
+import { mcpAddTool } from '../packages/mcp/decrypthub-integrations/src/custom-mcp.ts'
 import * as ProductSessions from '@deepseek-ai/dsh-tool-product-sessions'
 import * as ToolSessionQuery from '@deepseek-ai/dsh-tool-session-query'
 import * as ToolJobs from '@deepseek-ai/dsh-tool-jobs'
@@ -210,6 +211,18 @@ export interface ToolPackage {
  * guard proves it is exhaustive against the on-disk glob.
  */
 const TOOL_PACKAGES: ToolPackage[] = [
+  {
+    pkg: '@deepseek-ai/dsh-decrypthub-integrations',
+    dir: 'decrypthub-integrations',
+    source: 'packages/mcp/decrypthub-integrations/src/custom-mcp.ts',
+    requires: ['ctx.tools', 'ctx.settings', 'ctx.userQuestions', 'ctx.mcpManager'],
+    writes: ['tool/call', 'tool/result', 'Desktop profile settings'],
+    note: 'The Desktop profile exposes mcp_add with editable settings and user questions. Approval starts the configured connection, and discovery is checked on the instance that supplies the next model step.',
+    mount(ctx) {
+      ctx.effect(() => ctx.tools.register(mcpAddTool(ctx)))
+      return Promise.resolve()
+    },
+  },
   {
     pkg: '@deepseek-ai/dsh-tool-product-sessions',
     dir: 'tool-product-sessions',

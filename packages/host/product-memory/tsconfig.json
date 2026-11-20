@@ -25,6 +25,18 @@
     },
     {
       "path": "../../settings/settings"
+    },
+    {
+      "path": "../../core/agent"
+    },
+    {
+      "path": "../../core/session"
+    },
+    {
+      "path": "../../util/error"
+    },
+    {
+      "path": "../../workspace/workspace"
     }
   ]
 }

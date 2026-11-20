@@ -2,6 +2,7 @@
 import type { Context, Fiber } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/dsh-app-boot'
 import * as McpClient from '@deepseek-ai/dsh-mcp-client'
 import type {} from '@deepseek-ai/dsh-mcp-manager'
 import type {} from '@deepseek-ai/dsh-tools'
@@ -12,6 +13,7 @@ import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type { Volatile } from '@deepseek-ai/cosmokit'
 import { createHash } from 'node:crypto'
 import { isAbsolute, join } from 'node:path'
+import { mcpAddTool } from './custom-mcp.ts'
 
 /** Configurable executable for an independently installed device integration. */
 interface DeviceServer {
@@ -29,7 +31,7 @@ interface DeviceServer {
 export interface IntegrationConfig {
   /** Installed browser component and per-Agent profile storage. */
   wdh: {
-    /** Start one client for each Agent on its first step. */
+    /** Prepare one client per loaded Agent when WDH is installed. */
     enabled: boolean
     /** Absolute entry path in an installed WDH component. */
     entry: string
@@ -81,7 +83,7 @@ export type Config = Volatile<IntegrationConfig>
 /** Product plugin identity. */
 export const name = 'decrypthub-integrations'
 /** Existing services own MCP lifecycle, dispatch policy and working directories. */
-export const inject = ['tools', 'workingDirectory', 'mcpManager']
+export const inject = ['agents', 'tools', 'workingDirectory', 'mcpManager']
 
 interface Binding { cwd: string; entry: string; handle: Fiber; unobserve?: () => void }
 
@@ -93,6 +95,11 @@ interface Binding { cwd: string; entry: string; handle: Fiber; unobserve?: () =>
  * @param config - validated deployment settings.
  */
 export async function apply(ctx: Context, config: Config): Promise<void> {
+  ctx.inject(['profileContext', 'settings', 'userQuestions'], (scope) => {
+    if (scope.profileContext.name === 'desktop') {
+      scope.effect(() => scope.tools.register(mcpAddTool(scope)), 'decrypthub: add custom MCP from chat')
+    }
+  })
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'decrypthub_status',
     description: 'Read the current chat’s selected mobile App and verify that its original process is still online. If the chat has no target, report WDH availability and the configured Android/iOS services and Apps. If the selected process is stale, ask the user to select it again in the chat. This tool only reads status.',
@@ -119,7 +126,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     const resourceCall = ['list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource'].includes(exec.name)
       && (server === 'adh' || server === 'idh' || server === undefined)
     if (!/^mcp__(adh|idh)__/.test(exec.name) && !resourceCall) return undefined
-    if (exec.agent === undefined || !ctx.get('decrypthubComponents')?.hasChatTarget(exec.agent.id)) return undefined
+    if (exec.agent === undefined) return undefined
+    try {
+      if (!ctx.get('decrypthubComponents')?.hasChatTarget(exec.agent.id)) return undefined
+    } catch (error) {
+      ctx.logger.error('Unable to verify the device scope for this chat', error)
+      return { reason: 'The chat device scope is unavailable. Check its target before using device tools.',
+        info: { name: 'ChatTargetScopeError', code: 'CHAT_TARGET_UNAVAILABLE' } }
+    }
     return {
       reason: 'This chat is bound to a device for status queries. Use decrypthub_status for the selected App.',
       info: { name: 'ChatTargetScopeError', code: 'CHAT_TARGET_STATUS_ONLY' },
@@ -184,15 +198,13 @@ async function mountIntegration(ctx: Context, config: IntegrationConfig): Promis
   if (!wdh.enabled) return
 
   const components = ctx.get('decrypthubComponents')
-  const entry = components === undefined ? wdh.entry : await components.wdhEntry(wdh.entry)
   let dataDirectory = wdh.dataDirectory
   if (!isAbsolute(dataDirectory)) {
     const home = process.env.DSH_HOME
     if (typeof home === 'string' && isAbsolute(home)) dataDirectory = join(home, 'wdh')
   }
-  if (!isAbsolute(entry) || !isAbsolute(dataDirectory)) {
-    // Do not fail the plugin: Official components needs this settings namespace to stay editable.
-    ctx.logger.warn('DecryptHub WDH: entry and dataDirectory must be absolute paths; WDH stays disconnected until an official component is installed.')
+  if (!isAbsolute(dataDirectory)) {
+    ctx.logger.warn('DecryptHub WDH: configure an absolute dataDirectory before connecting.')
     return
   }
 
@@ -209,21 +221,24 @@ async function mountIntegration(ctx: Context, config: IntegrationConfig): Promis
     binding.unobserve?.()
   }
 
-  const bind = async (agent: Agent): Promise<void> => {
+  const bind = async (agent: Agent, reconnect: boolean): Promise<void> => {
     if (stopped) return
     const cwd = ctx.workingDirectory.get(agent.session)
     const liveComponents = ctx.get('decrypthubComponents')
-    const nextEntry = liveComponents === undefined ? entry : await liveComponents.wdhEntry(entry)
+    const nextEntry = liveComponents === undefined ? wdh.entry : await liveComponents.wdhEntry(wdh.entry)
     const previous = bindings.get(agent)
-    if (previous?.cwd === cwd && previous.entry === nextEntry) return
-    if (previous !== undefined) await retire(previous)
+    if (!reconnect && previous?.cwd === cwd && previous.entry === nextEntry) return
+    if (previous !== undefined) {
+      await retire(previous)
+      bindings.delete(agent)
+    }
     // oxlint-disable-next-line typescript/no-unnecessary-condition -- Teardown may set stopped while transport closure is awaited.
-    if (stopped) return
+    if (stopped || !isAbsolute(nextEntry)) return
     const directoryKey = createHash('sha256').update(`${agent.id}\0${cwd}`).digest('hex')
     const handle = agent.ctx.plugin(McpClient, {
       transport: 'stdio', serverName: 'wdh', command: process.execPath,
       args: [nextEntry, 'mcp', '--browser', wdh.browser, '--root', cwd,
-        '--data-dir', join(dataDirectory, directoryKey), '--kernel-dir', dataDirectory],
+        '--data-dir', join(dataDirectory, directoryKey), '--kernel-dir', dataDirectory, '--desktop'],
       env: {}, cwd, startupTimeoutMs: config.startupTimeoutMs,
       closeTimeoutMs: config.closeTimeoutMs, toolCallTimeoutMs: config.toolCallTimeoutMs,
     })
@@ -232,18 +247,49 @@ async function mountIntegration(ctx: Context, config: IntegrationConfig): Promis
     await handle.await()
     const status = McpClient.connectionStatusOf(handle)
     if (liveComponents !== undefined && status !== undefined) {
-      binding.unobserve = liveComponents.observeWdh(agent.id, cwd, () => status.current(), listener => status.onChange(listener))
+      const call = McpClient.connectionToolCallerOf(handle)
+      binding.unobserve = liveComponents.observeWdh(agent.id, cwd, () => status.current(), listener => status.onChange(listener),
+        call === undefined ? undefined : async (selection, signal) => {
+          const check = (): void => {
+            if (stopped || bindings.get(agent) !== binding || ctx.workingDirectory.get(agent.session) !== cwd) {
+              throw new Error('The WDH workspace changed. Refresh the capture after reconnection.')
+            }
+          }
+          check()
+          const result = await call('wdh_control', selection === null
+            ? { action: 'capture-list' }
+            : { action: 'capture-detail', args: { id: selection.id, generation: selection.generation } }, signal)
+          check()
+          return result
+        })
     }
   }
 
-  if (components !== undefined) ctx.effect(() => components.registerReconnect('wdh', async () => {
-    for (const [agent, binding] of bindings) {
-      await operations.get(agent)
-      await retire(binding)
-      bindings.delete(agent)
-      await bind(agent)
+  const queueBind = (agent: Agent, reconnect = false): Promise<void> => {
+    const start = (): Promise<void> => bind(agent, reconnect)
+    const operation = (operations.get(agent) ?? Promise.resolve()).then(start, start)
+    operations.set(agent, operation)
+    return operation.finally(() => { if (operations.get(agent) === operation) operations.delete(agent) })
+  }
+  const prepare = async (agent: Agent): Promise<void> => {
+    try {
+      await queueBind(agent)
+    } catch (error) {
+      ctx.logger.error('Unable to prepare the WDH connection for this chat', error)
     }
+  }
+  if (components !== undefined) ctx.effect(() => components.registerReconnect('wdh', async () => {
+    if (!isAbsolute(await components.wdhEntry(wdh.entry))) throw new Error('Install WDH before reconnecting.')
+    await Promise.all(ctx.agents.list().map(agent => queueBind(agent, true)))
   }))
+
+  // Pre-step runs after the model's tool selection. Prepare new connections before a chat can take its first step.
+  ctx.on('agent/created', async ({ agent }) => { await prepare(agent); return undefined })
+  ctx.on('decrypthub-components/activated', async (id) => {
+    if (id !== 'wdh') return
+    const candidates = ctx.agents.list().filter(agent => agent.status !== 'running' || !bindings.has(agent))
+    await Promise.all(candidates.map(prepare))
+  })
 
   ctx.tools.guard((exec) => {
     const resourceCall = ['list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource'].includes(exec.name)
@@ -263,16 +309,9 @@ async function mountIntegration(ctx: Context, config: IntegrationConfig): Promis
     const decision = await next()
     if (decision.kind === 'reject' || stopped) return decision
     signal.throwIfAborted()
-    // Both continuations serialize a new attempt after the prior caller has observed its own failure.
-    const operation = (operations.get(agent) ?? Promise.resolve()).then(() => bind(agent), () => bind(agent))
-    operations.set(agent, operation)
-    try {
-      await operation
-      signal.throwIfAborted()
-      return decision
-    } finally {
-      if (operations.get(agent) === operation) operations.delete(agent)
-    }
+    await queueBind(agent)
+    signal.throwIfAborted()
+    return decision
   })
   // oxlint-disable-next-line typescript/no-misused-promises -- AgentRegistry awaits these lifecycle observers through Cordis parallel().
   ctx.on('agent/disposed', async ({ agent }) => {
@@ -291,4 +330,5 @@ async function mountIntegration(ctx: Context, config: IntegrationConfig): Promis
     const failures = results.filter(result => result.status === 'rejected')
     if (failures.length > 0) throw new AggregateError(failures.map(result => new Error(String(result.reason))), 'DecryptHub WDH cleanup failed; restart the application.')
   })
+  await Promise.all(ctx.agents.list().filter(agent => agent.status !== 'running').map(prepare))
 }

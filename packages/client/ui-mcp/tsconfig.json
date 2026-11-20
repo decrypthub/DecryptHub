@@ -70,6 +70,12 @@
     },
     {
       "path": "../ui-conversation/tsconfig.client.json"
+    },
+    {
+      "path": "../ui-approval"
+    },
+    {
+      "path": "../ui-user-questions"
     }
   ]
 }

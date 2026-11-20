@@ -1,4 +1,5 @@
 import type { Fiber } from '@deepseek-ai/cordis'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { McpCloseResult, McpConnectionStatus } from './types.ts'
 
 /**
@@ -31,8 +32,15 @@ export interface McpConnectionStatusHandle {
   onChange(callback: (status: McpConnectionStatus) => void | Promise<void>): () => void
 }
 
+/** A Host-owned tool request on the current generation of one client. */
+export type McpConnectionToolCaller = (
+  name: string, args: Record<string, JsonValue>, signal: AbortSignal,
+) => Promise<JsonValue>
+
 /** Writable status cell retained across supervisors on the same Fiber. */
 export class McpStatusCell implements McpConnectionStatusHandle {
+  /** Available while the owning supervisor is mounted. */
+  callTool: McpConnectionToolCaller | undefined
   private value: McpConnectionStatus = { state: 'connecting', attempt: 0 }
   private closeResult: McpCloseResult = { closeConfirmed: true }
 
@@ -128,6 +136,6 @@ export function registerStatusCell(fiber: Fiber, warn: (message: string, error: 
  * @param fiber - plugin Fiber or its thenable handle.
  * @returns the retained cell, or `undefined` before the MCP instance registers one.
  */
-export function connectionStatusIn(fiber: Fiber): McpConnectionStatusHandle | undefined {
+export function connectionStatusIn(fiber: Fiber): McpStatusCell | undefined {
   return cellsByFiber.get(fiber.ctx.fiber)
 }

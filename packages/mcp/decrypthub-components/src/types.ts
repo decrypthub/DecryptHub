@@ -50,6 +50,31 @@ export interface WdhConnectionView {
   workspace: string
   status: McpConnectionStatus
 }
+/** A recent request in the owning WDH connection. */
+export interface WdhCaptureRow {
+  id: string
+  url: string
+  method: string
+  status: number | string
+}
+/** Capture entries and the connection identity used to resolve their IDs. */
+export interface WdhCaptureList {
+  generation: string
+  requests: WdhCaptureRow[]
+}
+/** A request identity scoped to the WDH connection that listed it. */
+export interface WdhCaptureSelection {
+  generation: string
+  id: string
+}
+/** Bounded response and source locations captured for one request. */
+export interface WdhCaptureDetail {
+  id: string
+  headers: string
+  headersTruncated: boolean
+  body: { text: string; encoding: 'base64' | null; truncated: boolean } | null
+  frames: { functionName: string; url: string; line: number; column: number }[]
+}
 /** One cancellable installation transaction. */
 export interface ComponentOperation {
   kind?: 'component' | 'browser'
@@ -109,10 +134,10 @@ export interface ImportResult { readonly id: ImportKind; readonly status: 'impor
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
-    /** A verified active component changed; providers refresh their next connection.
+    /** A verified activation committed; providers prepare idle connections before the operation settles.
      * @param id - activated component.
-     * @mode emit
+     * @mode parallel
      */
-    'decrypthub-components/activated'(id: ComponentId): void
+    'decrypthub-components/activated'(id: ComponentId): void | Promise<void>
   }
 }

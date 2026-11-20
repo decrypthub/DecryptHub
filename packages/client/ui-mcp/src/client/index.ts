@@ -18,10 +18,11 @@ import type { SkillCatalog } from './SkillsMcpPage.tsx'
 import { McpSource } from './source.ts'
 import { ComponentsSource } from './components-source.ts'
 import { ComponentsIcon } from './ComponentsPage.tsx'
-import { WdhStatusPill } from './WdhStatusPill.tsx'
+import { WdhStatusPill, type WdhPillInjected } from './WdhStatusPill.tsx'
 import { ChatTargetPicker, type ChatTargetInjected } from './ChatTargetPicker.tsx'
 import { SkillsMcpMainPage, SkillsMcpPage } from './SkillsMcpPage.tsx'
 import { ImportPage } from './ImportPage.tsx'
+import { McpChatApproval, selectMcpChatApproval } from './McpChatApproval.tsx'
 import { en, zh, type McpKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -78,6 +79,11 @@ function mount(ctx: Context): void {
   ctx.remote.$on('settings/document-updated', (ns) => { if (ns === 'mcp-manager') void source.refresh() })
   ctx.on('connection/reset', () => { source.reset() })
   const t = ctx.locale.bind('settings.mcp')
+  ctx.slots.inject('conversation.composer', () => ctx.slots.register({
+    name: 'conversation.composer', priority: -1,
+    select: ({ pendingInteraction }) => selectMcpChatApproval(pendingInteraction),
+    inject: () => ({ resolveText: (text: { en: string; [locale: string]: string }) => ctx.locale.resolveText(text) }),
+  }, McpChatApproval))
   const official = ctx.remote.decrypthubComponents
   const components = new ComponentsSource({
     async *watch(signal) { yield* official.watch(signal) },
@@ -175,11 +181,16 @@ function mount(ctx: Context): void {
   ctx.slots.inject('main', () => ctx.slots.register({
     name: 'main', key: panel, locale: 'settings.mcp', inject: combinedInject,
   }, SkillsMcpMainPage))
+  const captureActions: NonNullable<WdhPillInjected['capture']> = {
+    list: (sessionId, signal) => confirmed(official.wdhCaptureList(sessionId, signal)),
+    detail: (sessionId, selection, signal) => confirmed(official.wdhCaptureDetail(sessionId, selection, signal)),
+  }
   ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
     name: 'conversation.composer.dock', id: 'wdh-status', order: 20, locale: 'settings.mcp',
     inject: () => ({
       hooks: { components: components.store },
       retry: () => { void components.run(ops => ops.reconnect('wdh')).catch(() => {}) },
+      capture: captureActions,
     }),
   }, WdhStatusPill))
   const targetActions = {

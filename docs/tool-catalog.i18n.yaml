@@ -9,8 +9,14 @@
   en: 6cc2cd9ced70bb09
   zh: 1c0e6cb4ba2ed637
 /tool-schema-catalog/tool-package-map:
-  en: bea365ddfcd3425e
-  zh: 632c336f074c559d
+  en: a8d6625c5b36a8f8
+  zh: 292803b1ea7c7bd8
+/tool-schema-catalog/deepseek-ai-dsh-decrypthub-integrations:
+  en: 423d4bd7bf012dc0
+  zh: 423d4bd7bf012dc0
+/tool-schema-catalog/deepseek-ai-dsh-decrypthub-integrations/mcp-add:
+  en: 6b1acab30ff2ac76
+  zh: f0eaac0758a0ae5d
 /tool-schema-catalog/deepseek-ai-dsh-tool-product-sessions:
   en: 6ca3c40ce535b236
   zh: 6ca3c40ce535b236

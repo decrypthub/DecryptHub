@@ -15,6 +15,7 @@ This table connects model-visible tool names to the plugin package and service s
 
 | Tool package | Model-visible names | Requires | Writes / affects | Shipped aliases | Deployment note |
 | --- | --- | --- | --- | --- | --- |
+| `@deepseek-ai/dsh-decrypthub-integrations` | `mcp_add` | `ctx.tools`, `ctx.settings`, `ctx.userQuestions`, `ctx.mcpManager` | `tool/call`, `tool/result`, `Desktop profile settings` | - | The Desktop profile exposes mcp_add with editable settings and user questions. Approval starts the configured connection, and discovery is checked on the instance that supplies the next model step. |
 | `@deepseek-ai/dsh-tool-product-sessions` | `session_list`, `session_read` | `ctx.tools`, `ctx.sessionQuery`, `a calling Agent for workspace authority` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-plugin-manager` | `plugin_manager` | `ctx.tools`, `ctx.pluginManager`, `ctx.sandboxPolicy` | `tool/call`, `tool/result`, `user/message` | - | - |
 | `@deepseek-ai/dsh-plugin-market` | `plugin_market` | `ctx.tools`, `ctx.pluginMarket` | `tool/call`, `tool/result` | - | - |
@@ -54,6 +55,100 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`, `ctx.workflowEngine`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents the script children)` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-workspace-dependencies` | `load_workspace_dependencies` | `ctx.tools` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`, `web_search` | `ctx.tools`, `ctx.web`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps. |
+
+<a id="deepseek-aidsh-decrypthub-integrations"></a>
+
+## `@deepseek-ai/dsh-decrypthub-integrations`
+
+### `mcp_add`
+
+Add and enable one custom MCP server when the user asks, with an approval card showing the exact connection configuration. For a GitHub repository or documentation link, use web_fetch to read its setup instructions first, then use the documented Streamable HTTP endpoint or executable and argument list. A repository page is not an MCP endpoint. For pasted MCP JSON, translate the chosen server entry into config. Do not invent a command or run setup scripts yourself. Keep secrets out of tool arguments and use stored credential references. Approval saves the server for all chats in this profile. The tool waits for the live connection to discover its tools. On success, continue the user’s task with the new tools in the next step of this chat.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Unique server name using 1–32 ASCII letters, digits, underscores or hyphens."
+    },
+    "source": {
+      "type": "string",
+      "description": "Repository, package or documentation source shown to the user, if known."
+    },
+    "config": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "transport": {
+              "type": "string",
+              "const": "streamable-http"
+            },
+            "url": {
+              "type": "string",
+              "description": "Actual Streamable HTTP MCP URL."
+            },
+            "headers": {
+              "type": "object",
+              "description": "Optional string headers. Example authorization value: Bearer ${credential:MY_TOKEN}.",
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "transport",
+            "url"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "transport": {
+              "type": "string",
+              "const": "stdio"
+            },
+            "command": {
+              "type": "string",
+              "description": "Executable only, such as npx or uvx. Put each argument in args."
+            },
+            "args": {
+              "type": "array",
+              "description": "Documented launch arguments as separate strings.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "cwd": {
+              "type": "string",
+              "description": "Optional absolute working directory required by the command."
+            },
+            "env": {
+              "type": "object",
+              "description": "Optional string environment variables. Use credential references for tokens and passwords.",
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "transport",
+            "command"
+          ]
+        }
+      ],
+      "description": "One server’s connection settings. Use credential references such as ${credential:MY_TOKEN} for secrets."
+    }
+  },
+  "required": [
+    "name",
+    "config"
+  ]
+}
+```
+
+Source: [`packages/mcp/decrypthub-integrations/src/custom-mcp.ts`](../packages/mcp/decrypthub-integrations/src/custom-mcp.ts)
+
+The Desktop profile exposes mcp_add with editable settings and user questions. Approval starts the configured connection, and discovery is checked on the instance that supplies the next model step.
 
 <a id="deepseek-aidsh-tool-product-sessions"></a>
 
