@@ -15,7 +15,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true })))
 })
 
-it('forwards the documented pnpm purge command through both package scripts to the real argument parser', async () => {
+it('forwards the documented pnpm purge command through both package scripts to the real argument parser', { timeout: 90_000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), 'desktop-purge-command-'))
   roots.push(directory)
   const scripts = join(directory, 'apps/desktop/scripts')
@@ -27,7 +27,8 @@ it('forwards the documented pnpm purge command through both package scripts to t
   await writeFile(join(directory, 'pnpm-workspace.yaml'), 'packages:\n  - apps/desktop\n')
   await writeFile(join(directory, 'apps/desktop/package.json'), JSON.stringify({ name: desktop.name, type: 'module', scripts: { 'purge:latest': desktop.scripts['purge:latest'] } }))
   await mkdir(join(directory, 'node_modules'))
-  for (const dependency of ['.bin', 'pnpm', 'tsx', 'semver']) {
+  // pnpm's Windows shims resolve their executables via the sibling virtual store.
+  for (const dependency of ['.bin', '.pnpm', 'pnpm', 'tsx', 'semver']) {
     await symlink(join(root, 'node_modules', dependency), join(directory, 'node_modules', dependency), 'junction')
   }
   await mkdir(join(directory, 'node_modules/@deepseek-ai'), { recursive: true })

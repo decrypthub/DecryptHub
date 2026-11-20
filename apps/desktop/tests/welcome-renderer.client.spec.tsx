@@ -3,13 +3,15 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { Welcome } from '../src/client/WelcomePage.tsx'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resolveDesktopLocale } from '../src/locale.ts'
 import type { AccountView } from '@deepseek-ai/dsh-deepseek-account/types'
 import type { WelcomeSaveResult, WelcomeNotice } from '../src/welcome-api.ts'
 
 const html = readFileSync(join(import.meta.dirname, '../renderer/welcome.html'), 'utf8')
+beforeEach(() => { vi.stubEnv('DSH_CLIENT_TITLE', 'DecryptHub') })
 afterEach(cleanup)
+afterEach(() => { vi.unstubAllEnvs() })
 
 function mount(language = 'zh-CN', takeNotice = vi.fn<() => Promise<WelcomeNotice | undefined>>().mockResolvedValue(undefined)) {
   cleanup()

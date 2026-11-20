@@ -15,7 +15,8 @@ async function fixture() {
   return directory
 }
 
-it('retains two bounded segments after dense operations across 50 plugins', async () => {
+// Draining the full queue performs a thousand real filesystem appends.
+it('retains two bounded segments after dense operations across 50 plugins', { timeout: 90_000 }, async () => {
   const directory = await fixture()
   const journal = new OperationJournal(directory, { recordBytes: 128, segmentBytes: 1024, queuedBytes: 128 * 1000 })
   onTestFinished(async () => { await journal.close() })

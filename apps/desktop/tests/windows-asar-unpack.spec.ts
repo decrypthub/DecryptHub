@@ -131,10 +131,10 @@ it('includes the diagnostic worker in the archive selected by the shipping file 
   const appDir = join(root, 'app')
   const resources = join(root, 'resources')
   const destination = join(resources, 'app')
-  await mkdir(join(appDir, 'lib'), { recursive: true })
+  await mkdir(join(appDir, 'lib', 'types'), { recursive: true })
   await mkdir(resources)
   const worker = join(appDir, 'lib', 'operation-report-worker.js')
-  const excluded = join(appDir, 'lib', 'not-shipped.js')
+  const excluded = join(appDir, 'lib', 'types', 'operation-report-worker.js')
   await writeFile(worker, 'export {}')
   await writeFile(excluded, 'export {}')
   const config = unsignedWindowsConfig('com.example.diagnostics', join(root, 'dsh'))
@@ -158,7 +158,7 @@ it('includes the diagnostic worker in the archive selected by the shipping file 
   }).pack([{ src: appDir, destination, files, metadata }])
   const archive = await readAsar(join(resources, 'app.asar'))
   expect(archive.getFile('lib/operation-report-worker.js').size).toBe(Buffer.byteLength('export {}'))
-  expect(() => archive.getFile('lib/not-shipped.js')).toThrow()
+  expect(() => archive.getFile('lib/types/operation-report-worker.js')).toThrow()
 })
 
 it.each([false, true])('unpacks PE files through builder source patterns (external=%s)', async (external) => {

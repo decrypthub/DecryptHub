@@ -54,10 +54,12 @@ export async function prepareDesktopRollout(directory: string, manifest: Desktop
     throw new Error('desktop rollout: retained update metadata differs from manifest')
   }
   const parsed = metadata(contents)
-  const payload = `deepseek-harness-${source.version}-${source.target}.${windows ? 'exe' : 'zip'}`
-  const file = manifest.files.find(entry => entry.name === payload)
   const entry = parsed.files[0]
-  if (parsed.version !== source.version || entry.url !== payload || !file
+  const payload = entry.url
+  const suffix = `${source.version}-${source.target}.${windows ? 'exe' : 'zip'}`
+  const matchesPayload = payload === `decrypthub-${suffix}` || payload === `deepseek-harness-${suffix}`
+  const file = manifest.files.find(entry => entry.name === payload)
+  if (parsed.version !== source.version || !matchesPayload || !file
     || entry.size !== file.size || entry.sha512 !== file.sha512
     || (parsed.path !== undefined && parsed.path !== payload)
     || (parsed.sha512 !== undefined && parsed.sha512 !== file.sha512)) {

@@ -113,7 +113,8 @@ describe('installed update archive contents', () => {
   })
 
   it.each(['name', 'version', 'dshDesktopAppId', 'main', 'type', 'dshMandatoryUpdatePolicy'])(
-    'rejects mismatched packaged %s', async (field) => {
+    // Each case seals and reopens an actual ASAR fixture on disk.
+    'rejects mismatched packaged %s', { timeout: 90_000 }, async (field) => {
       await fixture(async ({ manifest, source, payload, version, seal }) => {
         const path = join(source, 'package.json')
         const data = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>

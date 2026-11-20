@@ -39,7 +39,10 @@ int wmain(int count, wchar_t** args) {
   DWORD code = 0;
   const bool completed = signalled && WaitForSingleObject(child.hProcess, 15000) == WAIT_OBJECT_0
     && GetExitCodeProcess(child.hProcess, &code);
-  if (!completed) { TerminateProcess(child.hProcess, 1); WaitForSingleObject(child.hProcess, INFINITE); }
+  if (!completed) {
+    if (WaitForSingleObject(child.hProcess, 0) == WAIT_OBJECT_0) GetExitCodeProcess(child.hProcess, &code);
+    else { TerminateProcess(child.hProcess, 1); WaitForSingleObject(child.hProcess, INFINITE); }
+  }
   FreeConsole();
   FILE* report = nullptr;
   _wfopen_s(&report, args[5], L"w");

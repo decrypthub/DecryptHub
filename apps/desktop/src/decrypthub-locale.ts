@@ -9,6 +9,8 @@ export function productMessages<T extends Readonly<Record<string, string>>>(mess
   const title = process.env.DSH_CLIENT_TITLE
   if (title === undefined || title === 'DeepSeek Harness') return messages
   return Object.fromEntries(Object.entries(messages).map(([key, value]) => [key,
-    value.replaceAll('DeepSeek Harness', title).replaceAll(/\bDSH\b/gu, title),
+    value.replaceAll(key === 'welcomeKeyDescription'
+      ? /DeepSeek Harness|\b(?:DSH|Harness)\b/gu
+      : /DeepSeek Harness|\bDSH\b/gu, () => title),
   ])) as T
 }

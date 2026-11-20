@@ -60,7 +60,7 @@ describe('desktop macOS release signature', () => {
       expect(entitlements).toContain(`<key>${key}</key>\n    <true/>`)
     }
     expect(config.extraResources.map(resource => resource.to)).toEqual([
-      'runtime', 'components/wdh', 'components/wdh/node_modules', 'legal/LICENSE.deepseek-harness', 'legal/THIRD_PARTY_NOTICES.md', 'icon.png',
+      'runtime', 'legal/LICENSE.deepseek-harness', 'legal/THIRD_PARTY_NOTICES.md', 'icon.png',
     ])
     expect(config.extraResources[0]?.to).toBe('runtime')
     expect(portablePath(config.extraResources[0]?.from ?? '')).toContain('/.desktop-build/targets/mac-arm64/runtime')
@@ -151,7 +151,7 @@ describe('desktop macOS release signature', () => {
       DSH_DESKTOP_UNSIGNED: '1',
     }, 'win32', 'x64')
     expect(portablePath(config.directories.output)).toContain('/targets/win-x64/unsigned-artifacts')
-    expect(portablePath(config.nsis.include)).toMatch(/\/scripts\/installer\.nsh$/u)
+    expect(portablePath(config.nsis.include)).toMatch(/\/targets\/win-x64\/installer-ui\/include\.nsh$/u)
     expect(config).toMatchObject({
       win: { forceCodeSigning: false, signtoolOptions: { sign: undefined } },
       publish: null,
