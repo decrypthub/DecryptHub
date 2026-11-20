@@ -12,6 +12,8 @@ This reference owns the reasons for product patches and their retirement conditi
 
 ## Product ownership and upstream reuse
 
+The native Windows restart banner and status window display the DecryptHub name. The Chat running status rotates product tips while preserving the elapsed clock and screen-reader status. Keep these presentation changes until the upstream installer exposes its product title and Chat exposes its running-status copy.
+
 | Capability | Owner and decision |
 |---|---|
 | Community account and avatar | Keep `ui-settings-decrypthub-account` and Desktop `community-account-*`; the native bridge is the product-specific carrier. |

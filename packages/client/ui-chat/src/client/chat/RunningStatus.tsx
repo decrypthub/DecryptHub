@@ -7,6 +7,8 @@ import { RunningWhaleTail } from './RunningWhaleTail.tsx'
 import a11yCss from './accessibility.module.css'
 import css from './ChatView.module.css'
 
+const HARNESS_TIP_INTERVAL_MS = 8000
+
 interface RunningStatusProps {
   readonly startTime: number | undefined
   /** Freeze the shown duration while the Client cannot observe the Session. */
@@ -30,7 +32,19 @@ export const RunningStatus = memo(function RunningStatus({ startTime, paused, ho
     const timer = setInterval(() => { setNow(Date.now()) }, LIVE_RUN_CLOCK_INTERVAL_MS)
     return () => { clearInterval(timer) }
   }, [startTime, paused, holding])
-  const label = startTime === undefined ? t('chat.deepDiving') : t('chat.deepDivingFor', {
+  const [tipIndex, setTipIndex] = useState(0)
+  useEffect(() => {
+    setTipIndex(0)
+  }, [startTime])
+  useEffect(() => {
+    if (paused || holding) return
+    const timer = setInterval(() => { setTipIndex(index => index + 1) }, HARNESS_TIP_INTERVAL_MS)
+    return () => { clearInterval(timer) }
+  }, [startTime, paused, holding])
+  const tips = t('chat.harnessTips').split('\n')
+  const tip = t('chat.harnessTip', { tip: tips[tipIndex % tips.length] ?? '' })
+  const label = startTime === undefined ? tip : t('chat.harnessTipFor', {
+    tip,
     duration: formatRunDuration(Math.max(1000, now - startTime), t).map(part => part.text).join(''),
   })
   return (
