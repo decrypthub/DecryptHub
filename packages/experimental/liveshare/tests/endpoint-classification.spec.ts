@@ -11,6 +11,11 @@ import { VIEWER_ENDPOINT_CLASSES, assertSameViewerActions } from '../src/endpoin
 const CLASSIFIED = Object.keys(VIEWER_ENDPOINT_CLASSES)
 
 describe('viewer endpoint classification', () => {
+  it('keeps browser captures private to the owner', () => {
+    expect(VIEWER_ENDPOINT_CLASSES['decrypthubComponents/wdhCaptureList']).toBe('owner-only')
+    expect(VIEWER_ENDPOINT_CLASSES['decrypthubComponents/wdhCaptureDetail']).toBe('owner-only')
+  })
+
   it('reports the endpoint a classification is missing', () => {
     const incomplete = Object.fromEntries(
       Object.entries(VIEWER_ENDPOINT_CLASSES).filter(([endpoint]) => endpoint !== 'session/prompt'),

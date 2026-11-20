@@ -228,6 +228,8 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'decrypthubComponents/snapshot': 'owner-only', // owner official component management
   'decrypthubComponents/uninstall': 'owner-only', // owner official component management
   'decrypthubComponents/watch': 'owner-only', // owner official component management
+  'decrypthubComponents/wdhCaptureDetail': 'owner-only', // owner reads the chat's captured response and initiator
+  'decrypthubComponents/wdhCaptureList': 'owner-only', // owner lists the chat's captured requests
   'mcpManager/probe': 'owner-only', // owner MCP server management
   'mcpManager/restart': 'owner-only', // owner MCP server management
   'mcpManager/watch': 'owner-only', // owner MCP server management
