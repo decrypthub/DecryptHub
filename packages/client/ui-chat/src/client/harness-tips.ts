@@ -9,6 +9,7 @@ export const harnessTipsZh = [
   '社区 MCP 可以为 Agent 补充分析工具',
 ]
 
+/** English running-status tips for the same rotation as the Chinese list. */
 export const harnessTipsEn = [
   'DecryptHub is built on DeepSeek Harness',
   'Customize your Agent persona and analysis style in Settings',

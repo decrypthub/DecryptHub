@@ -87,8 +87,8 @@ export class McpResourceRuntime extends Service {
             servers[provider.availability?.() ?? 'resources'].push(name)
           }
           return '## MCP servers\n\n'
-            + `Connected resource servers: ${JSON.stringify(servers.resources.sort())}.\n`
-            + `Connected servers without resources: ${JSON.stringify(servers['no-resources'].sort())}.\n`
+            + `Connected resource servers: ${JSON.stringify(servers.resources.sort())}. `
+            + `Connected servers without resources: ${JSON.stringify(servers['no-resources'].sort())}. `
             + `Disconnected servers: ${JSON.stringify(servers.disconnected.sort())}.\n\n`
             + 'For an MCP tool request, use the currently available server-qualified tool. '
             + 'Use mcp_server_status to check MCP connection state when a tool is missing. '

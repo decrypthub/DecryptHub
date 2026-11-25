@@ -969,8 +969,8 @@ export interface Config extends CuaConfig {
 
 ## `@deepseek-ai/dsh-decrypthub-components`
 
-- `inject`: `settings` · `agents` · `mcpManager` · `subprocess`
-- `source`: [`packages/mcp/decrypthub-components/src/index.ts:28`](../packages/mcp/decrypthub-components/src/index.ts)
+- `inject`: `settings` · `agents` · `mcpManager` · `subprocess` · `storageDomain`
+- `source`: [`packages/mcp/decrypthub-components/src/index.ts:32`](../packages/mcp/decrypthub-components/src/index.ts)
 
 ```ts config-catalog
 /** Deployment-owned directories; no catalog can choose an executable. */
@@ -998,9 +998,9 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-decrypthub-integrations`
 
-- `inject`: `tools` · `workingDirectory` · `mcpManager`
+- `inject`: `agents` · `tools` · `workingDirectory` · `mcpManager`
 - `refs`: `Volatile` (`@deepseek-ai/cosmokit`)
-- `source`: [`packages/mcp/decrypthub-integrations/src/index.ts:79`](../packages/mcp/decrypthub-integrations/src/index.ts)
+- `source`: [`packages/mcp/decrypthub-integrations/src/index.ts:81`](../packages/mcp/decrypthub-integrations/src/index.ts)
 
 ```ts config-catalog
 /** Live product connection configuration. */
@@ -1010,7 +1010,7 @@ export type Config = Volatile<IntegrationConfig>
 export interface IntegrationConfig {
   /** Installed browser component and per-Agent profile storage. */
   wdh: {
-    /** Start one client for each Agent on its first step. */
+    /** Prepare one client per loaded Agent when WDH is installed. */
     enabled: boolean
     /** Absolute entry path in an installed WDH component. */
     entry: string
@@ -2571,7 +2571,7 @@ export interface LspLocalServerConfig {
 ## `@deepseek-ai/dsh-mcp-client`
 
 - `inject`: `tools`
-- `source`: [`packages/mcp/mcp-client/src/index.ts:140`](../packages/mcp/mcp-client/src/index.ts)
+- `source`: [`packages/mcp/mcp-client/src/index.ts:148`](../packages/mcp/mcp-client/src/index.ts)
 
 ```ts config-catalog
 /** Configuration for one stdio or Streamable HTTP MCP server. */
@@ -2980,8 +2980,8 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-product-memory`
 
-- `inject`: `systemPrompt` · `tools` · `settings` · `agents`
-- `source`: [`packages/host/product-memory/src/index.ts:38`](../packages/host/product-memory/src/index.ts)
+- `inject`: `systemPrompt` · `tools` · `settings`
+- `source`: [`packages/host/product-memory/src/index.ts:44`](../packages/host/product-memory/src/index.ts)
 
 ```ts config-catalog
 /** Deployment-varying limits and stored entries. */
@@ -2997,9 +2997,11 @@ export interface MemoryEntry {
   /** The remembered fact, one sentence. */
   text: string
   /** `user` applies across projects; `project` applies to one workspace. */
-  scope: string
-  /** Absolute workspace directory a `project` entry belongs to. */
+  scope: 'user' | 'project'
+  /** Original directory for entries written before workspace ids were stored. */
   workspace?: string
+  /** Durable workspace identity for a project-scoped entry. */
+  workspaceId?: string
   /** ISO-8601 creation stamp. */
   createdAt: string
   /** ISO-8601 last-write stamp. */
@@ -4683,7 +4685,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-tool-product-sessions`
 
 - `inject`: `tools` · `sessionQuery`
-- `source`: [`packages/session/tool-product-sessions/src/index.ts:21`](../packages/session/tool-product-sessions/src/index.ts)
+- `source`: [`packages/session/tool-product-sessions/src/index.ts:24`](../packages/session/tool-product-sessions/src/index.ts)
 
 ```ts config-catalog
 /** Listing limits. */

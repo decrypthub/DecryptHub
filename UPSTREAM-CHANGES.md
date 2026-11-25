@@ -7,7 +7,7 @@ This reference owns the reasons for product patches and their retirement conditi
 ## Upstream baseline
 
 - The current source includes upstream master’s rc.3 merge, PR #8422, declaring `0.2.2-rc.3`. The previous product base was the rc.1 master merge, PR #7873. The sync preserves both histories; the earlier release tags identify different trees.
-- Product mainline remains `feat/dsh-rc1`; its name does not pin the engine version. The old Tauri `origin/main` is not merged.
+- The product mainline is `main`, renamed from `feat/dsh-rc1` on 2026-11-21. The branch name does not pin the engine version. The old Tauri history is not merged.
 - `packages/core/`, `vendor/` and the recorded Session fixtures match rc.3. No product Agent loop, Session format, storage engine or Cordis modification is retained.
 
 ## Product ownership and upstream reuse

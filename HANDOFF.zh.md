@@ -1,33 +1,23 @@
 # 跨设备交接
 
-当前产品分支：`feat/dsh-rc1`，远端：`https://github.com/decrypthub/DecryptHub.git`。固定上游基线是 DeepSeek Harness `0.2.2-rc.3`（upstream PR #8422）；保留的产品修改与已核对的上游最新提交见[上游差异记录](UPSTREAM-CHANGES.zh.md)。`main` 是更早的 Tauri 实现，`handoff/ui-alignment-20261104` 是它的 UI 交接快照；两者都只读，不要合并进本分支。
+[English](HANDOFF.md) | 中文
 
-## 在另一台电脑接续
+DecryptHub 桌面端在 [DecryptHub](https://github.com/decrypthub/DecryptHub) 的 `main` 分支开发。该分支沿用 DeepSeek Harness 产品线的历史，不要将旧 Tauri 实现合入。固定的引擎基线和保留的产品改动见[上游差异记录](UPSTREAM-CHANGES.zh.md)。
+
+## 在另一台电脑检出
+
+使用 Node.js >=24.9.0 和 `package.json` 固定的 pnpm 版本。
 
 ```sh
-git clone --branch feat/dsh-rc1 https://github.com/decrypthub/DecryptHub.git DecryptHub-DSH
+git clone --branch main https://github.com/decrypthub/DecryptHub.git DecryptHub-DSH
 cd DecryptHub-DSH
 pnpm install --frozen-lockfile
 ```
 
-需要 Node.js >=24.9.0 和项目固定的 pnpm 11.28.5。先阅读 `PRODUCT-DESIGN.zh.md`、`DECRYPTHUB.zh.md` 和 `AGENTS.md`。
+阅读[产品设计](PRODUCT-DESIGN.zh.md)、[产品配置](DECRYPTHUB.zh.md)和[仓库说明](AGENTS.md)。WebDecryptHub 是独立的[浏览器组件](https://github.com/decrypthub/WebDecryptHub)。使用与待测桌面版本配套的组件构建，将 `DSH_DESKTOP_WDH_COMPONENT_DIR` 指向其组件目录。组件和桌面端分别维护 Git 历史。
 
-需要旧版设计或实现时，另外克隆 `handoff/ui-alignment-20261104` 到平级目录 `DecryptHub-Desktop`，不要把它合并到新主干。
+## 验证与交付预览
 
-WDH 独立运行时：`https://github.com/decrypthub/WebDecryptHub.git`，本次依赖分支 `codex/github-token-for-kernel-download`，提交 `b937d45`。建议克隆到平级目录 `WebDecryptHub-Runtime`。打包 Desktop 前先按该仓的组件构建文档生成 WDH，并将 `DSH_DESKTOP_WDH_COMPONENT_DIR` 指向组件产物；本机产物目录不随 Git 携带。
+按[测试指南](docs/testing.zh.md)执行与改动相关的检查。给用户提供固定构建的预览，不要让用户在会随源码变更而重载的窗口中验收。用绝对路径 `DSH_DESKTOP_BUILD_ROOT` 隔离打包产物。预览不等于已通过正式发布验证。
 
-## 当前实现与待完成项
-
-已接入品牌及独立数据目录、DecryptHub 社区登录、三种自定义 API 格式、上游思考强度菜单、自定义 MCP、官方 WDH / ADH / IDH 管理与校验安装。保留 DSH 供应商目录、官方 API 适配器、Agent 预设、团队与开发者工具；关闭官方账号入口、首启公告、官方密钥自动引导、遥测及会话上传。
-
-全局记忆与系统记忆管理页、专用 DSH 插件配置导入、WDH 内嵌浏览器/抓包/调试工作台尚未迁移。真实设备连接、官方组件真实发布下载及生产账号接口尚未完成端到端验证。
-
-开发窗口在后续构建时出现过根插槽热重载错误并变成空白；本轮通过固定安装包避免该交付问题，没有修复上游热重载生命周期。不要边让用户体验开发窗口边重建工作区产物。设置绝对路径 `DSH_DESKTOP_BUILD_ROOT` 可隔离整套准备目录和安装包，随后运行打包产物。
-
-## 验证状态
-
-最近已通过完整构建的 10 项检查、MCP 相关 18 项测试、构建路径 17 项测试、相关重连/只读启动定向复验、关键构建启动与 Worker 预览、43 项文档校验。固定安装包还通过原生模块、离线插件安装移除和文档转换检查，并实际打开新会话、官方组件及 MCP 设置、冷启动复查。
-
-整套 GUI 曾出现 13 个文件、64 项失败；本轮新增的提前订阅问题已修复并定向复验，其余旧账号、设置及主题断言还需整理。最终源码未重跑整套 GUI / 所有 Web 场景，不应当作已通过全量回归的发布版。末次本地预览构建后只修改了构建路径测试和交接文档。
-
-本机应用数据、账号凭据、设备配置、`.tmp/`、`.desktop-build/`、浏览器内核及安装包均不进入提交。换机后需自行配置模型和设备连接；不要复制或提交凭据文件。
+换机后在目标电脑配置本机模型和设备。不要把账号凭据、应用数据、设备配置、浏览器内核或安装包作为源码检出的一部分提交或复制。

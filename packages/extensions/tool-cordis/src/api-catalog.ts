@@ -1027,9 +1027,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'hasChatTarget(sessionId: SessionId): boolean',
-        description: 'Whether a chat has an explicit scope, including a binding that needs reselection.',
+        description: 'Whether a chat has an explicit scope, including a pending change or a selection that needs to be renewed.',
         parameters: [{ name: 'sessionId', description: 'owning chat.' }],
-        returns: 'true while a binding exists.',
+        returns: 'true while a selection exists or a change is in progress.',
       },
       {
         signature: '@Remote async chatTarget(sessionId: SessionId, signal: AbortSignal): Promise<ChatTargetView | null>',
@@ -1041,7 +1041,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         signature: '@Remote async setChatTarget(sessionId: SessionId, choice: ChatTargetChoice | null, signal: AbortSignal): Promise<ChatTargetView | null>',
         description: 'Bind a chat to a process from an explicitly configured device, or clear the binding.',
         parameters: [{ name: 'sessionId', description: 'owning chat.' }, { name: 'choice', description: 'exact device and App observation, or null to clear it.' }, { name: 'signal', description: 'caller lifetime.' }],
-        returns: 'confirmed binding or null after clearing.',
+        returns: 'the selection or null for a clear, after the durable write.',
       },
       {
         signature: '@Remote async measureTools(id: ComponentId): Promise<string[] | null>',
@@ -1098,10 +1098,22 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'actual invocation without shell expansion.',
       },
       {
-        signature: 'observeWdh(agentId: SessionId, workspace: string, read: () => McpConnectionStatus, subscribe: (listener: () => void) => () => void): () => void',
+        signature: 'observeWdh(agentId: SessionId, workspace: string, read: () => McpConnectionStatus, subscribe: (listener: () => void) => () => void, readCapture?: WdhCaptureReader): () => void',
         description: 'Publish one real Agent-owned connection; disposing it removes the observation.',
-        parameters: [{ name: 'agentId', description: 'owning Agent identity.' }, { name: 'workspace', description: 'current working directory.' }, { name: 'read', description: 'live connection state.' }, { name: 'subscribe', description: 'underlying MCP observation.' }],
+        parameters: [{ name: 'agentId', description: 'owning Agent identity.' }, { name: 'workspace', description: 'current working directory.' }, { name: 'read', description: 'live connection state.' }, { name: 'subscribe', description: 'underlying MCP observation.' }, { name: 'readCapture', description: 'optional capture reader owned by this exact connection.' }],
         returns: 'connection-observation disposer.',
+      },
+      {
+        signature: '@Remote({ resources: { session: sessionId => sessionId } }) async wdhCaptureList(sessionId: SessionId, signal: AbortSignal): Promise<WdhCaptureList>',
+        description: 'List recent requests from the browser already bound to the chat.',
+        parameters: [{ name: 'sessionId', description: 'chat owning the WDH connection.' }, { name: 'signal', description: 'caller lifetime.' }],
+        returns: 'a capture list scoped to the connection.',
+      },
+      {
+        signature: '@Remote({ resources: { session: sessionId => sessionId } }) async wdhCaptureDetail(sessionId: SessionId, selection: WdhCaptureSelection, signal: AbortSignal): Promise<WdhCaptureDetail | null>',
+        description: 'Read the selected capture\'s response and initiating stack together.',
+        parameters: [{ name: 'sessionId', description: 'chat owning the WDH connection.' }, { name: 'selection', description: 'identifier and connection generation from the list.' }, { name: 'signal', description: 'caller lifetime.' }],
+        returns: 'selected details, or null if the capture expired.',
       },
       {
         signature: 'registerReconnect(id: ComponentId, reconnect: () => Promise<void>): () => void',
@@ -5451,10 +5463,10 @@ export const EVENT_API: readonly EventApiEntry[] = [
   },
   {
     name: 'decrypthub-components/activated',
-    mode: 'emit',
-    signature: '\'decrypthub-components/activated\'(id: ComponentId): void',
-    summary: 'A verified active component changed; providers refresh their next connection.',
-    description: 'A verified active component changed; providers refresh their next connection.',
+    mode: 'parallel',
+    signature: '\'decrypthub-components/activated\'(id: ComponentId): void | Promise<void>',
+    summary: 'A verified activation committed; providers prepare idle connections before the operation settles.',
+    description: 'A verified activation committed; providers prepare idle connections before the operation settles.',
     parameters: [{ name: 'id', description: 'activated component.' }],
   },
   {
@@ -10888,6 +10900,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ViewerPluginPolicy',
     declaration: 'export interface ViewerPluginPolicy {\n    readonly plugin: string;\n    readonly mode: \'all\' | \'none\' | \'selected\';\n    readonly endpoints?: readonly string[];\n}',
+  },
+  {
+    name: 'WdhCaptureDetail',
+    declaration: 'export interface WdhCaptureDetail {\n    id: string;\n    headers: string;\n    headersTruncated: boolean;\n    body: {\n        text: string;\n        encoding: \'base64\' | null;\n        truncated: boolean;\n    } | null;\n    frames: {\n        functionName: string;\n        url: string;\n        line: number;\n        column: number;\n    }[];\n}',
+  },
+  {
+    name: 'WdhCaptureList',
+    declaration: 'export interface WdhCaptureList {\n    generation: string;\n    requests: WdhCaptureRow[];\n}',
+  },
+  {
+    name: 'WdhCaptureRow',
+    declaration: 'export interface WdhCaptureRow {\n    id: string;\n    url: string;\n    method: string;\n    status: number | string;\n}',
+  },
+  {
+    name: 'WdhCaptureSelection',
+    declaration: 'export interface WdhCaptureSelection {\n    generation: string;\n    id: string;\n}',
   },
   {
     name: 'WdhConnectionView',

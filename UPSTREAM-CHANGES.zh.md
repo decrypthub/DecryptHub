@@ -7,7 +7,7 @@
 ## 上游基线
 
 - 当前源码包含上游 master 的 rc.3 合并 PR #8422，声明版本为 `0.2.2-rc.3`。原产品基线为 rc.1 的 master 合并 PR #7873。本次同步保留双方历史；较早的 release tag 对应不同代码树。
-- 产品主线仍为 `feat/dsh-rc1`，分支名称不限制引擎版本。未合并旧 Tauri `origin/main`。
+- 产品主线是 `main`（2026-11-21 由 `feat/dsh-rc1` 改名）。分支名称不限制引擎版本。未合并旧 Tauri 历史。
 - `packages/core/`、`vendor/` 与录制会话夹具均与 rc.3 一致。不保留产品侧 Agent 循环、会话格式、存储引擎或 Cordis 修改。
 
 ## 产品归属与上游复用

@@ -1,21 +1,23 @@
 # Cross-device handoff
 
-Product branch: `feat/dsh-rc1` in `https://github.com/decrypthub/DecryptHub.git`. Its pinned upstream base is DeepSeek Harness `0.2.2-rc.3` (upstream PR #8422); retained product patches and the observed upstream head are recorded in [the upstream change record](UPSTREAM-CHANGES.md). `main` holds the previous Tauri implementation and `handoff/ui-alignment-20261104` its UI handoff snapshot; treat both as read-only and do not merge them into this branch. See [the detailed Chinese handoff](HANDOFF.zh.md).
+English | [中文](HANDOFF.zh.md)
+
+The DecryptHub desktop product is developed on `main` in [DecryptHub](https://github.com/decrypthub/DecryptHub). This branch follows the DeepSeek Harness product history; do not merge the old Tauri implementation into it. See [the upstream change record](UPSTREAM-CHANGES.md) for the pinned engine base and retained product patches.
+
+## Set up another checkout
+
+Use Node.js >=24.9.0 and the pnpm version pinned in `package.json`.
 
 ```sh
-git clone --branch feat/dsh-rc1 https://github.com/decrypthub/DecryptHub.git DecryptHub-DSH
+git clone --branch main https://github.com/decrypthub/DecryptHub.git DecryptHub-DSH
 cd DecryptHub-DSH
 pnpm install --frozen-lockfile
 ```
 
-Use Node.js >=24.9.0 and the pinned pnpm 11.28.5. Read `PRODUCT-DESIGN.md`, `DECRYPTHUB.md` and `AGENTS.md`. Clone the legacy branch separately as sibling `DecryptHub-Desktop` when its designs are needed; do not merge it into the DSH branch.
+Read [the product design](PRODUCT-DESIGN.md), [the product setup](DECRYPTHUB.md), and [the repository instructions](AGENTS.md). WebDecryptHub is a separate [browser component](https://github.com/decrypthub/WebDecryptHub). Use the component build selected for the desktop version under test, and point `DSH_DESKTOP_WDH_COMPONENT_DIR` at its component directory. The component and Desktop use separate Git histories.
 
-The independent WDH runtime is `https://github.com/decrypthub/WebDecryptHub.git`, branch `codex/github-token-for-kernel-download`, commit `b937d45`. Clone it as sibling `WebDecryptHub-Runtime`; build its component and supply `DSH_DESKTOP_WDH_COMPONENT_DIR` before packaging Desktop.
+## Validate and share a preview
 
-Branding, community login, API formats, reasoning selection, custom MCP and official component management are implemented. Global/system memory UI, dedicated DSH configuration import and the embedded WDH workbench remain pending. Real devices, official release downloads and production account integration still need end-to-end validation.
+Use [the testing guide](docs/testing.md) for the checks relevant to your change. Build a fixed preview rather than leaving the user on a window that reloads when sources change. An absolute `DSH_DESKTOP_BUILD_ROOT` isolates packaging outputs. A preview is not a qualified production release.
 
-A development-window HMR failure removed the root slot during rebuild and left a blank page. A frozen packaged preview avoids that delivery problem; the upstream HMR lifecycle itself is not fixed. Keep user previews independent of source rebuilds. `DSH_DESKTOP_BUILD_ROOT` selects an absolute isolated build and packaging root.
-
-Recent focused tests, build/type checks, documentation gates and packaged runtime checks passed. The complete GUI suite retains failures in legacy account/settings/theme expectations and was not fully rerun on the final source. This branch is a development handoff, not a fully qualified release.
-
-Local app data, credentials, device configuration, preview artifacts, browser kernels and installers are excluded. Configure models and devices on the other computer without committing credential files.
+Configure local models and devices on the destination computer. Do not commit or copy account credentials, local application data, device configuration, browser kernels, or installers as part of the source checkout.

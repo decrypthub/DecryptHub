@@ -170,9 +170,9 @@ One owner of official installations; the MCP client remains the transport owner.
  */
 @Remote async inspectTargets(id: ComponentId, signal: AbortSignal): Promise<ComponentInventory>
 
-/** Whether a chat has an explicit scope, including a binding that needs reselection.
+/** Whether a chat has an explicit scope, including a pending change or a selection that needs to be renewed.
  * @param sessionId - owning chat.
- * @returns true while a binding exists.
+ * @returns true while a selection exists or a change is in progress.
  */
 hasChatTarget(sessionId: SessionId): boolean
 
@@ -187,7 +187,7 @@ hasChatTarget(sessionId: SessionId): boolean
  * @param sessionId - owning chat.
  * @param choice - exact device and App observation, or null to clear it.
  * @param signal - caller lifetime.
- * @returns confirmed binding or null after clearing.
+ * @returns the selection or null for a clear, after the durable write.
  */
 @Remote async setChatTarget(sessionId: SessionId, choice: ChatTargetChoice | null, signal: AbortSignal): Promise<ChatTargetView | null>
 
@@ -253,9 +253,25 @@ async runtime(id: 'adh' | 'idh', command: string, args: readonly string[], endpo
  * @param workspace - current working directory.
  * @param read - live connection state.
  * @param subscribe - underlying MCP observation.
+ * @param readCapture - optional capture reader owned by this exact connection.
  * @returns connection-observation disposer.
  */
-observeWdh(agentId: SessionId, workspace: string, read: () => McpConnectionStatus, subscribe: (listener: () => void) => () => void): () => void
+observeWdh(agentId: SessionId, workspace: string, read: () => McpConnectionStatus, subscribe: (listener: () => void) => () => void, readCapture?: WdhCaptureReader): () => void
+
+/** List recent requests from the browser already bound to the chat.
+ * @param sessionId - chat owning the WDH connection.
+ * @param signal - caller lifetime.
+ * @returns a capture list scoped to the connection.
+ */
+@Remote({ resources: { session: sessionId => sessionId } }) async wdhCaptureList(sessionId: SessionId, signal: AbortSignal): Promise<WdhCaptureList>
+
+/** Read the selected capture's response and initiating stack together.
+ * @param sessionId - chat owning the WDH connection.
+ * @param selection - identifier and connection generation from the list.
+ * @param signal - caller lifetime.
+ * @returns selected details, or null if the capture expired.
+ */
+@Remote({ resources: { session: sessionId => sessionId } }) async wdhCaptureDetail(sessionId: SessionId, selection: WdhCaptureSelection, signal: AbortSignal): Promise<WdhCaptureDetail | null>
 
 /** Bind the integration's actual connection replacement operation.
  * @param id - component identity.
@@ -385,18 +401,18 @@ Source: [`packages/mcp/mcp-resources/src/index.ts`](../../packages/mcp/mcp-resou
 
 ### `decrypthub-components/*` events
 
-<a id="decrypthub-componentsactivated--emit"></a>
+<a id="decrypthub-componentsactivated--parallel"></a>
 
-#### `decrypthub-components/activated` — emit
+#### `decrypthub-components/activated` — parallel
 
-A verified active component changed; providers refresh their next connection.
+A verified activation committed; providers prepare idle connections before the operation settles.
 
 ```ts cordis-catalog
-/** A verified active component changed; providers refresh their next connection.
+/** A verified activation committed; providers prepare idle connections before the operation settles.
  * @param id - activated component.
- * @mode emit
+ * @mode parallel
  */
-'decrypthub-components/activated'(id: ComponentId): void
+'decrypthub-components/activated'(id: ComponentId): void | Promise<void>
 ```
 
 Source: [`packages/mcp/decrypthub-components/src/types.ts`](../../packages/mcp/decrypthub-components/src/types.ts)
