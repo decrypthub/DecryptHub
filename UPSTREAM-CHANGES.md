@@ -6,9 +6,9 @@ This reference owns the reasons for product patches and their retirement conditi
 
 ## Upstream baseline
 
-- The current source includes upstream master’s rc.3 merge, PR #8422, declaring `0.2.2-rc.3`. The previous product base was the rc.1 master merge, PR #7873. The sync preserves both histories; the earlier release tags identify different trees.
+- The current source includes upstream master’s rc.5 back-sync merge, PR #8736 (`2e39e70496`, declaring `0.2.2-rc.5`, with the rc.5 tag `9c2670d3bc` as ancestor). Earlier bases were the rc.3 merge PR #8422 and the rc.1 merge PR #7873. The 0.2.3 alpha line and newer master are intentionally not followed in this round.
 - The product mainline is `main`, renamed from `feat/dsh-rc1` on 2026-11-21. The branch name does not pin the engine version. The old Tauri history is not merged.
-- `packages/core/`, `vendor/` and the recorded Session fixtures match rc.3. No product Agent loop, Session format, storage engine or Cordis modification is retained.
+- `packages/core/` and `vendor/` match rc.5 exactly. No product Agent loop, Session format, storage engine or Cordis modification is retained. Recorded Session fixtures follow upstream, except `plugin-manager-mcp`, which keeps the product difference: a server without the resources capability no longer contributes the three resource tools and exposes `mcp_server_status` instead.
 
 ## Product ownership and upstream reuse
 
@@ -19,7 +19,7 @@ The native Windows restart banner and status window display the DecryptHub name.
 | Community account and avatar | Keep `ui-settings-decrypthub-account` and Desktop `community-account-*`; the native bridge is the product-specific carrier. |
 | WDH / ADH / IDH | Keep `decrypthub-components`, `decrypthub-integrations`, `ui-mcp` and `mcp-bundle`; reuse upstream MCP clients, tools and UI slots. CLI implementations stay in their own repositories. |
 | Memory and role | Keep `product-memory`, `product-persona`, `ui-decrypthub-settings` and `memory-bundle`; use upstream settings and prompt contributions. |
-| Session history | Keep `tool-product-sessions` as a thin adapter over stable upstream `ctx.sessionQuery`. The upstream model-facing `tool-session-query` remains experimental: standard-package isolation forbids a direct dependency. Retire this adapter once a supported upstream tool can replace list/read without relaxing that rule. No second history store is added. |
+| Session history | Keep `tool-product-sessions` (list + full-text read). Upstream rc.5 adds the supported `tool-session-list`, but it only lists sessions and has no `session_read` body access, and the product tool filters by workspace ownership; retire once upstream covers reading. Tool names do not collide, so both coexist. |
 | Skill authoring | Keep removable `tool-skill-manage` for owned create/delete operations. Upstream `skill-filesystem` and `tool-skill` own discovery, watching, catalog and loading; no duplicate scanner is added. |
 | Runtime and brand | Keep `product-runtime`, `ui-brand-decrypthub` and `product-identity`. Desktop naming adapts unchanged upstream dictionaries in `decrypthub-locale`; the product bootstrap supplies the title and URL scheme. |
 
@@ -35,7 +35,7 @@ The former welcome-notice option is removed; Desktop follows upstream’s existi
 
 ## Remaining inherited runtime patch sites
 
-Each row is an inherited runtime or packaging implementation that still differs from rc.3. Product-only source files and generated manifests, catalogs, assets and tests remain in the complete Git diff. New runtime patches add their reason and retirement condition here.
+Each row is an inherited runtime or packaging implementation that still differs from rc.5. Retired in this round: the `CONTENT_REFUSED` refusal patch in `llm-deepseek/translate.ts` and `llm/error.ts` — upstream rc.5 implements equivalent semantics (refusal keeps the provider explanation and settles token usage before raising), so the product patch is dropped wholesale. The MCP Host direct-call channel is kept (see the table): upstream’s new `McpClientHost` mounts/probes/authorizes servers for the management surface but exposes no per-fiber fixed-call channel, so `connectionToolCallerOf` has no equivalent yet. Product-only source files and generated manifests, catalogs, assets and tests remain in the complete Git diff. New runtime patches add their reason and retirement condition here.
 
 | File | Reason and retirement condition |
 |---|---|
@@ -87,6 +87,6 @@ The documentation-site build rejects upstream’s `es2024` compiler target in it
 The current local delta is reproducible against the reviewed upstream merge:
 
 ```sh
-git diff --stat "upstream/master^{/^Merge pull request #8422 }" HEAD
-git diff --name-status --diff-filter=M "upstream/master^{/^Merge pull request #8422 }" HEAD
+git diff --stat 2e39e70496aa02986ca6a820c5d497e816b69d7e HEAD
+git diff --name-status --diff-filter=M 2e39e70496aa02986ca6a820c5d497e816b69d7e HEAD
 ```

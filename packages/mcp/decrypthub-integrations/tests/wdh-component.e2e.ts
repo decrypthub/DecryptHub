@@ -1,6 +1,7 @@
 /** Installed-component handshake smoke; no browser launch or device call is made. */
 import { Context } from '@deepseek-ai/cordis'
-import { Config, probeServer } from '@deepseek-ai/dsh-mcp-client'
+import { Config } from '@deepseek-ai/dsh-mcp-client'
+import { probeServer } from '@deepseek-ai/dsh-mcp-client/src/probe.ts'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

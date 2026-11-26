@@ -10,7 +10,7 @@
     { "path": "../ui-primitives" },
     { "path": "../ui-layout" },
     { "path": "../ui-sidebar" },
-    { "path": "../ui-workspace" },
+    { "path": "../ui-workspace/tsconfig.client.json" },
     { "path": "../locale/tsconfig.client.json" },
     { "path": "../store" },
     { "path": "../../api/remotes/tsconfig.client.json" },

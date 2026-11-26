@@ -80,7 +80,7 @@ async function mountProfile(devices: Partial<Record<'adh' | 'idh', { endpoint: s
   ] }]))
   await fs.writeFile(join(dir, 'cordis.yml'), '[]')
   const profile: ProfileContext = { name: 'desktop', startedBundles: ['test-official-components'], dir,
-    patchPath: join(dir, 'cordis.patch.yml'), installAnchor: join(home, 'package.json'), cwd: home, home, overlays: [], telemetryDisabledEnv: undefined }
+    patchPath: join(dir, 'cordis.patch.yml'), installAnchor: join(home, 'package.json'), cwd: home, home, overlayPaths: [], telemetryDisabledEnv: undefined }
   ctx.baseUrl = pathToFileURL(home).href + '/'
   ctx.provide('profileContext', profile)
   await ctx.plugin(SubprocessLocal)

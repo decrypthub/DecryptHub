@@ -81,7 +81,7 @@ export const en = {
   toolTitle: 'Connection inspection', noTools: 'The server advertised no tools.', probeFailed: 'Connection inspection failed',
   cleanupFailed: 'Connection cleanup was not confirmed. Restart the application before retrying.',
   'state.disabled': 'Disabled', 'state.closed': 'Closed', 'state.connecting': 'Connecting', 'state.connected': 'Connected',
-  'state.reconnecting': 'Reconnecting', 'state.waiting-credentials': 'Waiting for credentials', 'state.failed': 'Failed',
+  'state.reconnecting': 'Reconnecting', 'state.waiting-credentials': 'Waiting for credentials', 'state.waiting-authorization': 'Waiting for authorization', 'state.failed': 'Failed',
   'state.unknown': 'Not observed', toolCount: '{count} tools', loading: 'Loading',
 } as const
 /** Locale keys available to the MCP page. */
@@ -168,6 +168,6 @@ export const zh: Record<McpKey, string> = {
   toolTitle: '连接检查', noTools: '服务没有提供工具。', probeFailed: '连接检查失败',
   cleanupFailed: '无法确认连接已清理，请重启应用后重试。',
   'state.disabled': '已停用', 'state.closed': '已关闭', 'state.connecting': '连接中', 'state.connected': '已连接',
-  'state.reconnecting': '正在重连', 'state.waiting-credentials': '等待凭据', 'state.failed': '连接失败',
+  'state.reconnecting': '正在重连', 'state.waiting-credentials': '等待凭据', 'state.waiting-authorization': '等待授权', 'state.failed': '连接失败',
   'state.unknown': '尚未观测', toolCount: '{count} 个工具', loading: '正在读取',
 }

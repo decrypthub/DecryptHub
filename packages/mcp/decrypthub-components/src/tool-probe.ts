@@ -1,5 +1,5 @@
 /** Count the tools of one installed official component without registering a connection. */
-import { probeServer } from '@deepseek-ai/dsh-mcp-client'
+import { probeServer } from '@deepseek-ai/dsh-mcp-client/src/probe.ts'
 import type { Context } from '@deepseek-ai/cordis'
 
 /**
@@ -16,7 +16,7 @@ export async function probeTools(ctx: Context, command: string, cwd: string, arg
   const result = await probeServer(ctx, {
     transport: 'stdio', serverName: 'component-probe', command, args: [...args], env, cwd,
     toolCallTimeoutMs: 20_000, closeTimeoutMs: 5_000, expandTemplates: false, failOnStartupError: false,
-    startupTimeoutMs: 30_000,
+    startupTimeoutMs: 30_000, toolLoading: 'eager', catalogDescriptionMaxLength: 160,
   })
   return result.ok ? result.toolNames : null
 }

@@ -6,9 +6,9 @@
 
 ## 上游基线
 
-- 当前源码包含上游 master 的 rc.3 合并 PR #8422，声明版本为 `0.2.2-rc.3`。原产品基线为 rc.1 的 master 合并 PR #7873。本次同步保留双方历史；较早的 release tag 对应不同代码树。
+- 当前源码包含上游 master 的 rc.5 回同步合并 PR #8736（`2e39e70496`，声明版本 `0.2.2-rc.5`，以 rc.5 tag `9c2670d3bc` 为祖先）。此前基线依次为 rc.3 合并 PR #8422、rc.1 合并 PR #7873；本轮未跟进 0.2.3 alpha / 更新的 master。
 - 产品主线是 `main`（2026-11-21 由 `feat/dsh-rc1` 改名）。分支名称不限制引擎版本。未合并旧 Tauri 历史。
-- `packages/core/`、`vendor/` 与录制会话夹具均与 rc.3 一致。不保留产品侧 Agent 循环、会话格式、存储引擎或 Cordis 修改。
+- `packages/core/`、`vendor/` 与 rc.5 完全一致。不保留产品侧 Agent 循环、会话格式、存储引擎或 Cordis 修改。录制会话夹具随上游刷新，仅 `plugin-manager-mcp` 保留产品差异：无资源能力的服务器不再出现资源三件套工具，改发 `mcp_server_status`。
 
 ## 产品归属与上游复用
 
@@ -19,7 +19,7 @@ Windows 原生更新提示和状态窗口显示 DecryptHub。聊天等待状态�
 | 社区账号与头像 | 保留 `ui-settings-decrypthub-account` 与 Desktop `community-account-*`，原生桥接负责承载产品身份。 |
 | WDH / ADH / IDH | 保留 `decrypthub-components`、`decrypthub-integrations`、`ui-mcp` 和 `mcp-bundle`，复用上游 MCP 客户端、工具与界面插槽。CLI 实现仍在各自仓库。 |
 | 记忆与角色 | 保留 `product-memory`、`product-persona`、`ui-decrypthub-settings` 和 `memory-bundle`，使用上游设置与提示词贡献机制。 |
-| 会话历史 | 保留 `tool-product-sessions` 作为稳定上游 `ctx.sessionQuery` 的薄适配层。上游面向模型的 `tool-session-query` 仍属 experimental，标准包隔离规则不允许直接依赖。上游受支持工具可替代列表/读取且无需放宽该规则时，再移除适配层；不另建历史库。 |
+| 会话历史 | 保留 `tool-product-sessions`（列表 + 正文读取）。rc.5 上游新增正式版 `tool-session-list`，但只做列表、没有 `session_read` 正文读取能力，且产品工具带工作区归属过滤；上游覆盖读取能力后再退休产品工具。两者工具名不冲突，可共存。 |
 | 技能编写 | 保留可移除的 `tool-skill-manage`，提供有归属保护的创建/删除。发现、监听、目录与加载由上游 `skill-filesystem`、`tool-skill` 负责，不另建扫描器。 |
 | 运行环境与品牌 | 保留 `product-runtime`、`ui-brand-decrypthub`、`product-identity`。Desktop 通过 `decrypthub-locale` 适配未改动的上游词典，由产品启动入口提供名称和 URL 协议。 |
 
@@ -35,7 +35,7 @@ Windows 原生更新提示和状态窗口显示 DecryptHub。聊天等待状态�
 
 ## 保留的继承运行时代码修改点
 
-下表每行都是仍与 rc.3 不同的继承运行时或打包实现。产品专用源码、生成清单、目录、资源与测试仍在完整 Git diff 中。新增运行时修改须在此补充理由和退休条件。
+下表每行都是仍与 rc.5 不同的继承运行时或打包实现。本轮退休：`llm-deepseek/translate.ts` 与 `llm/error.ts` 的 `CONTENT_REFUSED` 拒答补丁——上游 rc.5 已实现等效语义（refusal 保留供应商 explanation、先结算 token 再抛错），产品补丁整体删除。`mcp-client` 的 Host 直调通道仍保留（见表内说明）：上游新增 `McpClientHost` 面向管理面挂载/探测/授权，但不暴露按 fiber 取固定调用通道的能力，`connectionToolCallerOf` 暂无等效替代。产品专用源码、生成清单、目录、资源与测试仍在完整 Git diff 中。新增运行时修改须在此补充理由和退休条件。
 
 | 文件 | 理由与退休条件 |
 |---|---|
@@ -64,7 +64,7 @@ Windows 原生更新提示和状态窗口显示 DecryptHub。聊天等待状态�
 | [packages/experimental/liveshare/src/endpoint-classification.ts](packages/experimental/liveshare/src/endpoint-classification.ts) | 组件管理、设备状态与工具探测仅允许所有者；外部提供方可登记权限分类前保留。 |
 | [packages/extensions/cordis-client-runner/src/client/slot-catalog.ts](packages/extensions/cordis-client-runner/src/client/slot-catalog.ts) | 生成的产品 API 或插槽目录；从合并源码重生成，不手工合并生成差异。 |
 | [packages/extensions/tool-cordis/src/api-catalog.ts](packages/extensions/tool-cordis/src/api-catalog.ts) | 生成的产品 API 或插槽目录；从合并源码重生成，不手工合并生成差异。 |
-| [packages/mcp/mcp-client/src/connection.ts](packages/mcp/mcp-client/src/connection.ts), [diagnostic.ts](packages/mcp/mcp-client/src/diagnostic.ts), and [tools.ts](packages/mcp/mcp-client/src/tools.ts) | 发布协商后的资源能力，在传输前拒绝不支持的读取，并在断线时说明请求未发送。上游实现等效行为后迁出。 |
+| [packages/mcp/mcp-client/src/connection.ts](packages/mcp/mcp-client/src/connection.ts), [index.ts](packages/mcp/mcp-client/src/index.ts), [status.ts](packages/mcp/mcp-client/src/status.ts) and [tools.ts](packages/mcp/mcp-client/src/tools.ts) | 在 rc.5 连接代/OAuth 重构之上保留产品补丁：发布协商后的资源能力、传输前拒绝不支持的读取、断线时说明请求未发送、`connectionToolCallerOf` Host 固定调用通道（WDH 组件直连依赖）。上游 `McpClientHost` 只管挂载/探测/授权，不提供等效通道；上游补齐后迁出。 |
 | [packages/mcp/mcp-resources/src/index.ts](packages/mcp/mcp-resources/src/index.ts) | 按作用域向模型提供 MCP 可用性和结果报告规则。上游采用实时能力和连接状态后迁出。 |
 | [packages/shell/tool-pwsh/src/index.ts](packages/shell/tool-pwsh/src/index.ts), [render.ts](packages/shell/tool-pwsh/src/render.ts), and [persistent pwsh](packages/shell/tool-pwsh-persistent/src/index.ts) | 在模型看到的文本中把非零退出标为命令失败。上游提供等效的退出结果报告后迁出。 |
 | [packages/util/official-bundles/src/bundles.ts](packages/util/official-bundles/src/bundles.ts) | 默认产品功能 bundle 与管理可见性；上游提供外部安装 bundle 目录后迁出。 |
@@ -87,6 +87,6 @@ Windows 上 `deepseek-messages-input-history` 录制回放能够生成持久化�
 可通过以下命令复算相对已审查上游合并点的本地差异：
 
 ```sh
-git diff --stat "upstream/master^{/^Merge pull request #8422 }" HEAD
-git diff --name-status --diff-filter=M "upstream/master^{/^Merge pull request #8422 }" HEAD
+git diff --stat 2e39e70496aa02986ca6a820c5d497e816b69d7e HEAD
+git diff --name-status --diff-filter=M 2e39e70496aa02986ca6a820c5d497e816b69d7e HEAD
 ```

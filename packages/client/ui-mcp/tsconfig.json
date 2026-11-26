@@ -60,7 +60,7 @@
       "path": "../ui-sidebar"
     },
     {
-      "path": "../ui-workspace"
+      "path": "../ui-workspace/tsconfig.client.json"
     },
     {
       "path": "../../util/crypto"
